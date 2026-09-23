@@ -1,27 +1,17 @@
-# Shared Xbox 360 baseline
+# Shipyard package boundary
 
-This base targets the real Ship of Harkinian 9.2.3 runtime. Smash360 consumes
-shared facilities through its BattleShip-specific adapters. PaperBoat/Starfox64
-is a future consumer, not an assumption that its game or Fast3D API matches SoH.
+The manifest covers production files under `python/` and `sources/`. Its hash
+and a Git revision let consumers detect changes to the checkout they selected.
 
-The first locked capabilities are the original Xenos implementation and
-framebuffer extension, exact triangle-stream packing, and production C++
-compiler settings. Both current ports must verify `baseline.json` and exercise
-their own pinned upstream contracts. Version-specific shader/material logic,
-resource formats, save semantics, and application UI stay with the port.
+| Package provides | Consumer provides |
+| --- | --- |
+| Xenos renderer and framebuffer source inputs | Fast3D interfaces, device lifecycle, and application integration |
+| Shader lowering and ImGui source inputs | Shader generation, GUI lifecycle, and input policy |
+| Vertex-stream transform | Version-specific loop anchors, color expression, namespace, and write counts |
+| Xenon C++ project settings | Project generation, SDK configuration, and build validation |
+| Checkout and file verification | Lock file, source location, and upstream contract checks |
 
-| Capability | Shared owner | SoH 9.x | Smash360 | State |
-| --- | --- | --- | --- | --- |
-| Xenos source and framebuffer extension | `sources/xenos` | current interface projection | BattleShip projection | both PPC objects compile |
-| Exact vertex packing | `python/xbox360_platform/vertex_stream.py` | 21 writes, 12 colors | 25 writes, 17 colors | differential tests pass |
-| Production C++ policy | `python/xbox360_platform/build_policy.py` | project generator | project generator | project tests pending |
-| Audio thread affinity primitive | planned common async owner | 9.x mixer requests core 2 | existing mixer policy | 9.x PPC test passes; consolidation pending |
-| Resource/archive concurrency | planned common contract | 9.x projection | donor tests | 9.x parity fixes pending |
-| Shader-code persistence | planned common service | modern storage adapter required | existing path | 9.x pending |
-| Hardware no-Watson boot | per-port runtime validation | first-chance fault unresolved | boots | unproven |
-
-Do not promote a capability to shared simply because its names match. Each
-migration requires source equivalence or a semantic differential, both
-consumers building from the common file, and relevant runtime validation.
-`baseline.json` is content-addressed; each consumer pins its hash and fails
-closed on drift.
+Keep application behavior, resource formats, save handling, and upstream API
+adaptation in the consumer. New package interfaces should be introduced only
+with a manifest update, a versioned lock contract, and consumer build checks.
+Hardware behavior needs validation in the consuming port.

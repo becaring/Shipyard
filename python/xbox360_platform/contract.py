@@ -1,13 +1,38 @@
-"""Fail closed when a consumer's pinned shared base changes."""
+"""Verify a consumer's pinned platform checkout and production files."""
 
 import hashlib
 import json
+import re
+import subprocess
 from pathlib import Path
 
 
+def _git_output(base: Path, *args: str) -> str:
+    try:
+        result = subprocess.run(
+            ['git', '-c', 'safe.directory=' + str(base), '-C', str(base), *args],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    except (OSError, subprocess.CalledProcessError) as exc:
+        raise ValueError('Xbox platform base is not a Git checkout: ' + str(base)) from exc
+    return result.stdout.strip()
+
+
 def verify(base: Path, lock: Path) -> dict:
+    base = Path(base).resolve()
+    lock = Path(lock)
     manifest_path = base / 'baseline.json'
     expected = json.loads(lock.read_text(encoding='utf-8'))
+    revision = expected['git_revision']
+    if not isinstance(revision, str) or not re.fullmatch(r'[0-9a-fA-F]{7,64}', revision):
+        raise ValueError('Xbox platform lock has an invalid Git revision')
+    if Path(_git_output(base, 'rev-parse', '--show-toplevel')).resolve() != base:
+        raise ValueError('Xbox platform base is not the Git checkout root: ' + str(base))
+    head = _git_output(base, 'rev-parse', '--verify', 'HEAD')
+    if not head.lower().startswith(revision.lower()):
+        raise ValueError('Xbox platform Git revision drift: ' + str(base))
     actual_digest = hashlib.sha256(manifest_path.read_bytes()).hexdigest()
     if actual_digest != expected['baseline_sha256']:
         raise ValueError('Xbox platform baseline drift: ' + str(manifest_path))

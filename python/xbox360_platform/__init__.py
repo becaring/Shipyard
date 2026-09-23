@@ -1,3 +1,3 @@
-"""Xbox 360 platform projections shared by the 9.x and Smash consumers."""
+"""Shipyard Xbox 360 platform projection helpers."""
 
-API_VERSION = 1
+API_VERSION = 4

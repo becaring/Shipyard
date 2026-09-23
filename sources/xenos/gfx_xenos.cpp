@@ -261,6 +261,7 @@ std::string XboxShader(const CCFeatures& features, size_t& floats) {
     return "float4 framebufferTile : register(c4);\n" + text;
 }
 
+
 GfxClipParameters ClipParameters() { GfxClipParameters p = {true, false}; return p; }
 void UnloadShader(ShaderProgram*) { current_shader = NULL; }
 void LoadShader(ShaderProgram* shader) {
@@ -304,7 +305,6 @@ std::map<std::string,IDirect3DVertexShader9*> vertex_programs;
 std::map<std::string,IDirect3DVertexDeclaration9*> vertex_declarations;
 ShaderProgram* CreateShader(uint64_t id0, uint32_t id1) {
     SoHPerfScope measure(SOH_PERF_SHADER);
-    const double compileStart=SoH_Time();
     ShaderProgram* shader = new ShaderProgram();
     gfx_cc_get_features(id0, id1, &shader->features);
     std::string source = XboxShader(shader->features, shader->floats);
@@ -339,8 +339,6 @@ ShaderProgram* CreateShader(uint64_t id0, uint32_t id1) {
     }
     if (offset != shader->floats * sizeof(float)) SoH_Fatal("SoH vertex stride", E_FAIL);
     shaders[std::make_pair(id0,id1)] = shader; LoadShader(shader);
-    const double elapsed=SoH_Time()-compileStart;
-    if(elapsed>=.008) SoH_Log("HITCH shader=%016I64x/%08x compile_create_ms=%.3f",id0,id1,elapsed*1000);
     return shader;
 }
 ShaderProgram* Lookup(uint64_t id0, uint32_t id1) {
@@ -820,28 +818,18 @@ std::unordered_map<std::pair<float,float>,uint16_t,hash_pair_ff> PixelDepth(int 
         SoH_Check(depth_texture->LockRect(0,&lock,NULL,D3DLOCK_READONLY),"depth LockRect");
     }
     XGTEXTURE_DESC desc;XGGetTextureDesc(depth_texture,0,&desc);
-    // Graph asks for individual occlusion samples. Let the SDK address those
-    // texels directly instead of allocating and untiling an entire framebuffer.
+    // The caller asks for individual occlusion samples. Let the SDK address
+    // those texels directly instead of untiling an entire framebuffer.
     // The source rectangle retains texture packing and the bottom-left contract.
-    static unsigned checkedReads,lastCheckedFrame;
-    static bool checkEnabled=GetFileAttributesA("game:\\soh-render-check.test")!=(DWORD)-1;
-    bool check=checkEnabled && checkedReads<8 && frame_number-lastCheckedFrame>=300;
-    std::vector<DWORD> reference;
-    if(check) {
-        reference.resize(b.width*b.height);
-        XGUntileTextureLevel(b.width,b.height,0,XGGetGpuFormat(desc.Format),0,&reference[0],b.width*4,NULL,lock.pBits,NULL);
-    }
     for(std::set<std::pair<float,float>>::const_iterator it=coords.begin();it!=coords.end();++it) {
         int x=(int)it->first,y=(int)it->second;
         if(x<0 || y<0 || x>=(int)b.width || y>=(int)b.height){result[*it]=65532;continue;}
         DWORD value;POINT destination={0,0};
         RECT source={x,(LONG)b.height-1-y,x+1,(LONG)b.height-y};
         XGUntileTextureLevel(b.width,b.height,0,XGGetGpuFormat(desc.Format),0,&value,sizeof(value),&destination,lock.pBits,&source);
-        if(check && value!=reference[(b.height-1-y)*b.width+x])SoH_Fatal("sparse depth read differs from full image",E_FAIL);
         // Match original D3D11's sample-zero read for multisampled depth.
         result[*it]=(uint16_t)(((value>>8)/16777215.0)*65532.0);
     }
-    if(check) {++checkedReads;lastCheckedFrame=frame_number;SoH_Log("RENDER sparse depth read=%u samples=%u size=%ux%u matches full image",checkedReads,(unsigned)coords.size(),b.width,b.height);}
     depth_texture->UnlockRect(0);if(resume)BeginFramebuffer();return result;
 }
 void* FramebufferImage(int id) {Resolve(id);return buffers[id].image;}
@@ -895,63 +883,9 @@ void ReadFramebufferPixels(IDirect3DTexture9* image,uint32_t width,uint32_t heig
     XGUntileTextureLevel(width,height,0,XGGetGpuFormat(desc.Format),0,&pixels[0],width*4,NULL,lock.pBits,NULL);
     image->UnlockRect(0);
 }
-const char* requestedRuntimeCapture;
-void CheckRuntimeFramebufferRestore() {
-    static bool checked;
-    const char* captureName=requestedRuntimeCapture;
-    if(captureName)requestedRuntimeCapture=NULL;
-    else {
-        if(checked || frame_number<600)return;
-        checked=true;captureName="render-audit.ppm";
-    }
-    if(GetFileAttributesA("game:\\soh-render-check.test")==(DWORD)-1) return;
-    Framebuffer& b=buffers[active_fb];
-    std::vector<DWORD> color,depth,restored;
-    ReadFramebufferPixels(b.image,b.width,b.height,color);
-    std::vector<unsigned char> capture;
-    char header[64];int headerBytes=sprintf(header,"P6\n%u %u\n255\n",b.width,b.height);
-    capture.insert(capture.end(),header,header+headerBytes);
-    for(size_t pixel=0;pixel<color.size();++pixel) {
-        capture.push_back((unsigned char)(color[pixel]>>16));
-        capture.push_back((unsigned char)(color[pixel]>>8));
-        capture.push_back((unsigned char)color[pixel]);
-    }
-    SoH_WriteFile(captureName,&capture[0],capture.size());
-    if(b.depth) {
-        ReadFramebufferPixels(b.depth_samples[0],b.width,b.height,depth);
-        unsigned nonfar=0;DWORD minDepth=0xffffffff,maxDepth=0;
-        for(size_t i=0;i<depth.size();++i) {if((depth[i]>>8)!=0xffffff)++nonfar;minDepth=std::min(minDepth,depth[i]);maxDepth=std::max(maxDepth,depth[i]);}
-        SoH_Log("AUDIT depth nonfar=%u min=%08lx max=%08lx center=%08lx",nonfar,minDepth,maxDepth,depth[(b.height/2)*b.width+b.width/2]);
-    }
-    // Check the actual application's completed frame through the same resume
-    // path used by texture uploads and readback. No synthetic scene is involved.
-    BeginFramebuffer();FinishFramebuffer();
-    ReadFramebufferPixels(b.image,b.width,b.height,restored);
-    unsigned colorChanges=0,depthChanges=0,visible=0;
-    for(size_t i=0;i<color.size();++i) {
-        if(color[i]!=restored[i])++colorChanges;
-        if(color[i]&0x00ffffff)++visible;
-    }
-    if(b.depth) {
-        ReadFramebufferPixels(b.depth_samples[0],b.width,b.height,restored);
-        for(size_t i=0;i<depth.size();++i)if((depth[i]>>8)!=(restored[i]>>8))++depthChanges;
-    }
-    SoH_Log("RENDER restore frame=%u visible=%u color_changes=%u depth_changes=%u pixels=%u",
-        frame_number,visible,colorChanges,depthChanges,(unsigned)color.size());
-    for(size_t target=0;target<buffers.size();++target) {
-        Framebuffer& completed=buffers[target];
-        if(!completed.stored || !completed.image || completed.width<640)continue;
-        ReadFramebufferPixels(completed.image,completed.width,completed.height,restored);
-        unsigned transparent=0;
-        for(size_t pixel=0;pixel<restored.size();++pixel)if((restored[pixel]>>24)!=255)++transparent;
-        SoH_Log("RENDER framebuffer=%u size=%ux%u nonopaque_pixels=%u pixels=%u",
-            (unsigned)target,completed.width,completed.height,transparent,(unsigned)restored.size());
-    }
-}
 void End() {
     BeginFramebuffer();
     FinishFramebuffer();
-    CheckRuntimeFramebufferRestore();
     if (active_fb!=0) { active_fb=0; BeginFramebuffer(); FinishFramebuffer(); }
     if (buffers[0].color!=presentation_color) {
         SoH_Check(soh_device->SetRenderTarget(0,presentation_color),"presentation target");
@@ -968,17 +902,6 @@ void End() {
 }
 void Finish() {}
 }
-void SoH_RequestRuntimeFramebufferCheck(const char* name) { requestedRuntimeCapture=name; }
-GfxRenderingAPI gfx_xenos_api = {
-    ClipParameters,UnloadShader,LoadShader,CreateShader,Lookup,ShaderInfo,
-    NewTexture,SelectTexture,Upload,Sampler,Depth,Decal,Viewport,Scissor,Alpha,Draw,
-    Init,Resize,Start,End,Finish,NewFramebuffer,UpdateFramebuffer,BindFramebuffer,Clear,
-    ResolveMSAA,PixelDepth,FramebufferImage,SelectFramebuffer,DeleteTexture,Filter,GetFilter
-};
-
-// ImGui draws directly through D3D rather than the Fast3D Draw entry point.
-void SoH_BeginNativeDraw() { BeginFramebuffer(); }
-void SoH_InvalidateNativeState() { InvalidateNativeState(); }
 
 void SoH_ShutdownGraphics() {
     InvalidateNativeState();
@@ -1022,171 +945,4 @@ void SoH_GetTextureUploadCounts(SoHTextureUploadCounts* counts) {
 void SoH_GetNativeStateCounts(SoHNativeStateCounts* counts) {
     *counts=native_state_counts;
     memset(&native_state_counts,0,sizeof(native_state_counts));
-}
-
-void SoH_ValidateRenderedFrame() {
-    Framebuffer& b=buffers[0];
-    D3DLOCKED_RECT lock;
-    SoH_Check(b.image->LockRect(0,&lock,NULL,D3DLOCK_READONLY),"captured framebuffer LockRect");
-    std::vector<DWORD> pixels(b.width*b.height);
-    XGTEXTURE_DESC desc;XGGetTextureDesc(b.image,0,&desc);
-    XGUntileTextureLevel(b.width,b.height,0,XGGetGpuFormat(desc.Format),0,&pixels[0],b.width*4,NULL,lock.pBits,NULL);
-    b.image->UnlockRect(0);
-    DWORD center=pixels[(b.height/2)*b.width+b.width/2], corner=pixels[0];
-    SoH_Log("resolved pixels center=%08lx corner=%08lx",center,corner);
-    std::vector<unsigned char> rgb;
-    char header[64];int n=sprintf(header,"P6\n%u %u\n255\n",b.width,b.height);rgb.insert(rgb.end(),header,header+n);
-    for(size_t i=0;i<pixels.size();++i){rgb.push_back((BYTE)(pixels[i]>>16));rgb.push_back((BYTE)(pixels[i]>>8));rgb.push_back((BYTE)pixels[i]);}
-    if(!SoH_WriteFile("bringup-frame.ppm",&rgb[0],rgb.size())) SoH_Fatal("capture write",E_FAIL);
-    unsigned red=(center>>16)&255,green=(center>>8)&255,blue=center&255;
-    if(red<45 || red>85 || green<105 || green>150 || blue<45 || blue>85 || (corner&0xffffff)!=0) SoH_Fatal("resolved Fast3D triangle pixel validation",E_FAIL);
-    SoH_Log("PASS resolved Fast3D geometry and interpolated vertex colors");
-}
-
-void SoH_ValidateDepthAndFramebuffer() {
-    ShaderProgram* saved_shader=current_shader;
-    int fb=NewFramebuffer();
-    UpdateFramebuffer(fb,320,240,1,false,true,true,true);
-    BindFramebuffer(fb,1);
-    Viewport(0,0,320,240);Clear();Scissor(0,0,320,240);
-    Depth(true,true);Alpha(false);
-    ShaderProgram* shade=Lookup(0x1000,0);
-    if(!shade) shade=CreateShader(0x1000,0); else LoadShader(shade);
-    // One triangle in the lower-left quadrant, depth 1/4. Its vertical mirror is clear.
-    float triangle[]={-.8f,-.8f,.25f,1,1,0,0, -.8f,0,.25f,1,1,0,0, 0,-.8f,.25f,1,1,0,0};
-    Draw(triangle,21,1);
-    std::set<std::pair<float,float>> points;
-    points.insert(std::make_pair(48.0f,36.0f));points.insert(std::make_pair(48.0f,203.0f));
-    std::unordered_map<std::pair<float,float>,uint16_t,hash_pair_ff> depths=PixelDepth(fb,points);
-    unsigned near_value=depths[std::make_pair(48.0f,36.0f)],far_value=depths[std::make_pair(48.0f,203.0f)];
-    SoH_Log("depth readback lower=%u upper=%u",near_value,far_value);
-    if(near_value<16370 || near_value>16395 || far_value<65530) {
-        std::vector<DWORD> depthPixels,colorPixels;
-        ReadFramebufferPixels(buffers[fb].depth_samples[0],320,240,depthPixels);
-        ReadFramebufferPixels(buffers[fb].image,320,240,colorPixels);
-        unsigned depthCount=0,colorCount=0;DWORD minimum=0xffffffff;
-        for(size_t i=0;i<depthPixels.size();++i) {
-            if((depthPixels[i]>>8)!=0xffffff)++depthCount;
-            if(depthPixels[i]<minimum)minimum=depthPixels[i];
-            if(colorPixels[i]&0x00ffffff)++colorCount;
-        }
-        SoH_Log("depth regression full nonfar=%u min=%08lx lower=%08lx upper=%08lx colored=%u",depthCount,minimum,
-            depthPixels[203*320+48],depthPixels[36*320+48],colorCount);
-    }
-    if(near_value<16370 || near_value>16395 || far_value<65530) SoH_Fatal("depth value/origin validation",E_FAIL);
-    BindFramebuffer(0,1);
-    if(saved_shader) LoadShader(saved_shader);
-    SoH_ValidateRenderedFrame();
-    SoH_Log("PASS offscreen color/depth isolation and bottom-left depth readback");
-}
-
-void SoH_CaptureAssetScene() {
-    Framebuffer& b=buffers[0];
-    D3DLOCKED_RECT lock;SoH_Check(b.image->LockRect(0,&lock,NULL,D3DLOCK_READONLY),"asset capture LockRect");
-    std::vector<DWORD> pixels(b.width*b.height);
-    XGTEXTURE_DESC desc;XGGetTextureDesc(b.image,0,&desc);
-    XGUntileTextureLevel(b.width,b.height,0,XGGetGpuFormat(desc.Format),0,&pixels[0],b.width*4,NULL,lock.pBits,NULL);
-    b.image->UnlockRect(0);
-    std::vector<unsigned char> rgb;
-    char header[64];int n=sprintf(header,"P6\n%u %u\n255\n",b.width,b.height);rgb.insert(rgb.end(),header,header+n);
-    size_t visible=0;
-    for(size_t i=0;i<pixels.size();++i) {
-        BYTE r=(BYTE)(pixels[i]>>16),g=(BYTE)(pixels[i]>>8),blue=(BYTE)pixels[i];
-        rgb.push_back(r);rgb.push_back(g);rgb.push_back(blue);
-        if(r>16 || g>16 || blue>16) ++visible;
-    }
-    if(!SoH_WriteFile("oot-assets.ppm",&rgb[0],rgb.size())) SoH_Fatal("asset capture write",E_FAIL);
-    SoH_Log("ROM asset scene visible pixels=%u",(unsigned)visible);
-    if(visible<10000) SoH_Fatal("ROM asset scene empty geometry",E_FAIL);
-}
-
-void SoH_ValidateBootFade() {
-    Framebuffer& b=buffers[0];
-    D3DLOCKED_RECT lock;
-    SoH_Check(b.image->LockRect(0,&lock,NULL,D3DLOCK_READONLY),"boot fade readback");
-    std::vector<DWORD> pixels(b.width*b.height);
-    XGTEXTURE_DESC desc;XGGetTextureDesc(b.image,0,&desc);
-    XGUntileTextureLevel(b.width,b.height,0,XGGetGpuFormat(desc.Format),0,&pixels[0],b.width*4,NULL,lock.pBits,NULL);
-    b.image->UnlockRect(0);
-    for(size_t i=0;i<pixels.size();++i)
-        if(pixels[i]&0x00ffffff) SoH_Fatal("original boot fade must cover the complete image",E_FAIL);
-    SoH_Log("PASS boot fade final frame is entirely black");
-}
-
-void* SoH_ImGuiTextureByID(unsigned id) {
-    if (id >= textures.size()) SoH_Fatal("menu texture index", E_INVALIDARG);
-    return textures[id].native;
-}
-
-// Explicit regression: SDK sampler state belongs to slots, not texture objects.
-void SoH_TestNativeSamplerOwnership() {
-    IDirect3DTexture9* tex[2]={NULL,NULL};
-    for(unsigned i=0;i<2;++i)SoH_Check(soh_device->CreateTexture(4,4,1,0,D3DFMT_LIN_A8R8G8B8,D3DPOOL_DEFAULT,&tex[i],NULL),"sampler ownership test texture");
-    InvalidateNativeState();
-    TextureSampler sample(true);sample.Set(true,2,1);
-    ApplySampler(0,sample);ApplySampler(1,sample);
-    unsigned written=native_state_counts.sampler_written;
-    for(unsigned i=0;i<12;++i) {
-        const int slot=i&1;
-        SetNativeTexture(slot,(i%3)==2?NULL:tex[i%2]);
-        VerifyNativeSampler(slot,native_state.sampler[slot]);
-        ApplySampler(slot,sample);
-    }
-    if(native_state_counts.sampler_written!=written)SoH_Fatal("unchanged sampler rewritten on texture bind",E_FAIL);
-    ShaderProgram testShader={};testShader.vertex=restore_vertex;testShader.pixel=restore_color;
-    testShader.declaration=restore_declaration;
-    __declspec(align(16)) float constants[12]={13,0.5f,0,0,32,64,1,0,8,16,0,0};
-    SetNativeConstants(constants);
-    LoadShader(&testShader);VerifyNativeConstants(constants);
-    VerifyNativeSampler(0,native_state.sampler[0]);ApplySampler(0,sample);
-    testShader.pixel=restore_depth;LoadShader(&testShader);VerifyNativeConstants(constants);
-    constants[5]=128;SetNativeConstants(constants);VerifyNativeConstants(constants);
-    VerifyNativeSampler(1,native_state.sampler[1]);ApplySampler(1,sample);
-    current_shader=NULL;
-    if(native_state_counts.sampler_written!=written)SoH_Fatal("unchanged sampler rewritten on shader bind",E_FAIL);
-    // A real one-field change writes exactly that field.
-    sample.Set(sample.linear,1,sample.t);ApplySampler(0,sample);VerifyNativeSampler(0,native_state.sampler[0]);
-    if(native_state_counts.sampler_written!=written+1)SoH_Fatal("sampler change rewrites unrelated fields",E_FAIL);
-    InvalidateNativeState();written=native_state_counts.sampler_written;ApplySampler(0,sample);
-    if(native_state_counts.sampler_written!=written+5)SoH_Fatal("external invalidation must restore all sampler fields",E_FAIL);
-    SetNativeTexture(0,NULL);SetNativeTexture(1,NULL);
-    for(unsigned i=0;i<2;++i)tex[i]->Release();
-    InvalidateNativeState();
-    SoH_Log("PASS native sampler ownership: bind/unbind, both slots, exact field changes and external invalidation");
-}
-
-// Read back RGB and nonopaque destination alpha for the old/new cutout state.
-void SoH_TestCutoutBlend() {
-    const int saved_fb=active_fb;ShaderProgram* saved_shader=current_shader;
-    const bool saved_alpha=requested_alpha;
-    const int fb=NewFramebuffer();UpdateFramebuffer(fb,32,32,1,false,true,false,false);
-    BindFramebuffer(fb,1);Viewport(0,0,32,32);Scissor(0,0,32,32);Depth(false,false);
-    ShaderProgram shader={};shader.vertex=restore_vertex;shader.declaration=restore_declaration;shader.floats=4;
-    ID3DXBuffer* code=Compile("float4 PSMain(float2 uv:TEXCOORD0):COLOR0 {if(uv.x<=0.19)clip(-1);return float4(0.25,0.75,0.5,1);}","PSMain","ps_3_0");
-    SoH_Check(soh_device->CreatePixelShader((DWORD*)code->GetBufferPointer(),&shader.pixel),"cutout comparison shader");code->Release();
-    float vertices[]={-1,-1,0,1, 1,-1,1,1, 1,1,1,0, -1,-1,0,1, 1,1,1,0, -1,1,0,0};
-    std::vector<DWORD> reference,result;
-    for(unsigned pass=0;pass<4;++pass) {
-        shader.features.opt_alpha=true;shader.features.opt_texture_edge=pass!=0;
-        shader.features.opt_noise=pass==2;shader.features.opt_invisible=pass==3;
-        LoadShader(&shader);Alpha(true);Clear();BeginFramebuffer();
-        SoH_Check(soh_device->Clear(0,NULL,D3DCLEAR_TARGET,0x5d0d1d2f,1,0),"cutout destination clear");
-        Draw(vertices,24,2);FinishFramebuffer();
-        ReadFramebufferPixels(buffers[fb].image,32,32,result);
-        DWORD blend=99,mask=99;
-        soh_device->GetRenderState(D3DRS_ALPHABLENDENABLE,&blend);
-        soh_device->GetRenderState(D3DRS_COLORWRITEENABLE,&mask);
-        if(blend!=(pass==1?FALSE:TRUE) || mask!=(pass==1?7:15))SoH_Fatal("cutout native mode transition",E_FAIL);
-        if(pass==0)reference=result;
-        else if(reference!=result)SoH_Fatal("cutout RGB/destination alpha differs from original blending",E_FAIL);
-        for(size_t i=0;i<result.size();++i)if((result[i]>>24)!=0x5d)SoH_Fatal("cutout destination alpha changed",E_FAIL);
-    }
-    if(reference[16*32+1]!=0x5d0d1d2f || reference[16*32+24]==0x5d0d1d2f)
-        SoH_Fatal("cutout comparison did not reject and draw pixels",E_FAIL);
-    Alpha(false);DWORD mask=0;soh_device->GetRenderState(D3DRS_COLORWRITEENABLE,&mask);
-    if(mask!=15)SoH_Fatal("opaque color mask restoration",E_FAIL);
-    BindFramebuffer(saved_fb,1);current_shader=NULL;
-    soh_device->SetPixelShader(NULL);shader.pixel->Release();InvalidateNativeState();
-    requested_alpha=saved_alpha;if(saved_shader)LoadShader(saved_shader);
-    SoH_Log("PASS cutout blend: identical 1024 pixels, destination alpha, noise/invisible and opaque transitions");
 }
