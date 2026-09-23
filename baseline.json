@@ -1,0 +1,14 @@
+{
+  "name": "LibUltraShip+Fast3D360",
+  "version": "0.1.0",
+  "api_version": 1,
+  "target_runtime": "Ship of Harkinian 9.2.3",
+  "files": {
+    "python/xbox360_platform/__init__.py": "b58e898e9389252f59d56807aee2f07365770692c888b1d3fdf240564dad0235",
+    "python/xbox360_platform/build_policy.py": "e996420eaf2f8924059640e273deeb8dd9216ca79d61831f48854278f9ed27b0",
+    "python/xbox360_platform/contract.py": "a0bcb3ab4c8129f86ef716440d84043dfc7b63ddd1bcdcdaf766b089f99b62b8",
+    "python/xbox360_platform/vertex_stream.py": "013971ace921e761f5cb68aec07bad5a4eb6cb65bece94802309389002e3fb7a",
+    "sources/xenos/gfx_xenos.cpp": "2d2e719ae10c5f730f07c9f48a752d1a1a0e1ec6e13e08f26da5ad9f9e295167",
+    "sources/xenos/native_extensions.inc": "6212ae8795aa742874fb84def55b071d9d26444b1b760c56549d22f63c88022f"
+  }
+}
