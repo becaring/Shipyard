@@ -49,6 +49,7 @@
     "sources/fast3d/dispatch_owner.h": "45d793c18d81135d22761144fc209ddf6dd333806f70f679cef83deed4df11e0",
     "sources/fast3d/shade_cache.h": "076b1b4af21b017cf8a541faa6f294873e127afee6101e9aecc7b4fdc14fdcaf",
     "sources/fast3d/texture_bindings.h": "efc9457e9a540c56989b4f0cdba15a648ad497c7329e594ccdf510d1558b810b",
+    "sources/fast3d/triangle_pipeline.h": "21bde482e4b0a8a813b65aadf2fe0c5223bdd58e2eec6e0b7ec21f55836f2b9c",
     "sources/fast3d/unit_color.h": "8006e0bea6945083ba0999df471041e2ac8b2240c7b6034b9f426bd74b56f654",
     "sources/fast3d/value_init.h": "214f34efed433395b98c6349d279e8cfd505c67caf6dd968dfd3282fb2ab85cb",
     "sources/fast3d/vertex_transform.cpp": "9d16c7e7be193d10cb4a427439c89d771eedb918b8759759d7786e3086f992ce",
