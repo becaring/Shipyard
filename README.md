@@ -22,6 +22,7 @@ an XEX on its own.
 - `sources/value_types/`, `sources/prism/`: XDK value-type and Prism compatibility contracts.
 - `sources/presentation/`, `sources/fast3d/`: shared pacing and bounded interpreter/geometry helpers.
 - `sources/atomic/`: native Xenon atomic operations and explicit memory-order policies.
+- `sources/math/`: scalar and color conversion shared by UI projections.
 - `sources/thread-pool/`: support for the bounded BS thread-pool projection.
 - `python/xbox360_platform/bs_thread_pool.py`: source-locked BS 4.1.0 lowering.
 - `python/xbox360_platform/json/`: source-locked nlohmann 3.12.0 projection.

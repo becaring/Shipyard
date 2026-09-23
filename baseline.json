@@ -68,6 +68,7 @@
     "sources/libultra/timer.h": "1abb4b66a9ce61b1592a2b211a87e2f5e0c7c4ce3f97245da4f16747d0c8e890",
     "sources/libzip/native_boundary.cpp": "49ada46d9a61cf0868c8f2d06e05bc81261c6c12523dc683071cec15001eeda4",
     "sources/libzip/native_boundary.h": "bd9fabb79d6f868c6288166ba89c8eb856bb7da27c60a9475e3cf5448327dccd",
+    "sources/math/color.h": "d235a13ae341c6f54f48f57f50aefb6154b1dabfd363cecdf25454abdce0b0dc",
     "sources/network/flag.h": "1464a0da03c5acf88e98aa88140ee94ffbc8df1ad35eaadf0d5449641c3899f9",
     "sources/network/transport.cpp": "ccc78975ca5f4a37390e18bd81eddfedf9cdb0ad57c56a9fa0db196b39ff62ec",
     "sources/network/transport.h": "0d982629ea3c3293d0b9893ab4a33d3aeba40fc20ff268cf82b75cf789754144",

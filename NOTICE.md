@@ -66,6 +66,7 @@ No file below has a verified redistribution grant for its local Xbox 360 adaptat
 | `sources/json/ordered_projection.hpp` | Modern 3Shipsty ordered-map projection for the bounded backend | Adaptation authorship and permission unverified |
 | `sources/presentation/pacing.h` | Moved from modern 3Shipsty refresh-aware presentation accumulator | Donor authorship and permission unverified |
 | `sources/presentation/xenos_pacing.h` | Shared Xenos presentation interval application extracted from both active windows | Donor authorship and permission unverified |
+| `sources/math/color.h` | Consolidated modern 3Shipsty NaN-aware scalar clamp and Smash360 color-byte conversion used by both current UI projections | Donor authorship and permission unverified |
 | `sources/presentation/xenos_surface.h` | Shared presentation-surface contract extracted from modern 3Shipsty and Smash360 window adapters | Authorship and donor contribution rights unverified |
 | `sources/presentation/xenos_surface.cpp` | Consolidated display-mode, pacing, present, and frame-latency mechanics from both active windows | Donor authorship and permission unverified |
 | `tests/presentation/xtl.h` | Local fake XDK display-device declarations for the presentation contract | Local test authorship and permission unverified |
