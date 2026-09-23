@@ -80,6 +80,10 @@ bool query_data(const std::string& native, WIN32_FILE_ATTRIBUTE_DATA& data, std:
 }
 }
 
+std::string to_native_path(const path& input, std::error_code& error) {
+    return native_path(input, error);
+}
+
 path& path::make_preferred() {
     std::replace(text_.begin(), text_.end(), '/', '\\');
     return *this;

@@ -5,7 +5,10 @@ namespace Shipyard { namespace Storage {
 void WriteAtomicFile(const xbox_compat::filesystem::path& destination, const void* bytes, size_t size) {
     if (size > UINT_MAX) throw std::length_error("atomic file exceeds native write size");
     if (!bytes && size) throw std::invalid_argument("atomic file data is null");
-    const std::string temporary = destination.string() + ".tmp";
+    std::error_code path_error;
+    const std::string native = xbox_compat::filesystem::to_native_path(destination, path_error);
+    if (path_error) throw xbox_compat::filesystem::filesystem_error("write atomic file", destination, path_error);
+    const std::string temporary = native + ".tmp";
     HANDLE file = CreateFileA(temporary.c_str(), GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
     if (file == INVALID_HANDLE_VALUE) throw Async::native_error("create atomic temporary", GetLastError());
     DWORD written = 0;
@@ -13,7 +16,7 @@ void WriteAtomicFile(const xbox_compat::filesystem::path& destination, const voi
     if (error == ERROR_SUCCESS && written != size) error = ERROR_WRITE_FAULT;
     if (error == ERROR_SUCCESS && !FlushFileBuffers(file)) error = GetLastError();
     if (!CloseHandle(file) && error == ERROR_SUCCESS) error = GetLastError();
-    if (error == ERROR_SUCCESS && !MoveFileExA(temporary.c_str(), destination.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) error = GetLastError();
+    if (error == ERROR_SUCCESS && !MoveFileExA(temporary.c_str(), native.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) error = GetLastError();
     if (error != ERROR_SUCCESS) { DeleteFileA(temporary.c_str()); throw Async::native_error("write atomic file", error); }
 }
 void WriteAtomicFile(const xbox_compat::filesystem::path& destination, const std::string& bytes) {

@@ -90,6 +90,7 @@ void current_path(const path& directory);
 void current_path(const path& directory, std::error_code& error);
 path absolute(const path& input);
 path absolute(const path& input, std::error_code& error);
+std::string to_native_path(const path& input, std::error_code& error);
 file_status status(const path& input);
 file_status status(const path& input, std::error_code& error);
 bool exists(const path& input);

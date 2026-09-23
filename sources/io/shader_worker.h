@@ -10,6 +10,8 @@ struct ShaderWorkerConfig {
     void (*log)(const char*,...);
     void (*fatal)(const char*,HRESULT);
 };
+// The first successful call copies the configuration and name; later calls
+// must provide equivalent values. Shutdown must not race with queue calls.
 bool ConfigureShaderWorker(const ShaderWorkerConfig* config);
 bool QueueShaderRecord(const std::string& record,bool truncate,void (*complete)(bool));
 void WaitShaderWrites();

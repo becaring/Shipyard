@@ -5,7 +5,7 @@ namespace Shipyard { namespace Network {
 // Application and worker threads share these state flags.
 class Flag {
 public:
-    Flag() {}
+    Flag() : value_(0) {}
     Flag(bool value) : value_(value?1:0) {}
     Flag(const Flag& value) : value_(value?1:0) {}
     Flag& operator=(bool value) { InterlockedExchange(&value_,value?1:0); return *this; }
