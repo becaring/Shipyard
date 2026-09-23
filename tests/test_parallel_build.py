@@ -9,7 +9,8 @@ import xml.etree.ElementTree as ET
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'python'))
-from xbox360_platform.parallel_build import plan, remove_shards, run, verify_receipt, write_shards
+from xbox360_platform.parallel_build import (plan, plan_link_view, remove_shards, run,
+                                             verify_receipt, write_shards)
 
 
 NS = 'http://schemas.microsoft.com/developer/msbuild/2003'
@@ -134,6 +135,24 @@ for item in root.findall('.//'+ns+'ClCompile[@Include]'):
             with self.assertRaisesRegex(ValueError, 'shard project changed'):
                 verify_receipt(build, receipt)
             build.shards[0].project.write_bytes(build.shards[0].contents)
+        finally:
+            remove_shards(build)
+
+    def test_link_view_consumes_verified_objects_without_compile_items(self):
+        build = self.build()
+        try:
+            receipt = run(build, [sys.executable, str(self.fake)],
+                          arguments=[str(self.header)], owned_roots=[self.root])
+            view = plan_link_view(build, receipt)
+            self.assertEqual(self.project.read_bytes(), self.project_bytes)
+            root = ET.fromstring(view.contents)
+            self.assertEqual(root.findall('.//' + N + 'ClCompile[@Include]'), [])
+            actual = {item.attrib['Include'] for item in root.findall('.//' + N + 'Object[@Include]')}
+            expected = {row['object'] for row in self.manifest}
+            self.assertEqual(actual, expected)
+            Path(self.manifest[0]['object']).write_bytes(b'corrupt')
+            with self.assertRaisesRegex(ValueError, 'object changed'):
+                plan_link_view(build, receipt)
         finally:
             remove_shards(build)
 

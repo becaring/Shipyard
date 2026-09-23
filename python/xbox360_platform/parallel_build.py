@@ -51,6 +51,12 @@ class Plan:
     shards: tuple
 
 
+@dataclass(frozen=True)
+class LinkView:
+    project: Path
+    contents: bytes
+
+
 def _xml_parts(root):
     if not root.tag.startswith('{'):
         raise ValueError('VC project has no XML namespace')
@@ -307,3 +313,39 @@ def verify_receipt(build, receipt):
     for path, digest in receipt['headers'].items():
         if _sha(path) != digest:
             raise ValueError('Compiled header changed: ' + path)
+
+
+def plan_link_view(build, receipt):
+    verify_receipt(build, receipt)
+    root = ET.parse(build.project).getroot()
+    namespace, items, _, _ = _xml_parts(root)
+    if len(items) != len(build.sources):
+        raise ValueError('Link project source inventory changed')
+    for group in root.findall(namespace + 'ItemGroup'):
+        for item in list(group.findall(namespace + 'ClCompile')):
+            group.remove(item)
+    objects = ET.SubElement(root, namespace + 'ItemGroup')
+    for source in build.sources:
+        ET.SubElement(objects, namespace + 'Object', Include=str(source.object))
+    guid = root.find('.//' + namespace + 'ProjectGuid')
+    if guid is not None:
+        guid.text = '{' + str(uuid.uuid5(uuid.NAMESPACE_URL,
+            str(build.project) + ':' + build.layout_sha256 + ':link')).upper() + '}'
+    path = build.project.with_name(build.project.stem + '.shipyard-link-' +
+                                   build.layout_sha256[:12] + '.vcxproj')
+    ET.register_namespace('', namespace[1:-1])
+    return LinkView(path, ET.tostring(root, encoding='utf-8', xml_declaration=True) + b'\n')
+
+
+def write_link_view(view):
+    if view.project.exists() and view.project.read_bytes() != view.contents:
+        raise ValueError('Existing link view differs: ' + str(view.project))
+    if not view.project.exists():
+        view.project.write_bytes(view.contents)
+
+
+def remove_link_view(view):
+    if view.project.exists():
+        if view.project.read_bytes() != view.contents:
+            raise ValueError('Refusing to remove changed link view: ' + str(view.project))
+        view.project.unlink()
