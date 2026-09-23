@@ -21,6 +21,7 @@ an XEX on its own.
 - `sources/binary/`: XDK binarytools compatibility contract.
 - `sources/value_types/`, `sources/prism/`: XDK value-type and Prism compatibility contracts.
 - `sources/presentation/`, `sources/fast3d/`: shared pacing and bounded interpreter/geometry helpers.
+- `sources/atomic/`: native Xenon atomic operations and explicit memory-order policies.
 - `sources/thread-pool/`: support for the bounded BS thread-pool projection.
 - `python/xbox360_platform/bs_thread_pool.py`: source-locked BS 4.1.0 lowering.
 - `python/xbox360_platform/json/`: source-locked nlohmann 3.12.0 projection.
@@ -28,6 +29,7 @@ an XEX on its own.
 - `python/xbox360_platform/value_types.py`: XDK variant projection.
 - `python/xbox360_platform/c89_lower.py`: C89 lowering with consumer-supplied source policy.
 - `python/xbox360_platform/vertex_stream.py`: vertex-stream source transform.
+- `python/xbox360_platform/cpp_syntax.py`: C++ syntax lowering shared by active Fast3D generators.
 - `python/xbox360_platform/build_policy.py`: Xenon C++ project settings.
 - `python/xbox360_platform/contract.py`: checkout and content verification.
 - `baseline.json`: SHA-256 manifest of the files in `python/`, `sources/` and selected `third_party/` inputs.

@@ -27,6 +27,7 @@ No file below has a verified redistribution grant for its local Xbox 360 adaptat
 | `sources/async/future.h` | Moved from modern 3Shipsty; adapted from Smash360 future primitives with timed waits | Donor authorship and permission unverified |
 | `sources/async/detached.h` | Moved from modern 3Shipsty detached-worker lifetime declaration | Authorship and permission unverified |
 | `sources/async/detached.cpp` | Moved from modern 3Shipsty detached-worker lifetime implementation | Authorship and permission unverified |
+| `sources/atomic/atomic.h` | Consolidated Smash360 port and Fast3D Xenon atomics with modern 3Shipsty and Smash360 logging counters; explicit conservative and diagnostic-read ordering policies | Donor authorship and permission unverified |
 | `sources/thread-pool/native_support.h` | Moved from modern 3Shipsty; adapted from Smash360 BS support | Donor authorship and permission unverified |
 | `sources/audio/PcmBufferPool.h` | Moved from modern 3Shipsty; normalized implementation matched Smash360 after namespace and error-type adaptation | Donor authorship and permission unverified |
 | `sources/audio/PcmBufferPool.cpp` | Moved from modern 3Shipsty; normalized implementation matched Smash360 after namespace and error-type adaptation | Donor authorship and permission unverified |
@@ -65,6 +66,10 @@ No file below has a verified redistribution grant for its local Xbox 360 adaptat
 | `sources/json/ordered_projection.hpp` | Modern 3Shipsty ordered-map projection for the bounded backend | Adaptation authorship and permission unverified |
 | `sources/presentation/pacing.h` | Moved from modern 3Shipsty refresh-aware presentation accumulator | Donor authorship and permission unverified |
 | `sources/presentation/xenos_pacing.h` | Shared Xenos presentation interval application extracted from both active windows | Donor authorship and permission unverified |
+| `sources/presentation/xenos_surface.h` | Shared presentation-surface contract extracted from modern 3Shipsty and Smash360 window adapters | Authorship and donor contribution rights unverified |
+| `sources/presentation/xenos_surface.cpp` | Consolidated display-mode, pacing, present, and frame-latency mechanics from both active windows | Donor authorship and permission unverified |
+| `tests/presentation/xtl.h` | Local fake XDK display-device declarations for the presentation contract | Local test authorship and permission unverified |
+| `tests/presentation/surface_cases.cpp` | Local fake-device presentation contract cases | Local test authorship and permission unverified |
 | `sources/crt/float.cpp` | Moved from modern 3Shipsty strict-float adaptation | Donor authorship and permission unverified |
 | `sources/crt/format.cpp` | Consolidated modern 3Shipsty C99 formatting and Smash360 `%z`/variadic behavior | Donor authorship and permission unverified |
 | `sources/crt/format.h` | Shared formatting interface derived from both active consumer contracts | Authorship and donor contribution rights unverified |
@@ -85,6 +90,8 @@ No file below has a verified redistribution grant for its local Xbox 360 adaptat
 | `third_party/nlohmann-3.12.0/README.md` | Local source-lock and LF-normalization receipt for the selected nlohmann inputs | Local authorship and permission unverified |
 | `tests/bs_thread_pool_upstream.hpp` | BS thread-pool 4.1.0 by Barak Shoshany | MIT; original copyright notice retained and license in `tests/LICENSE-BS-thread-pool.txt` |
 | `python/xbox360_platform/vertex_stream.py` | Extracted from 3Shipsty `platform/shipyard/fast3d/vertex_packing.py` | Authorship unverified |
+| `python/xbox360_platform/cpp_syntax.py` | Consolidated modern 3Shipsty and Smash360 Fast3D if-initializer lowering | Local generator authorship and permission unverified |
+| `tests/test_cpp_syntax.py` | Shipyard regression fixture for shared C++ syntax lowering | Test authorship and permission unverified |
 | `python/xbox360_platform/__init__.py` | First recorded in Shipyard | Authorship unverified |
 | `python/xbox360_platform/build_policy.py` | First recorded in Shipyard | Authorship unverified |
 | `python/xbox360_platform/contract.py` | First recorded in Shipyard | Authorship unverified |
