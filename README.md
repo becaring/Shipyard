@@ -14,6 +14,9 @@ an XEX on its own.
 - `sources/graphics/`: directly compiled shader lowerer.
 - `sources/imgui/`: directly compiled ImGui renderer and shared gamepad bindings.
 - `sources/input/`: directly compiled physical XInput backend.
+- `sources/async/`: native synchronization, futures, and detached-worker lifetime.
+- `sources/thread-pool/`: support for the bounded BS thread-pool projection.
+- `python/xbox360_platform/bs_thread_pool.py`: source-locked BS 4.1.0 lowering.
 - `python/xbox360_platform/vertex_stream.py`: vertex-stream source transform.
 - `python/xbox360_platform/build_policy.py`: Xenon C++ project settings.
 - `python/xbox360_platform/contract.py`: checkout and content verification.

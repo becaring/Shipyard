@@ -5,9 +5,15 @@
   "platform": "Xbox 360",
   "files": {
     "python/xbox360_platform/__init__.py": "eb61123707c571332c1d75c3427ebcc5e295466441cf163389196c9a684d159c",
+    "python/xbox360_platform/bs_thread_pool.py": "441294ae253f552914fd53432aa8ac1f783784b5a0d72e57f75dedd3b6b98fe2",
     "python/xbox360_platform/build_policy.py": "e996420eaf2f8924059640e273deeb8dd9216ca79d61831f48854278f9ed27b0",
     "python/xbox360_platform/contract.py": "588fef79b831e0496021ee1341f20ca156ebf5fdb9f24f2eba8f68c3df87c165",
     "python/xbox360_platform/vertex_stream.py": "013971ace921e761f5cb68aec07bad5a4eb6cb65bece94802309389002e3fb7a",
+    "sources/async/detached.cpp": "aae87a054c0a7783a00fda332a0528ea1b54b0f0d79f96f3b4ff3c60f044ba20",
+    "sources/async/detached.h": "6a80ba952255122447b32f031ab9fc9543107b534ea7c82d3801ff0cd16c7e9d",
+    "sources/async/future.h": "e26e1fc6583177e8432df0691a56e240b260d4f963513b65004c7a45dec1c801",
+    "sources/async/native.cpp": "3ce31a91a1cfd7abcd1e6f6860eaf1a4ede8e863d6fc4f91ce9681cd77847bef",
+    "sources/async/native.h": "96cc01b51dce933decacfd7f73c42cc254aaf72ee6bb54a864d15f732725e4e2",
     "sources/graphics/shader_lower.cpp": "658149fcbc16b0665c3be44f21a49211ad5d0b1de978c50d49ada85de016e0ae",
     "sources/graphics/shader_lower.h": "3f171d3746d9e81d0fce7f908f1373ac002315a215b3e718c1925ad619febd12",
     "sources/imgui/gamepad_bindings.inc": "185144b1b069673195582070dcdefc63670ead87f934299bb12f612ed27ebf88",
@@ -16,6 +22,7 @@
     "sources/input/physical.cpp": "f53cbe61ea9c541aa45998c14e89ef0ee0e17d26799ce8e6561b75a036c8fd5e",
     "sources/input/physical.h": "f55ef336d7c8b9aa2bf290bcb24fc55dab7a104ce5ef7060efbd4ca367519cc8",
     "sources/input/xinput.cpp": "a75bf0203ab9c0a361bfe1ad44f83e77f396e0a4db3d6eda4b866735213c1ed4",
+    "sources/thread-pool/native_support.h": "100e1ea49f031bc7840f4305dd665a620c6a5622e39377519b1e1ac961682bf4",
     "sources/xenos/gfx_xenos.cpp": "087c00c8f9b33a92cb1bca4a30c6121a2a1a1e8f388d05a6fa471fd8a0a3711c",
     "sources/xenos/native_extensions.inc": "6212ae8795aa742874fb84def55b071d9d26444b1b760c56549d22f63c88022f"
   }

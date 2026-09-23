@@ -7,6 +7,7 @@ and a Git revision let consumers detect changes to the checkout they selected.
 | --- | --- |
 | Xenos renderer and framebuffer source inputs | Fast3D interfaces, device lifecycle, and application integration |
 | Shader lowering and ImGui source inputs | Shader generation, GUI lifecycle, and input policy |
+| Native async primitives and source-locked BS projection | Pinned upstream BS header, worker policy, and generated-header staging |
 | Vertex-stream transform | Version-specific loop anchors, color expression, namespace, and write counts |
 | Xenon C++ project settings | Project generation, SDK configuration, and build validation |
 | Checkout and file verification | Lock file, source location, and upstream contract checks |

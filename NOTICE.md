@@ -14,6 +14,11 @@ No file below has a verified redistribution grant for its local Xbox 360 adaptat
 | `sources/input/physical.h` | Moved from modern 3Shipsty; normalized text matches Smash360's physical input header after identifier renaming | Donor authorship and permission unverified |
 | `sources/input/physical.cpp` | Moved from modern 3Shipsty; normalized text matches Smash360's physical input implementation after identifier renaming | Donor authorship and permission unverified |
 | `sources/input/xinput.cpp` | Moved from modern 3Shipsty; normalized text matches Smash360's XInput transport after identifier renaming | Donor authorship and permission unverified |
+| `sources/async/native.h`, `sources/async/native.cpp`, `sources/async/future.h` | Moved from modern 3Shipsty; adapted from Smash360 native async primitives with timed waits and optional affinity | Donor authorship and permission unverified |
+| `sources/async/detached.h`, `sources/async/detached.cpp` | Moved from modern 3Shipsty detached-worker lifetime implementation | Authorship and permission unverified |
+| `sources/thread-pool/native_support.h` | Moved from modern 3Shipsty; adapted from Smash360 BS support | Donor authorship and permission unverified |
+| `python/xbox360_platform/bs_thread_pool.py` | Consolidated source-locked projections from modern 3Shipsty and Smash360 | Local generator authorship and permission unverified; projected BS source is MIT-licensed |
+| `tests/bs_thread_pool_upstream.hpp` | BS thread-pool 4.1.0 by Barak Shoshany | MIT; original copyright notice retained and license in `tests/LICENSE-BS-thread-pool.txt` |
 | `python/xbox360_platform/vertex_stream.py` | Extracted from 3Shipsty `platform/shipyard/fast3d/vertex_packing.py` | Authorship unverified |
 | `python/xbox360_platform/__init__.py` | First recorded in Shipyard | Authorship unverified |
 | `python/xbox360_platform/build_policy.py` | First recorded in Shipyard | Authorship unverified |
