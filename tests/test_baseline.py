@@ -9,7 +9,7 @@ BASE = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(BASE / "python"))
 from xbox360_platform import API_VERSION
 
-PRODUCTION = (BASE / "python", BASE / "sources")
+PRODUCTION = (BASE / "python", BASE / "sources", BASE / "third_party")
 TEXT_FILES = {".py", ".cpp", ".h", ".hpp", ".inc", ".md", ".json"}
 
 

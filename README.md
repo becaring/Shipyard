@@ -2,25 +2,29 @@
 
 Shipyard is the shared Xbox 360 platform checkout for LibUltraShip/Fast3D
 consumers. Consumers compile its reusable C++ implementations directly and
-provide narrow interfaces for game/version-specific behavior. Some older
-renderer and runtime paths are still being migrated; see the active consumer
+provide narrow interfaces for game/version-specific behavior. Some Fast3D,
+GUI and runtime paths are still being migrated; see the active consumer
 ownership reports before treating a subsystem as canonical. Shipyard requires
 the consuming port's upstream headers and Xbox 360 SDK and does not produce
 an XEX on its own.
 
 ## Contents
 
-- `sources/xenos/`: renderer and framebuffer migration inputs; direct compilation is pending.
+- `sources/xenos/`: directly compiled renderer, framebuffer and optional shader cache.
 - `sources/graphics/`: directly compiled shader lowerer.
 - `sources/imgui/`: directly compiled ImGui renderer and shared gamepad bindings.
 - `sources/input/`: directly compiled physical XInput backend.
 - `sources/async/`: native synchronization, futures, and detached-worker lifetime.
+- `sources/audio/`: XAudio2 sink, layout policy boundary and PCM pool.
+- `sources/clock/`, `sources/crt/`, `sources/filesystem/`, `sources/storage/`: native platform services.
+- `sources/presentation/`, `sources/fast3d/`: shared pacing and unit-color helpers.
 - `sources/thread-pool/`: support for the bounded BS thread-pool projection.
 - `python/xbox360_platform/bs_thread_pool.py`: source-locked BS 4.1.0 lowering.
+- `python/xbox360_platform/json/`: source-locked nlohmann 3.12.0 projection.
 - `python/xbox360_platform/vertex_stream.py`: vertex-stream source transform.
 - `python/xbox360_platform/build_policy.py`: Xenon C++ project settings.
 - `python/xbox360_platform/contract.py`: checkout and content verification.
-- `baseline.json`: SHA-256 manifest of the files in `python/` and `sources/`.
+- `baseline.json`: SHA-256 manifest of the files in `python/`, `sources/` and selected `third_party/` inputs.
 
 The C++ files are Xbox-specific, not a portable C++ API. A consumer must
 provide the declared adapters used by its selected files and check them against
