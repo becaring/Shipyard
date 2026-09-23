@@ -97,6 +97,8 @@ No file below has a verified redistribution grant for its local Xbox 360 adaptat
 | `python/xbox360_platform/cpp_syntax.py` | Consolidated modern 3Shipsty and Smash360 Fast3D if-initializer lowering | Local generator authorship and permission unverified |
 | `tests/test_cpp_syntax.py` | Shipyard regression fixture for shared C++ syntax lowering | Test authorship and permission unverified |
 | `tests/command_stack_contract.cpp` | Adapted Smash360's original-vs-projected stack-operation differential fixture for both active consumers | Test authorship and permission unverified |
+| `sources/fast3d/dispatch_owner.h` | Consolidated the active interpreters' per-command-walk weak-owner pin and nested invalidation mechanics | Donor authorship and permission unverified |
+| `tests/dispatch_owner_contract.cpp` | Shared lifetime, nesting and setter-invalidation contract for the dispatch-owner helper | Test authorship and permission unverified |
 | `python/xbox360_platform/__init__.py` | First recorded in Shipyard | Authorship unverified |
 | `python/xbox360_platform/build_policy.py` | First recorded in Shipyard | Authorship unverified |
 | `python/xbox360_platform/contract.py` | First recorded in Shipyard | Authorship unverified |
