@@ -12,6 +12,8 @@ No file below has a verified redistribution grant for its local Xbox 360 adaptat
 | `sources/xenos/shader_cache.cpp` | Adapted from Smash360 and SoH360 shader-cache implementation; game path policy extracted | Donor authorship and permission unverified |
 | `sources/graphics/shader_lower.cpp` | Adapted from Smash360 shader-lowering work | Pre-move source and contributor permissions unverified |
 | `sources/graphics/shader_lower.h` | Added with the package interface | Authorship unverified |
+| `sources/graphics/shader_provider.cpp` | Consolidated modern 3Shipsty and Smash360 Xbox shader-provider orchestration; upstream-version decode remains in consumer callbacks | Donor authorship and permission unverified |
+| `sources/binary/compat.h` | Consolidated the active consumers' binarytools XDK support headers, which differed only in namespace spelling | Donor authorship and permission unverified |
 | `sources/imgui/imgui_xenos.cpp` | Adapted from SoH360 `platform/xbox360/imgui_xenos.cpp` | Donor authorship and permission unverified |
 | `sources/imgui/shipyard_imgui_xenos.h` | Shipyard interface derived from the two active consumer renderer contracts | Authorship and donor contribution rights unverified |
 | `sources/imgui/gamepad_bindings.inc` | Extracted from SoH360 `platform/xbox360/imgui_platform.cpp` | Donor authorship and permission unverified |
@@ -43,6 +45,20 @@ No file below has a verified redistribution grant for its local Xbox 360 adaptat
 | `sources/filesystem/filesystem.h` | Moved from modern 3Shipsty; wider implementation supersedes Smash360's local filesystem interface | Donor authorship and permission unverified |
 | `sources/filesystem/filesystem.cpp` | Moved from modern 3Shipsty; includes reparse-aware queries and race-safe file operations | Donor authorship and permission unverified |
 | `sources/fast3d/unit_color.h` | Canonical color table and packing contract extracted from both active Fast3D projections | Donor authorship and permission unverified |
+| `sources/fast3d/value_init.h` | Consolidated modern 3Shipsty and Smash360 Fast3D value-initialization helper | Donor authorship and permission unverified |
+| `sources/fast3d/clip_quantize.h`, `sources/fast3d/clip_quantize.cpp` | Consolidated guarded VMX clip and matrix-quantization mechanics from the active Fast3D adaptations; near-plane and loaded-vertex layout remain explicit consumer policy | SoH-derived donor authorship and applicable Fast3D notices unverified |
+| `sources/fast3d/vertex_transform.h`, `sources/fast3d/vertex_transform.cpp` | Consolidated bounded 4-coordinate VMX vertex transform and required guards from modern 3Shipsty and Smash360 | Donor authorship and permission unverified; game/version-specific aspect and vertex publication remain with consumers |
+| `sources/fast3d/vmx_load.h` | Shared unaligned VMX load used by the selected transform and Smash clip/quantize adapter | Donor authorship and permission unverified |
+| `sources/libultra/clock.h`, `sources/libultra/clock.cpp` | Extracted modern 3Shipsty N64-cycle conversion; now uses the shared Shipyard clock | Donor authorship and permission unverified |
+| `sources/libultra/timer.h`, `sources/libultra/timer.cpp` | Moved modern 3Shipsty libultraship fallback timer mechanics; Smash's separate VI scheduler is not included | Donor authorship and permission unverified |
+| `sources/network/transport.h`, `sources/network/transport.cpp` | Moved modern 3Shipsty Xbox socket transport; optional to consumers without a socket service | Donor authorship and permission unverified |
+| `sources/network/flag.h` | Split from modern 3Shipsty Xbox network support | Donor authorship and permission unverified |
+| `sources/speech/data_boundary.c`, `sources/speech/data_boundary.h` | Moved from modern 3Shipsty's Xbox speech data loader; encodes eSpeak 1.52 file layouts but does not include the eSpeak engine or voice assets | Derivation, donor authorship and applicable eSpeak notices unverified |
+| `sources/speech/SpeechQueue.h` | Moved modern 3Shipsty's bounded Xbox speech queue, with the default language changed to an explicit caller argument | Donor authorship and permission unverified |
+| `sources/libzip/native_boundary.h`, `sources/libzip/native_boundary.cpp` | Modern 3Shipsty and Smash360 Xbox libzip boundaries were identical after exported-symbol renaming | Donor authorship and permission unverified; libzip upstream code is not included in these files |
+| `sources/value_types/xbox_compat/common.h`, `sources/value_types/xbox_compat/optional.h` | Byte-identical modern 3Shipsty and Smash360 XDK value-type compatibility headers, normalized to LF for the package | Donor authorship and permission unverified |
+| `sources/value_types/xbox_compat/variant.h` | Canonical generated variant companion for the two consumers' pinned 19-arity XDK value-type contract | Generator and donor authorship/permission unverified |
+| `sources/prism/compat.h` | Byte-identical modern 3Shipsty and Smash360 Prism/XDK compatibility header | Donor authorship and permission unverified |
 | `sources/json/json.cpp` | Modern 3Shipsty bounded nlohmann 3.12.0 backend, itself adapted from Smash360; modern parser/stream/ordered behavior retained | Adaptation authorship and contributor permission unverified |
 | `sources/json/include/nlohmann/json.hpp` | Modern 3Shipsty bounded nlohmann 3.12.0 interface, adapted from Smash360 and upstream APIs | Preserve upstream nlohmann MIT notice; adaptation rights unverified |
 | `sources/json/algorithm_support.h` | Adapted from Smash360 JSON algorithm support with modern stream behavior | Adaptation authorship and permission unverified |
@@ -53,8 +69,20 @@ No file below has a verified redistribution grant for its local Xbox 360 adaptat
 | `sources/crt/format.cpp` | Consolidated modern 3Shipsty C99 formatting and Smash360 `%z`/variadic behavior | Donor authorship and permission unverified |
 | `sources/crt/format.h` | Shared formatting interface derived from both active consumer contracts | Authorship and donor contribution rights unverified |
 | `python/xbox360_platform/bs_thread_pool.py` | Consolidated source-locked projections from modern 3Shipsty and Smash360 | Local generator authorship and permission unverified; projected BS source is MIT-licensed |
-| `python/xbox360_platform/json/*.py` | Consolidated modern 3Shipsty JSON projections and source-locked nlohmann algorithm extraction | Local generator authorship and permission unverified; upstream input retains nlohmann MIT notice |
-| `third_party/nlohmann-3.12.0/*` | Selected original nlohmann 3.12.0 headers used as locked generator inputs | nlohmann MIT; original notice in `third_party/nlohmann-3.12.0/LICENSE.MIT` |
+| `python/xbox360_platform/c89_lower.py` | Adapted from the byte-identical `SoH360/tools/c89_lower.py` copies previously active in modern 3Shipsty and Smash360; source selection and float-union policy are now caller parameters | Donor authorship and permission unverified |
+| `python/xbox360_platform/json/__init__.py` | Shipyard JSON projection package marker | Authorship unverified |
+| `python/xbox360_platform/json/backend.py` | Consolidated modern 3Shipsty bounded JSON backend projection | Local generator authorship and permission unverified; upstream input retains nlohmann MIT notice |
+| `python/xbox360_platform/json/generate_algorithms.py` | Source-locked extraction of nlohmann lexical/numeric routines | Local generator authorship and permission unverified; upstream input retains nlohmann MIT notice |
+| `python/xbox360_platform/json/generate_ordered.py` | Source-locked ordered-map projection for the bounded backend | Local generator authorship and permission unverified; upstream input retains nlohmann MIT notice |
+| `python/xbox360_platform/json/generate_streams.py` | Source-locked serializer/UTF-8 projection for the bounded backend | Local generator authorship and permission unverified; upstream input retains nlohmann MIT notice |
+| `python/xbox360_platform/libzip.py` | Consolidated modern 3Shipsty and Smash360 libzip 1.11.4 XDK projections, retaining pinned upstream C inputs in the consumers | Local generator authorship and permission unverified; libzip upstream code is not in this module |
+| `python/xbox360_platform/value_types.py` | Consolidated the active consumers' XDK variant projection for their pinned upstream contracts | Local generator authorship and permission unverified |
+| `third_party/nlohmann-3.12.0/include/nlohmann/detail/conversions/to_chars.hpp` | Original nlohmann 3.12.0 algorithm input, LF-normalized | nlohmann MIT; original notice in `third_party/nlohmann-3.12.0/LICENSE.MIT` |
+| `third_party/nlohmann-3.12.0/include/nlohmann/detail/input/lexer.hpp` | Original nlohmann 3.12.0 algorithm input, LF-normalized | nlohmann MIT; original notice in `third_party/nlohmann-3.12.0/LICENSE.MIT` |
+| `third_party/nlohmann-3.12.0/include/nlohmann/detail/output/serializer.hpp` | Original nlohmann 3.12.0 algorithm input, LF-normalized | nlohmann MIT; original notice in `third_party/nlohmann-3.12.0/LICENSE.MIT` |
+| `third_party/nlohmann-3.12.0/include/nlohmann/ordered_map.hpp` | Original nlohmann 3.12.0 ordered-map input, LF-normalized | nlohmann MIT; original notice in `third_party/nlohmann-3.12.0/LICENSE.MIT` |
+| `third_party/nlohmann-3.12.0/LICENSE.MIT` | Original nlohmann MIT license text | nlohmann MIT |
+| `third_party/nlohmann-3.12.0/README.md` | Local source-lock and LF-normalization receipt for the selected nlohmann inputs | Local authorship and permission unverified |
 | `tests/bs_thread_pool_upstream.hpp` | BS thread-pool 4.1.0 by Barak Shoshany | MIT; original copyright notice retained and license in `tests/LICENSE-BS-thread-pool.txt` |
 | `python/xbox360_platform/vertex_stream.py` | Extracted from 3Shipsty `platform/shipyard/fast3d/vertex_packing.py` | Authorship unverified |
 | `python/xbox360_platform/__init__.py` | First recorded in Shipyard | Authorship unverified |

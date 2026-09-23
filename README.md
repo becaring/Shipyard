@@ -11,16 +11,22 @@ an XEX on its own.
 ## Contents
 
 - `sources/xenos/`: directly compiled renderer, framebuffer and optional shader cache.
-- `sources/graphics/`: directly compiled shader lowerer.
+- `sources/graphics/`: directly compiled shader lowerer and provider orchestration.
 - `sources/imgui/`: directly compiled ImGui renderer and shared gamepad bindings.
 - `sources/input/`: directly compiled physical XInput backend.
 - `sources/async/`: native synchronization, futures, and detached-worker lifetime.
 - `sources/audio/`: XAudio2 sink, layout policy boundary and PCM pool.
-- `sources/clock/`, `sources/crt/`, `sources/filesystem/`, `sources/storage/`: native platform services.
-- `sources/presentation/`, `sources/fast3d/`: shared pacing and unit-color helpers.
+- `sources/clock/`, `sources/libultra/`, `sources/crt/`, `sources/filesystem/`, `sources/storage/`: native platform services.
+- `sources/network/`, `sources/libzip/`, `sources/io/`, `sources/speech/`: optional socket, archive, I/O and speech data/queue services.
+- `sources/binary/`: XDK binarytools compatibility contract.
+- `sources/value_types/`, `sources/prism/`: XDK value-type and Prism compatibility contracts.
+- `sources/presentation/`, `sources/fast3d/`: shared pacing and bounded interpreter/geometry helpers.
 - `sources/thread-pool/`: support for the bounded BS thread-pool projection.
 - `python/xbox360_platform/bs_thread_pool.py`: source-locked BS 4.1.0 lowering.
 - `python/xbox360_platform/json/`: source-locked nlohmann 3.12.0 projection.
+- `python/xbox360_platform/libzip.py`: source-locked libzip 1.11.4 XDK projection.
+- `python/xbox360_platform/value_types.py`: XDK variant projection.
+- `python/xbox360_platform/c89_lower.py`: C89 lowering with consumer-supplied source policy.
 - `python/xbox360_platform/vertex_stream.py`: vertex-stream source transform.
 - `python/xbox360_platform/build_policy.py`: Xenon C++ project settings.
 - `python/xbox360_platform/contract.py`: checkout and content verification.
