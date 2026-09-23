@@ -16,6 +16,7 @@
     "python/xbox360_platform/json/generate_ordered.py": "cdae43b4a828b749bff2894511b192b4f7a599b305eb03d87f9c63726b15785e",
     "python/xbox360_platform/json/generate_streams.py": "210de8758f5167e3d004dd74dbef6e06e54386690f5170a5a1da347bb971f133",
     "python/xbox360_platform/libzip.py": "1d1181a118757e87a4aaeddd859d96b33397bc3e500576f2cb161fb48e6a5905",
+    "python/xbox360_platform/parallel_build.py": "48a6fd0198461b1235cf8ae6a51e6b76cbe820ae377b020006eccecfd08be0b6",
     "python/xbox360_platform/shade_cache.py": "8d629f6a7b6f9def36ade192f1df0ad4dcaa06b7a783c65c965660969c6cdb94",
     "python/xbox360_platform/vertex_stream.py": "ad42ae41527ba9961c589f498b5345bfa7fd8b27446349a43dc325d9deb7eadd",
     "python/xbox360_platform/value_types.py": "69dd8a820f4a70506ed9e8427d98f796b87cf758ffceeda9949ec89e1a19d9c1",

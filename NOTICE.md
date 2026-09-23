@@ -103,6 +103,8 @@ No file below has a verified redistribution grant for its local Xbox 360 adaptat
 | `python/xbox360_platform/shade_cache.py` | Moved the Smash360 checked shade-cache projection into Shipyard with an explicit light-color accessor | Local projection authorship and permission unverified |
 | `python/xbox360_platform/__init__.py` | First recorded in Shipyard | Authorship unverified |
 | `python/xbox360_platform/build_policy.py` | First recorded in Shipyard | Authorship unverified |
+| `python/xbox360_platform/parallel_build.py` | Shared deterministic XDK project sharding and compile-receipt verifier for active consumers | Local implementation authorship and permission unverified |
+| `tests/test_parallel_build.py` | Fake-project sharding, concurrent runner and receipt contract | Local test authorship and permission unverified |
 | `python/xbox360_platform/contract.py` | First recorded in Shipyard | Authorship unverified |
 
 The SoH360 donor snapshot includes a Harbour Masters MIT notice for libultraship and a separate Emill/MaikelChan Fast3D notice restricting binary redistribution. Smash360's pinned BattleShip notice has different scope and does not license its local `platform/xbox360` files. Match notices to the exact incorporated source before redistribution. Preserve applicable copyright and license text; do not substitute a current upstream website's license for the pinned donor.
