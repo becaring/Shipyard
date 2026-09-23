@@ -96,6 +96,7 @@ No file below has a verified redistribution grant for its local Xbox 360 adaptat
 | `python/xbox360_platform/vertex_stream.py` | Extracted from 3Shipsty `platform/shipyard/fast3d/vertex_packing.py` | Authorship unverified |
 | `python/xbox360_platform/cpp_syntax.py` | Consolidated modern 3Shipsty and Smash360 Fast3D if-initializer lowering | Local generator authorship and permission unverified |
 | `python/xbox360_platform/fast3d_opcode.py` | Consolidated the modern 3Shipsty AST opcode-table lowerer and Smash360's equivalent opcode-table projection; upstream handler rows remain in each consumer | Local generator authorship and permission unverified |
+| `python/xbox360_platform/fast3d_triangle_split.py` | Consolidated Smash360's cull/emission split projection and applied it to modern 3Shipsty through version-specific boundaries | Donor and local generator authorship and permission unverified |
 | `tests/test_cpp_syntax.py` | Shipyard regression fixture for shared C++ syntax lowering | Test authorship and permission unverified |
 | `tests/command_stack_contract.cpp` | Adapted Smash360's original-vs-projected stack-operation differential fixture for both active consumers | Test authorship and permission unverified |
 | `sources/fast3d/dispatch_owner.h` | Consolidated the active interpreters' per-command-walk weak-owner pin and nested invalidation mechanics | Donor authorship and permission unverified |

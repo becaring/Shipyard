@@ -11,6 +11,7 @@
     "python/xbox360_platform/cpp_syntax.py": "70acb94cb993ee8bf66ef19615747d55c36e4ce00c0f2cbe68aec50c8d7f65b2",
     "python/xbox360_platform/contract.py": "588fef79b831e0496021ee1341f20ca156ebf5fdb9f24f2eba8f68c3df87c165",
     "python/xbox360_platform/fast3d_opcode.py": "96c9aba7254c62ac0c6e0bf4e216afb38b0cad093be7aec32e7023dadecaca20",
+    "python/xbox360_platform/fast3d_triangle_split.py": "d7d76b5b50f9f8e72b0ffea6f1cf7145bed6c71f94e19919d7a41dbe5d6d75f1",
     "python/xbox360_platform/json/__init__.py": "00cbce8da54f719cb9b23b0f03eab323dc2ecf0a5bc1dfa122f515e6bd1bda5b",
     "python/xbox360_platform/json/backend.py": "8c02ec02149d94ce71d728fe9bcd200f9c1bd8612a874eab78d158393d6b1b4b",
     "python/xbox360_platform/json/generate_algorithms.py": "314b60a2a206ae5fca4d51061bcd2d5f61e1e82e6d9ab6a58224d590bbd451c5",
