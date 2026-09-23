@@ -8,7 +8,7 @@
     "python/xbox360_platform/bs_thread_pool.py": "441294ae253f552914fd53432aa8ac1f783784b5a0d72e57f75dedd3b6b98fe2",
     "python/xbox360_platform/build_policy.py": "e996420eaf2f8924059640e273deeb8dd9216ca79d61831f48854278f9ed27b0",
     "python/xbox360_platform/c89_lower.py": "4e5cfa3ae4a13742d1490fd8a68baf3778689993f9e0af24b4f2582e392884de",
-    "python/xbox360_platform/cpp_syntax.py": "70acb94cb993ee8bf66ef19615747d55c36e4ce00c0f2cbe68aec50c8d7f65b2",
+    "python/xbox360_platform/cpp_syntax.py": "a025beec42213683dcdcbd20f02e36aed6fe6227b51ae08604780349832721f1",
     "python/xbox360_platform/contract.py": "588fef79b831e0496021ee1341f20ca156ebf5fdb9f24f2eba8f68c3df87c165",
     "python/xbox360_platform/fast3d_opcode.py": "96c9aba7254c62ac0c6e0bf4e216afb38b0cad093be7aec32e7023dadecaca20",
     "python/xbox360_platform/fast3d_triangle_split.py": "d7d76b5b50f9f8e72b0ffea6f1cf7145bed6c71f94e19919d7a41dbe5d6d75f1",
