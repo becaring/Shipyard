@@ -37,6 +37,7 @@ No file below has a verified redistribution grant for its local Xbox 360 adaptat
 | `sources/audio/services.h` | Xbox audio service hooks extracted from active consumer contracts | Authorship and donor contribution rights unverified |
 | `sources/clock/chrono.h` | Moved from modern 3Shipsty; namespace-neutralized form matches Smash360's chrono declarations | Donor authorship and permission unverified |
 | `sources/clock/chrono.cpp` | Moved from modern 3Shipsty with Smash360's per-thread QPC frequency cache | Donor authorship and permission unverified |
+| `sources/clock/sleep.h` | Moved Smash360's finite nanosecond-to-SDK-wait helper into the shared clock boundary; caller scheduling remains consumer-owned | Donor authorship and permission unverified |
 | `sources/storage/device.h` | Extracted from modern 3Shipsty and Smash360 storage interfaces | Donor authorship and permission unverified |
 | `sources/storage/device.cpp` | Consolidated modern 3Shipsty storage and Smash360 selector behavior | Donor authorship and permission unverified |
 | `sources/storage/atomic_file.h` | Moved from modern 3Shipsty atomic save-publication contract | Donor authorship and permission unverified |
@@ -47,6 +48,7 @@ No file below has a verified redistribution grant for its local Xbox 360 adaptat
 | `sources/filesystem/filesystem.cpp` | Moved from modern 3Shipsty; includes reparse-aware queries and race-safe file operations | Donor authorship and permission unverified |
 | `sources/fast3d/unit_color.h` | Canonical color table and packing contract extracted from both active Fast3D projections | Donor authorship and permission unverified |
 | `sources/fast3d/value_init.h` | Consolidated modern 3Shipsty and Smash360 Fast3D value-initialization helper | Donor authorship and permission unverified |
+| `sources/fast3d/command_stack.h` | Moved Smash360's cached command-stack container into the shared Fast3D boundary; modern 3Shipsty now consumes the same physical header | Donor authorship and permission unverified |
 | `sources/fast3d/clip_quantize.h`, `sources/fast3d/clip_quantize.cpp` | Consolidated guarded VMX clip and matrix-quantization mechanics from the active Fast3D adaptations; near-plane and loaded-vertex layout remain explicit consumer policy | SoH-derived donor authorship and applicable Fast3D notices unverified |
 | `sources/fast3d/vertex_transform.h`, `sources/fast3d/vertex_transform.cpp` | Consolidated bounded 4-coordinate VMX vertex transform and required guards from modern 3Shipsty and Smash360 | Donor authorship and permission unverified; game/version-specific aspect and vertex publication remain with consumers |
 | `sources/fast3d/vmx_load.h` | Shared unaligned VMX load used by the selected transform and Smash clip/quantize adapter | Donor authorship and permission unverified |
@@ -67,6 +69,7 @@ No file below has a verified redistribution grant for its local Xbox 360 adaptat
 | `sources/presentation/pacing.h` | Moved from modern 3Shipsty refresh-aware presentation accumulator | Donor authorship and permission unverified |
 | `sources/presentation/xenos_pacing.h` | Shared Xenos presentation interval application extracted from both active windows | Donor authorship and permission unverified |
 | `sources/math/color.h` | Consolidated modern 3Shipsty NaN-aware scalar clamp and Smash360 color-byte conversion used by both current UI projections | Donor authorship and permission unverified |
+| `sources/memory/address_gap.h` | Moved Smash360's saturating address-interval exclusion helper; display-list registry and cache policy remain consumer-owned | Donor authorship and permission unverified |
 | `sources/presentation/xenos_surface.h` | Shared presentation-surface contract extracted from modern 3Shipsty and Smash360 window adapters | Authorship and donor contribution rights unverified |
 | `sources/presentation/xenos_surface.cpp` | Consolidated display-mode, pacing, present, and frame-latency mechanics from both active windows | Donor authorship and permission unverified |
 | `tests/presentation/xtl.h` | Local fake XDK display-device declarations for the presentation contract | Local test authorship and permission unverified |
@@ -93,6 +96,7 @@ No file below has a verified redistribution grant for its local Xbox 360 adaptat
 | `python/xbox360_platform/vertex_stream.py` | Extracted from 3Shipsty `platform/shipyard/fast3d/vertex_packing.py` | Authorship unverified |
 | `python/xbox360_platform/cpp_syntax.py` | Consolidated modern 3Shipsty and Smash360 Fast3D if-initializer lowering | Local generator authorship and permission unverified |
 | `tests/test_cpp_syntax.py` | Shipyard regression fixture for shared C++ syntax lowering | Test authorship and permission unverified |
+| `tests/command_stack_contract.cpp` | Adapted Smash360's original-vs-projected stack-operation differential fixture for both active consumers | Test authorship and permission unverified |
 | `python/xbox360_platform/__init__.py` | First recorded in Shipyard | Authorship unverified |
 | `python/xbox360_platform/build_policy.py` | First recorded in Shipyard | Authorship unverified |
 | `python/xbox360_platform/contract.py` | First recorded in Shipyard | Authorship unverified |

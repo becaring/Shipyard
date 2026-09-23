@@ -16,13 +16,14 @@ an XEX on its own.
 - `sources/input/`: directly compiled physical XInput backend.
 - `sources/async/`: native synchronization, futures, and detached-worker lifetime.
 - `sources/audio/`: XAudio2 sink, layout policy boundary and PCM pool.
-- `sources/clock/`, `sources/libultra/`, `sources/crt/`, `sources/filesystem/`, `sources/storage/`: native platform services.
+- `sources/clock/`, `sources/libultra/`, `sources/crt/`, `sources/filesystem/`, `sources/storage/`: native platform services and finite clock waits.
 - `sources/network/`, `sources/libzip/`, `sources/io/`, `sources/speech/`: optional socket, archive, I/O and speech data/queue services.
 - `sources/binary/`: XDK binarytools compatibility contract.
 - `sources/value_types/`, `sources/prism/`: XDK value-type and Prism compatibility contracts.
 - `sources/presentation/`, `sources/fast3d/`: shared pacing and bounded interpreter/geometry helpers.
 - `sources/atomic/`: native Xenon atomic operations and explicit memory-order policies.
 - `sources/math/`: scalar and color conversion shared by UI projections.
+- `sources/memory/`: optional saturating address-interval arithmetic.
 - `sources/thread-pool/`: support for the bounded BS thread-pool projection.
 - `python/xbox360_platform/bs_thread_pool.py`: source-locked BS 4.1.0 lowering.
 - `python/xbox360_platform/json/`: source-locked nlohmann 3.12.0 projection.
