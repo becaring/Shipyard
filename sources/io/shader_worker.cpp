@@ -59,9 +59,11 @@ DWORD WINAPI Run(void*) {
                                  config.name,(unsigned)write->bytes.size()); }
                 catch (...) {}
             }
+            const size_t writtenBytes=write->bytes.size();
+            std::string().swap(write->bytes);
             {
                 SectionLock lock(mutex);
-                queuedBytes-=write->bytes.size();--queuedCount;
+                queuedBytes-=writtenBytes;--queuedCount;
                 write->success=ok;
                 write->next=NULL;
                 if(completedTail)completedTail->next=write;
