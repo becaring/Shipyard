@@ -17,7 +17,10 @@ an XEX on its own.
 - `sources/async/`: native synchronization, futures, and detached-worker lifetime.
 - `sources/audio/`: XAudio2 sink, layout policy boundary and PCM pool.
 - `sources/clock/`, `sources/libultra/`, `sources/crt/`, `sources/filesystem/`, `sources/storage/`: native platform services and finite clock waits.
+- `sources/environment/`: bounded launch-file reader, parser and immutable environment table; consumers own path and absence policy.
+- `sources/diagnostics/`: owned-record queue, worker, backpressure and drain; consumers supply sinks, formatting and worker placement.
 - `sources/network/`, `sources/libzip/`, `sources/io/`, `sources/speech/`: optional socket, archive, I/O and speech data/queue services.
+- `sources/entropy/`: caller-initialized native byte fill used by archive and utility adapters.
 - `sources/binary/`: XDK binarytools compatibility contract.
 - `sources/value_types/`, `sources/prism/`: XDK value-type and Prism compatibility contracts.
 - `sources/presentation/`, `sources/fast3d/`: shared pacing and bounded interpreter/geometry helpers.
@@ -28,7 +31,9 @@ an XEX on its own.
 - `python/xbox360_platform/bs_thread_pool.py`: source-locked BS 4.1.0 lowering.
 - `python/xbox360_platform/json/`: source-locked nlohmann 3.12.0 projection.
 - `python/xbox360_platform/libzip.py`: source-locked libzip 1.11.4 XDK projection.
+- `python/xbox360_platform/logging_core.py`: pinned spdlog compiler lowering with explicit consumer conversion and formatter policies.
 - `python/xbox360_platform/value_types.py`: XDK variant projection.
+- `python/xbox360_platform/prism.py`: version-constrained Prism compiler lowering.
 - `python/xbox360_platform/c89_lower.py`: C89 lowering with consumer-supplied source policy.
 - `python/xbox360_platform/vertex_stream.py`: vertex-stream source transform.
 - `python/xbox360_platform/cpp_syntax.py`: C++ syntax lowering shared by active Fast3D generators.

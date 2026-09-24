@@ -1,4 +1,5 @@
 #include "libzip/native_boundary.h"
+#include "entropy/native.h"
 #include "filesystem/filesystem.h"
 #include <stdlib.h>
 #include <string.h>
@@ -34,15 +35,5 @@ extern "C" char *shipyard_zip_resolve_path(const char *name, zip_error_t *error)
 
 extern "C" int shipyard_zip_secure_random(unsigned char *buffer, unsigned short length) {
     if (!buffer && length) return 0;
-#ifdef _XBOX
-    // XNet's caller owns network initialization. No hidden process-lifetime
-    // network startup or cleanup here; failure propagates to libzip.
-    return XNetRandom(buffer, length) == 0;
-#else
-    HCRYPTPROV provider;
-    if (!CryptAcquireContext(&provider, NULL, NULL, PROV_RSA_AES, CRYPT_VERIFYCONTEXT | CRYPT_SILENT)) return 0;
-    const BOOL success = CryptGenRandom(provider, length, buffer);
-    const BOOL released = CryptReleaseContext(provider, 0);
-    return success && released;
-#endif
+    return Shipyard::Entropy::FillBytes(buffer, length);
 }
