@@ -51,11 +51,25 @@ consumers. Modern uses its trait adapter and projection/composition tests;
 Smash uses its own trait adapter. This is source and build evidence, not
 physical hardware validation.
 
+## Fast3D notice assignment for selected source (R1 closed)
+
+The bounded source and build-input trace is
+`provenance/FAST3D_R1_LINEAGE.md`. The actual Modern and Smash interpreter,
+combiner-decoding, and projected shader-formula inputs come from their
+separately pinned Fast3D trees, each carrying the Emill/MaikelChan MIT notice.
+The generated Prism shader builders retain that upstream origin. Shipyard's
+shader provider delegates to those builders, while its Xenos backend and
+numeric/cache/triangle mechanisms follow the maintainer's local SoH360 and
+Smash360 implementation trail. The historical Re60 Fast3D combiner and SM3
+shader-generator files are not selected into either current XEX build. The
+older source-only and later asset-exception notices remain preserved for
+their historical revisions. This bounded finding does not rely on a low
+exact-line match count as proof of independent origin.
+
 ## Exact unresolved release facts
 
 | ID | Missing fact | Required resolution |
 | --- | --- | --- |
-| R1: Fast3D notice applicability | Which protectable expression, if any, from each historical Fast3D revision is in current Shipyard implementations or selected XEX link inputs. The `23eb15e6` repository and license are identified; applicability to later code is not. | Compare actual implementations and creation history across the old SoH360 snapshot, becaring renderer, official Fast3D revisions, and active MIT-pinned consumers. Retain the applicable notice for each component and inspect any release payload against the asset exception where it governs. |
 | R2: Modern combined XEX | Complete GPL-3.0-or-later obligations from statically linking eSpeak NG 1.52.0, including the covered program's Corresponding Source, local changes, build/projection/install/run scripts, notices, and license compatibility of other components. This interacts with R3 and R5. | Review the complete selected link and source inputs under GPL `COPYING` sections 5 and 6. Analyze any Xbox SDK System Library exception unit by unit; it neither automatically requires publishing the SDK nor exempts all SDK code. Prepare a complete compliant source/package process for the exact XEX and obtain open-source licensing counsel review before distribution. An eSpeak-only source bundle is insufficient for a covered combined executable. Standalone Shipyard's original MIT grant need not change. |
 | R3: XEX/package contents | Exact ROM-derived assets, archives, SDK redistributables, and distribution grants in the proposed Modern or Smash package. | Inventory the frozen or successor XEX and each support file, then establish rights and SDK channel/terms for the actual package. |
 | R5: consumer source publication | Rights and terms for upstream game/decomp content outside the maintainer's Xbox contributions. Smash's BattleShip MIT notice excludes its decomp submodule and named derivative tables; Modern has no top-level license file in its pin. | Define the exact source-release scope and clear those components independently of Shipyard's local grant. |

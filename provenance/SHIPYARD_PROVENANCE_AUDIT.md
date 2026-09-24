@@ -12,6 +12,14 @@ tracked file, the three source revisions, or either XEX. It is not a release
 license file. A publication revision must carry the corrected notices in its
 actual distributed source tree.
 
+**Successor disposition:** The historical R1 and R4 rows below describe the
+frozen baseline before its documentation was corrected. For this local
+publication-notice candidate, R1 is closed by the selected-input trace in
+`FAST3D_R1_LINEAGE.md`, and `NOTICE.md` plus `LICENSE` correct R4. The
+remaining release questions are R2 (the combined Modern GPL-linked program),
+R3 (exact binary/package assets and SDK terms), and R5 (consumer game/decomp
+source rights). No source or executable has been published.
+
 ## Frozen identity
 
 | Checkout/artifact | Identity |
