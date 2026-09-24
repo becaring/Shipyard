@@ -28,20 +28,21 @@ struct XboxTrianglePipelineKey {
 
     template<class Owner> __forceinline bool Matches(const Owner& owner) const {
         const RDP& r=*owner.mRdp;
+        const GfxClipParameters currentClip=XboxTrianglePipelineTraits::Clip(owner);
         if(!valid || r.viewport_or_scissor_changed ||
            backend!=owner.mRapi || combine!=r.combine_mode || modeL!=r.other_mode_l || modeH!=r.other_mode_h ||
            grayscale!=r.grayscale || firstTile!=r.first_tile_index ||
-           vertexZ!=(owner.mRsp->geometry_mode&G_ZBUFFER) || redirect!=owner.RdpColorImageIsZBuffer() ||
-           clip.z_is_from_0_to_1!=owner.mXboxClipParameters.z_is_from_0_to_1 ||
-           clip.invertY!=owner.mXboxClipParameters.invertY ||
-           shaderPresent!=!owner.mShaderStack.empty() ||
-           (shaderPresent && shaderTop!=owner.mShaderStack.top()) ||
+           vertexZ!=(owner.mRsp->geometry_mode&G_ZBUFFER) || redirect!=XboxTrianglePipelineTraits::Redirect(owner) ||
+           clip.z_is_from_0_to_1!=currentClip.z_is_from_0_to_1 ||
+           clip.invertY!=currentClip.invertY ||
+           shaderPresent!=XboxTrianglePipelineTraits::ShaderPresent(owner) ||
+           (shaderPresent && shaderTop!=XboxTrianglePipelineTraits::ShaderIdentity(owner)) ||
            std::memcmp(rendering,&owner.mRenderingState,sizeof(rendering)))return false;
         for(unsigned i=0;i<2;++i) {
             if(masked[i]!=r.loaded_texture[i].masked || blended[i]!=r.loaded_texture[i].blended)return false;
             if(!used[i])continue;
             if(r.textures_changed[i])return false;
-            const unsigned tile=(i==1 && firstTile>=2)?firstTile:firstTile+i;
+            const unsigned tile=XboxTrianglePipelineTraits::EffectiveTile(owner,i);
             if(tile>=8 || r.texture_tile[tile].tmem_index>=2 ||
                std::memcmp(tiles[i],&r.texture_tile[tile],sizeof(tiles[i])))return false;
             const unsigned tmem=r.texture_tile[tile].tmem_index;
@@ -64,15 +65,16 @@ struct XboxTrianglePipelineKey {
         if(r.viewport_or_scissor_changed)return;
         backend=owner.mRapi;combine=r.combine_mode;modeL=r.other_mode_l;modeH=r.other_mode_h;
         grayscale=r.grayscale;firstTile=r.first_tile_index;vertexZ=owner.mRsp->geometry_mode&G_ZBUFFER;
-        redirect=owner.RdpColorImageIsZBuffer();clip=owner.mXboxClipParameters;
-        shaderPresent=!owner.mShaderStack.empty();shaderTop=shaderPresent?owner.mShaderStack.top():0;
+        redirect=XboxTrianglePipelineTraits::Redirect(owner);clip=XboxTrianglePipelineTraits::Clip(owner);
+        shaderPresent=XboxTrianglePipelineTraits::ShaderPresent(owner);
+        shaderTop=shaderPresent?XboxTrianglePipelineTraits::ShaderIdentity(owner):0;
         std::memcpy(rendering,&owner.mRenderingState,sizeof(rendering));
         for(unsigned i=0;i<2;++i) {
             masked[i]=r.loaded_texture[i].masked;blended[i]=r.loaded_texture[i].blended;
             used[i]=result.comb->usedTextures[i];
             if(!used[i])continue;
             if(r.textures_changed[i])return;
-            const unsigned tile=(i==1 && firstTile>=2)?firstTile:firstTile+i;
+            const unsigned tile=XboxTrianglePipelineTraits::EffectiveTile(owner,i);
             if(tile>=8 || r.texture_tile[tile].tmem_index>=2)return;
             // Nonfinite bounds retain their original arithmetic/exception path.
             uint32_t bounds[4];
