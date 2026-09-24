@@ -79,7 +79,8 @@ struct CodeCache {
 void CacheCompleted(bool ok) {
     if(!ok && cache.writable) {
         cache.writable=false;
-        Shipyard_Log("shader cache persistence failed; runtime compilation remains available");
+        try { Shipyard_Log("shader cache persistence failed; runtime compilation remains available"); }
+        catch (...) { /* Optional cache diagnostics cannot stop rendering. */ }
     }
 }
 void CodeCache::Store(const std::string& key,const void* code,size_t size) {
@@ -121,15 +122,19 @@ bool ConfigureShaderCache(const ShaderCacheConfig& config) {
 }
 ID3DXBuffer* LoadShaderCode(const std::string& source,const char* entry,const char* profile) {
     if(!cache.configured)return NULL;
-    const std::vector<DWORD>* code=cache.Find(Key(source,entry,profile));
-    if(!code)return NULL;
-    ID3DXBuffer* buffer=NULL;
-    if(FAILED(D3DXCreateBuffer((DWORD)(code->size()*4),&buffer)))return NULL;
-    memcpy(buffer->GetBufferPointer(),&(*code)[0],code->size()*4);
-    return buffer;
+    try {
+        const std::vector<DWORD>* code=cache.Find(Key(source,entry,profile));
+        if(!code)return NULL;
+        ID3DXBuffer* buffer=NULL;
+        if(FAILED(D3DXCreateBuffer((DWORD)(code->size()*4),&buffer)))return NULL;
+        memcpy(buffer->GetBufferPointer(),&(*code)[0],code->size()*4);
+        return buffer;
+    } catch (...) { return NULL; } // Optional lookup falls back to compilation.
 }
 void StoreShaderCode(const std::string& source,const char* entry,const char* profile,ID3DXBuffer* code) {
-    if(cache.configured && code)cache.Store(Key(source,entry,profile),code->GetBufferPointer(),code->GetBufferSize());
+    if(!cache.configured || !code)return;
+    try { cache.Store(Key(source,entry,profile),code->GetBufferPointer(),code->GetBufferSize()); }
+    catch (...) { CacheCompleted(false); } // Keep the successfully compiled shader.
 }
 void GetShaderCacheCounts(ShaderCacheCounts* counts) {
     if(!counts)return;

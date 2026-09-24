@@ -4,6 +4,22 @@
 #include <stdexcept>
 
 namespace Shipyard { namespace Diagnostics {
+namespace {
+struct SectionLock {
+    explicit SectionLock(CRITICAL_SECTION& section) : section_(section) {
+        EnterCriticalSection(&section_);
+    }
+    ~SectionLock() { LeaveCriticalSection(&section_); }
+private:
+    SectionLock(const SectionLock&);
+    SectionLock& operator=(const SectionLock&);
+    CRITICAL_SECTION& section_;
+};
+void ReportFailure(const Config& config) {
+    try { if (config.sink_error) config.sink_error(config.context); }
+    catch (...) { /* A secondary reporting failure must not escape the queue. */ }
+}
+}
 
 Queue::Queue(const Config& config) : config_(config), wake_(NULL), drained_(NULL),
     space_(NULL), worker_(NULL), worker_id_(0), started_(false), stopping_(false),
@@ -38,16 +54,14 @@ void Queue::start_locked() {
 }
 
 void Queue::consume_record(const Record& record) {
-    EnterCriticalSection(&sink_gate_);
+    SectionLock lock(sink_gate_);
     try { config_.consume(record, config_.context); }
-    catch (...) { if (config_.sink_error) config_.sink_error(config_.context); }
-    LeaveCriticalSection(&sink_gate_);
+    catch (...) { ReportFailure(config_); }
 }
 void Queue::flush_sink() {
-    EnterCriticalSection(&sink_gate_);
+    SectionLock lock(sink_gate_);
     try { config_.flush(config_.context); }
-    catch (...) { if (config_.sink_error) config_.sink_error(config_.context); }
-    LeaveCriticalSection(&sink_gate_);
+    catch (...) { ReportFailure(config_); }
 }
 
 bool Queue::submit(const Record& source, uint32_t capture_start) {
@@ -58,52 +72,48 @@ bool Queue::submit(const Record& source, uint32_t capture_start) {
     catch (const std::bad_alloc&) { return false; }
     catch (const std::length_error&) { return false; }
     for (;;) {
-        EnterCriticalSection(&gate_);
-        start_locked();
-        if (!worker_ || closed_) {
-            ++stats_.accepted;
-            if (config_.begin_record) config_.begin_record(owned, config_.context);
-            if (config_.accepted) config_.accepted(owned, capture_start, config_.context);
-            // The original fallback serializes sink writes under its queue
-            // lock. CRITICAL_SECTION recursion permits one-level report logs.
-            consume_record(owned);
-            flush_sink();
-            ++stats_.processed;
-            LeaveCriticalSection(&gate_);
-            return true;
+        {
+            SectionLock lock(gate_);
+            start_locked();
+            const bool synchronous = !worker_ || closed_;
+            const bool room = !synchronous &&
+                bytes <= config_.byte_limit - queued_bytes_ &&
+                stats_.accepted - stats_.processed < config_.line_limit;
+            const bool worker_fallback = !synchronous && !room &&
+                GetCurrentThreadId() == worker_id_;
+            if (synchronous || room || worker_fallback) {
+                try {
+                    if (config_.begin_record)
+                        config_.begin_record(owned, owned.metadata, config_.context);
+                    if (config_.accepted)
+                        config_.accepted(owned, capture_start, owned.metadata,
+                                         config_.context);
+                } catch (...) { return false; }
+                if (room) {
+                    try { pending_.push_back(owned); }
+                    catch (const std::bad_alloc&) { return false; }
+                    catch (const std::length_error&) { return false; }
+                    queued_bytes_ += bytes;
+                    ++stats_.accepted;
+                    if (queued_bytes_ > stats_.peak_bytes)
+                        stats_.peak_bytes = queued_bytes_;
+                    ResetEvent(drained_);
+                    if (owned.format || owned.level >= 3 ||
+                        queued_bytes_ >= config_.wake_bytes) SetEvent(wake_);
+                    return true;
+                }
+                ++stats_.accepted;
+                // The fallback serializes sink writes under the queue lock.
+                // CRITICAL_SECTION recursion permits one-level report logs.
+                consume_record(owned);
+                flush_sink();
+                ++stats_.processed;
+                return true;
+            }
+            ++stats_.backpressure;
+            ResetEvent(space_);
+            SetEvent(wake_);
         }
-        if (bytes <= config_.byte_limit - queued_bytes_ &&
-            stats_.accepted - stats_.processed < config_.line_limit) {
-            if (config_.begin_record) config_.begin_record(owned, config_.context);
-            try { pending_.push_back(owned); }
-            catch (const std::bad_alloc&) { LeaveCriticalSection(&gate_); return false; }
-            catch (const std::length_error&) { LeaveCriticalSection(&gate_); return false; }
-            queued_bytes_ += bytes;
-            ++stats_.accepted;
-            if (config_.accepted) config_.accepted(pending_.back(), capture_start, config_.context);
-            if (queued_bytes_ > stats_.peak_bytes) stats_.peak_bytes = queued_bytes_;
-            ResetEvent(drained_);
-            if (owned.format || owned.level >= 3 || queued_bytes_ >= config_.wake_bytes)
-                SetEvent(wake_);
-            LeaveCriticalSection(&gate_);
-            return true;
-        }
-        // The worker may log from a sink or its startup callback. Preserve
-        // normal FIFO queueing when room remains, but never wait on itself.
-        if (GetCurrentThreadId() == worker_id_) {
-            ++stats_.accepted;
-            if (config_.begin_record) config_.begin_record(owned, config_.context);
-            if (config_.accepted) config_.accepted(owned, capture_start, config_.context);
-            consume_record(owned);
-            flush_sink();
-            ++stats_.processed;
-            LeaveCriticalSection(&gate_);
-            return true;
-        }
-        ++stats_.backpressure;
-        ResetEvent(space_);
-        SetEvent(wake_);
-        LeaveCriticalSection(&gate_);
         WaitForSingleObject(space_, INFINITE);
     }
 }
@@ -112,7 +122,8 @@ DWORD WINAPI Queue::run(void* context) {
     static_cast<Queue*>(context)->run_worker(); return 0;
 }
 void Queue::run_worker() {
-    if (config_.worker_started) config_.worker_started(config_.context);
+    try { if (config_.worker_started) config_.worker_started(config_.context); }
+    catch (...) { ReportFailure(config_); }
     for (;;) {
         WaitForSingleObject(wake_, config_.interval_ms);
         std::deque<Record> lines;
@@ -139,7 +150,8 @@ void Queue::run_worker() {
         if (stopping_) SetEvent(wake_);
         LeaveCriticalSection(&gate_);
     }
-    if (config_.worker_stopped) config_.worker_stopped(config_.context);
+    try { if (config_.worker_stopped) config_.worker_stopped(config_.context); }
+    catch (...) { ReportFailure(config_); }
 }
 
 void Queue::flush() {

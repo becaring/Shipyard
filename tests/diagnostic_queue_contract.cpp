@@ -47,6 +47,17 @@ static void worker_started(void* context) {
     Record record; record.bytes = "started";
     if (!f.queue->submit(record)) ++f.failures;
 }
+static void throw_begin(const Record&, Shipyard::Diagnostics::Metadata&, void* context) {
+    if (static_cast<Fixture*>(context)->recurse.exchange(0))
+        throw std::runtime_error("begin callback");
+}
+static void throw_accepted(const Record&, uint32_t,
+                           Shipyard::Diagnostics::Metadata&, void*) {
+    throw std::runtime_error("accepted callback");
+}
+static void throw_worker(void*) { throw std::runtime_error("worker callback"); }
+static void throw_sink_error(void*) { throw std::runtime_error("error callback"); }
+static void throw_flush(void*) { throw std::runtime_error("flush callback"); }
 static Config config(Fixture& f, bool sync = false) {
     Config c = {};
     c.context = &f; c.consume = consume; c.flush = flush; c.sink_error = sink_error;
@@ -146,6 +157,37 @@ int main() {
         if (!q.submit(record)) return 19;
         q.flush(); q.shutdown();
         if (f.failures != 0 || !output_is(f, "nested", "recurse")) return 20;
+    }
+    {
+        Fixture f; f.recurse = 1;
+        Config c = config(f, true); c.begin_record = throw_begin;
+        Queue q(c); f.queue = &q;
+        Record a; a.bytes = "not accepted";
+        if (q.submit(a) || q.stats().accepted != 0 || q.stats().processed != 0)
+            return 22;
+        Record b; b.bytes = "healthy";
+        if (!q.submit(b) || !output_is(f, "healthy") ||
+            q.stats().accepted != 1 || q.stats().processed != 1) return 23;
+    }
+    {
+        Fixture f; Config c = config(f); c.accepted = throw_accepted;
+        Queue q(c); f.queue = &q;
+        Record a; a.bytes = "not accepted";
+        if (q.submit(a) || q.stats().accepted != 0 || q.stats().processed != 0)
+            return 24;
+        q.flush(); q.shutdown();
+    }
+    {
+        Fixture f; Config c = config(f); c.worker_started = throw_worker;
+        c.worker_stopped = throw_worker; c.flush = throw_flush;
+        c.sink_error = throw_sink_error;
+        Queue q(c); f.queue = &q;
+        Record a; a.bytes = "failure";
+        Record b; b.bytes = "survived";
+        if (!q.submit(a) || !q.submit(b)) return 25;
+        q.flush(); q.shutdown();
+        if (q.stats().accepted != 2 || q.stats().processed != 2 ||
+            !output_is(f, "survived")) return 26;
     }
     std::puts("diagnostic queue saturation, fallback, recursion, drain, shutdown race, sink failure, post-shutdown PASS");
 }

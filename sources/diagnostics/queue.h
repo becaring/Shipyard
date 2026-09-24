@@ -10,18 +10,24 @@ namespace Shipyard { namespace Diagnostics {
 typedef void (*Emit)(const char*, ...);
 typedef void (*Format)(const void*, Emit);
 
-// All bytes are copied before publication. The callback and its context must
-// remain alive until shutdown returns; the formatter itself belongs to the title.
+struct Metadata {
+    LARGE_INTEGER queued_at;
+    uint32_t capture_ticks;
+    DWORD producer;
+    Metadata() : capture_ticks(0), producer(0) {
+        queued_at.QuadPart = 0;
+    }
+};
+
+// Payload is copied before publication. Preparation callbacks see it as const
+// and may change only metadata; this keeps byte accounting stable. Callback
+// context and formatter must remain alive until shutdown returns.
 struct Record {
     int level;
     std::string bytes;
     Format format;
-    LARGE_INTEGER queued_at;
-    uint32_t capture_ticks;
-    DWORD producer;
-    Record() : level(2), format(NULL), capture_ticks(0), producer(0) {
-        queued_at.QuadPart = 0;
-    }
+    Metadata metadata;
+    Record() : level(2), format(NULL) {}
 };
 
 struct Config {
@@ -29,8 +35,10 @@ struct Config {
     void (*consume)(const Record&, void*);
     void (*flush)(void*);
     void (*sink_error)(void*);
-    void (*begin_record)(Record&, void*);
-    void (*accepted)(Record&, uint32_t, void*);
+    // Exceptions from preparation callbacks reject that record. Worker and
+    // sink callback exceptions are contained; later records remain available.
+    void (*begin_record)(const Record&, Metadata&, void*);
+    void (*accepted)(const Record&, uint32_t, Metadata&, void*);
     void (*worker_started)(void*);
     void (*worker_stopped)(void*);
     size_t byte_limit;
