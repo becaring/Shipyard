@@ -20,6 +20,20 @@ The older SoH360 snapshot has a different 19-line upstream Fast3D notice, SHA-25
 | Shipyard Xenos backend | Current `sources/xenos/core.cpp` SHA-256 `48e4045d94b38365c9c0bd4e0d9c472c0c4da120548cfe8515003bf99bdfb268` descends from the maintainer's SoH360 `platform/xbox360/gfx_xenos.cpp`: Shipyard's first `sources/xenos/gfx_xenos.cpp` blob was line-identical to that local file before extraction/refactoring. The current core is selected directly by both consumers. Comparison with historical Re60 `gfx_xdk.cpp` shows a different backend: Re60's local `d3d` state, `XGTileTextureLevel` upload and stubbed framebuffer path versus current `Fast` state, linear texture upload, complete framebuffer path and delegated shader building. The common rendering API concepts alone do not establish a transfer of old upstream formula code. | Maintainer MIT for the local backend implementation, with active Fast3D MIT retained for the API/types and called interpreter/shader code. The historical conditional notice remains with the historical renderer. |
 | Shipyard Fast3D numeric/cache/triangle helpers | `sources/fast3d/` contains 17 headers and two `.cpp` mechanisms, introduced through the local SoH360 and Smash extraction commits `32e325e`, `6409652`, `496b134`, `1b8090e`, and related trait changes. `numeric.h` names the exact SoH360 `fast3d_float.cpp` SHA-256; `triangle_pipeline.h` was moved from the maintainer's Smash implementation. They operate on selected consumer Fast3D types but do not carry the historical Re60 `shader_item_to_str`, `append_formula`, or `gfx_cc_get_features` bodies. Direct P source objects and included headers appear in both consumers' build receipts. | Maintainer MIT for original local mechanisms; the consumer Fast3D types and interpreter remain under their pinned MIT notices. |
 
+The complete Shipyard path coverage for the uncertain renderer families is:
+
+| Shipyard first-add commit | Current paths and portion |
+| --- | --- |
+| `e4d000d8c271` | `sources/xenos/{core.cpp,core.h,metrics.h,pixels.h,shader_cache.cpp,shader_cache.h}`: local Xenos backend, metrics/pixels, and optional cache; `sources/fast3d/unit_color.h`: local color conversion boundary. |
+| `32e325e94013` | `sources/fast3d/{clip_quantize.cpp,clip_quantize.h,value_init.h,vertex_transform.cpp,vertex_transform.h,vmx_load.h}`: extracted local numeric/vertex mechanisms. |
+| `30214e3119d4`, `cde9acfc193c` | `sources/fast3d/command_stack.h` and `dispatch_owner.h`: bounded stack and dispatch mechanics. |
+| `1b8090e71db8` | `sources/fast3d/{coordinate.h,light_color_cache.h,material_value_cache.h,normal_sources.h,numeric.h,projection_cache.h,shader_metadata_cache.h}`: extracted local value/cache mechanisms. |
+| `640965237036`, `7db50f2cc8ad`, `496b13404959` | `sources/fast3d/shade_cache.h`, `texture_bindings.h`, and `triangle_pipeline.h`: local optional shade cache, texture binding state, and Smash triangle certificate with consumer traits. |
+
+This table records the actual current file set and first Shipyard additions. It
+is paired with the positive local SoH360/Smash implementation trail and the
+function-level comparison above; a Git addition alone would prove only a move.
+
 ## Disposition and limit
 
 R1 is closed for the *selected source inputs*: the actual Fast3D-derived interpreter, combiner and projected shader formula are identified as upstream code under the two active pinned MIT notices, while the Shipyard-specific backend and mechanisms have the maintainer's local source trail. The old source-only notice and later conditional asset exception are retained for their historical revisions; neither was silently substituted for the active MIT grant. No historical Re60 `gfx_xdk.cpp`, `gfx_xdk_shader.cpp`, or `gfx_cc.cpp` is selected for the current XEX builds.
