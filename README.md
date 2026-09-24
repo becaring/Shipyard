@@ -2,9 +2,10 @@
 
 Shipyard is the shared Xbox 360 platform checkout for LibUltraShip/Fast3D
 consumers. Consumers compile its reusable C++ implementations directly and
-provide narrow interfaces for game/version-specific behavior. Some Fast3D,
-GUI and runtime paths are still being migrated; see the active consumer
-ownership reports before treating a subsystem as canonical. Shipyard requires
+provide narrow interfaces for game/version-specific behavior. Fast3D formulas,
+layout, lifecycle and version behavior stay in the consumers where their
+contracts differ; see their ownership reports for the exact boundaries.
+Shipyard requires
 the consuming port's upstream headers and Xbox 360 SDK and does not produce
 an XEX on its own.
 
