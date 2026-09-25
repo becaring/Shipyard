@@ -550,7 +550,9 @@ void Upload(const uint8_t* bytes, uint32_t width, uint32_t height) {
             VerifyTextureUpload(tex, bytes);
         ++upload_counts.reused;
         upload_counts.bytes_saved += size;
-        SelectTexture(upload_tile, id);
+        // The upload target is already selected. The full rebind below owns
+        // the native binding and sampler update for every alias.
+        selected_fb[upload_tile] = -1;
         RebindSampledTextures();
         return;
     }
@@ -588,7 +590,7 @@ void Upload(const uint8_t* bytes, uint32_t width, uint32_t height) {
         snapshot.height = height;
         snapshot.native = tex.native;
     }
-    SelectTexture(upload_tile, selected[upload_tile]);
+    selected_fb[upload_tile] = -1;
     RebindSampledTextures();
 }
 void Sampler(int tile, bool linear, uint32_t s, uint32_t t) {
@@ -1137,6 +1139,8 @@ void Clear(bool color, bool depth) {
     if (!color && !depth)
         return;
     ++framebuffer_clear_count;
+    const bool begin_clears_both = !live_framebuffer && color && depth &&
+                                   buffers[active_fb].depth && buffers[active_fb].tiles.size() == 1;
     if (!live_framebuffer) {
         Framebuffer& b = buffers[active_fb];
         // Discard retained samples before a full clear while preserving Fast3D's
@@ -1154,6 +1158,10 @@ void Clear(bool color, bool depth) {
         }
     }
     BeginFramebuffer();
+    // Single-tile BeginFramebuffer has just cleared both attachments after
+    // the retained samples were discarded. No draw can occur before here.
+    if (begin_clears_both)
+        return;
     const DWORD flags =
         (color ? D3DCLEAR_TARGET : 0) |
         ((depth && buffers[active_fb].depth) ? D3DCLEAR_ZBUFFER | D3DCLEAR_STENCIL : 0);

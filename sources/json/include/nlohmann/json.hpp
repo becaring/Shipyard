@@ -277,10 +277,14 @@ public:
     template <class T> T value(const std::string& key, const T& fallback) const {
         if (!is_object())
             throw type_error(306, std::string("cannot use value() with ") + type_name());
-        return contains(key) ? at(key).get<T>() : fallback;
+        const json* found = FindValue(key);
+        return found ? found->get<T>() : fallback;
     }
     std::string value(const std::string& key, const char* fallback) const {
-        return value<std::string>(key, std::string(fallback));
+        if (!is_object())
+            throw type_error(306, std::string("cannot use value() with ") + type_name());
+        const json* found = FindValue(key);
+        return found ? found->get<std::string>() : std::string(fallback);
     }
     iterator find(const std::string&);
     const_iterator find(const std::string&) const;
@@ -368,6 +372,7 @@ public:
     }
 
 private:
+    const json* FindValue(const std::string&) const;
     template <class T> friend class detail::iter_impl;
     template <class T, class Enable> friend struct detail::conversion;
     struct ObjectStorage;

@@ -1,7 +1,9 @@
 #include "diagnostics/queue.h"
 #include <atomic>
+#include <cstdlib>
 #include <cstdio>
 #include <cstring>
+#include <new>
 #include <string>
 #include <stdexcept>
 #include <vector>
@@ -9,6 +11,14 @@
 using Shipyard::Diagnostics::Queue;
 using Shipyard::Diagnostics::Record;
 using Shipyard::Diagnostics::Config;
+
+static std::atomic<int> payload_allocations(0);
+void* operator new(size_t size) {
+    payload_allocations.fetch_add(1);
+    if (void* memory = std::malloc(size)) return memory;
+    throw std::bad_alloc();
+}
+void operator delete(void* memory) noexcept { std::free(memory); }
 
 struct Fixture {
     CRITICAL_SECTION gate;
@@ -188,6 +198,26 @@ int main() {
         q.flush(); q.shutdown();
         if (q.stats().accepted != 2 || q.stats().processed != 2 ||
             !output_is(f, "survived")) return 26;
+    }
+    {
+        Fixture f; Config c = config(f); c.byte_limit = 4096;
+        c.line_limit = 4; c.wake_bytes = 1;
+        Queue q(c); f.queue = &q;
+        ResetEvent(f.release);
+        Record hold; hold.bytes = "hold";
+        if (!q.submit(hold) || WaitForSingleObject(f.entered, 2000) != WAIT_OBJECT_0) return 27;
+        Record large; large.bytes.assign(1024, 'x');
+        const int before = payload_allocations.load();
+        if (!q.submit(large)) return 28;
+        const int added = payload_allocations.load() - before;
+        SetEvent(f.release); q.flush(); q.shutdown();
+        // One of these allocations owns the accepted 1 KiB payload. The
+        // other two are the queue's deque block and delivery bookkeeping.
+        if (added != 3 || f.output.size() != 2 || f.output[1] != large.bytes) {
+            std::printf("payload allocations=%d output=%u match=%d\n", added,
+                        (unsigned)f.output.size(), f.output.size() == 2 && f.output[1] == large.bytes);
+            return 29;
+        }
     }
     std::puts("diagnostic queue saturation, fallback, recursion, drain, shutdown race, sink failure, post-shutdown PASS");
 }

@@ -9,6 +9,14 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class TextureBindingTests(unittest.TestCase):
+    def test_upload_has_one_native_binding_pass(self):
+        source = (ROOT / 'sources/xenos/core.cpp').read_text()
+        upload = source[source.index('void Upload(const uint8_t* bytes,'):source.index('\nvoid Sampler(', source.index('void Upload(const uint8_t* bytes,'))]
+        self.assertEqual(upload.count('RebindSampledTextures();'), 2)
+        self.assertEqual(upload.count('selected_fb[upload_tile] = -1;'), 2)
+        self.assertEqual(upload.count('SelectTexture('), 0,
+                         'SelectTexture binds the upload slot again before RebindSampledTextures')
+
     def test_six_slot_sampler_alias_and_invalidation(self):
         vswhere = Path(os.environ['ProgramFiles(x86)']) / 'Microsoft Visual Studio/Installer/vswhere.exe'
         installation = subprocess.check_output([

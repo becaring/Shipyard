@@ -2,6 +2,7 @@
 #include <algorithm>
 #include <new>
 #include <stdexcept>
+#include <utility>
 
 namespace Shipyard {
 namespace Diagnostics {
@@ -118,8 +119,9 @@ bool Queue::submit(const Record& source, uint32_t capture_start) {
                     return false;
                 }
                 if (room) {
+                    const bool wake_for_record = ownedRecord.format || ownedRecord.level >= 3;
                     try {
-                        pending_.push_back(ownedRecord);
+                        pending_.push_back(std::move(ownedRecord));
                     } catch (const std::bad_alloc&) {
                         return false;
                     } catch (const std::length_error&) {
@@ -130,8 +132,7 @@ bool Queue::submit(const Record& source, uint32_t capture_start) {
                     if (queued_bytes_ > stats_.peak_bytes)
                         stats_.peak_bytes = queued_bytes_;
                     ResetEvent(drained_);
-                    if (ownedRecord.format || ownedRecord.level >= 3 ||
-                        queued_bytes_ >= config_.wake_bytes)
+                    if (wake_for_record || queued_bytes_ >= config_.wake_bytes)
                         SetEvent(wake_);
                     return true;
                 }

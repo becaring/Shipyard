@@ -115,6 +115,10 @@ const char* json::type_name() const {
 bool json::contains(const std::string& k) const {
     return is_object() && object_->find(k) != object_->end();
 }
+const json* json::FindValue(const std::string& k) const {
+    object_t::const_iterator found = object_->find(k);
+    return found == object_->end() ? NULL : &found->second;
+}
 size_t json::size() const {
     if (is_object())
         return object_->size();
