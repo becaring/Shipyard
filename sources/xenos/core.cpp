@@ -371,10 +371,10 @@ ID3DXBuffer* Compile(const std::string& source, const char* entry, const char* p
 }
 void Element(std::vector<D3DVERTEXELEMENT9>& elements, WORD& offset, int count, BYTE usage,
              BYTE index) {
-    // Xenos declaration types are encoded tokens, not consecutive PC D3D9 enums.
+    // Xenos Type is a DWORD token with swizzle/numeric bits above bit 7, not a PC D3D9 BYTE.
     const DWORD types[] = {D3DDECLTYPE_FLOAT1, D3DDECLTYPE_FLOAT2, D3DDECLTYPE_FLOAT3,
                            D3DDECLTYPE_FLOAT4};
-    D3DVERTEXELEMENT9 element = {0,     offset, (BYTE)types[count - 1], D3DDECLMETHOD_DEFAULT,
+    D3DVERTEXELEMENT9 element = {0,     offset, types[count - 1], D3DDECLMETHOD_DEFAULT,
                                  usage, index};
     elements.push_back(element);
     offset += count * sizeof(float);
