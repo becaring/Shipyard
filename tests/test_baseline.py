@@ -1,5 +1,6 @@
 import hashlib
 import json
+import subprocess
 import sys
 import unittest
 from pathlib import Path
@@ -40,10 +41,23 @@ class BaselineTests(unittest.TestCase):
                 self.assertEqual(hashlib.sha256(path.read_bytes()).hexdigest(), expected)
 
     def test_text_is_utf8_lf_with_final_newline(self):
-        for path in BASE.rglob("*"):
-            if not path.is_file() or ".git" in path.parts or "__pycache__" in path.parts:
+        # Ignored scratch output may contain SDK files and temporary compiler
+        # fixtures. Check maintained files, including newly added tests, rather
+        # than walking nested worktrees and build products.
+        listed = subprocess.run(
+            ["git", "ls-files", "--cached", "-z"],
+            cwd=BASE, check=True, capture_output=True,
+        ).stdout
+        paths = {BASE / raw.decode("utf-8") for raw in listed.split(b"\0") if raw}
+        for directory in (*PRODUCTION, BASE / "tests"):
+            paths.update(path for path in directory.rglob("*") if path.is_file())
+        paths.add(BASE / ".clang-format")
+        for path in sorted(paths):
+            if not path.is_file() or "__pycache__" in path.parts:
                 continue
-            if path.suffix not in TEXT_FILES and path.name not in {".gitattributes", ".gitignore"}:
+            if path.suffix not in TEXT_FILES and path.name not in {
+                ".gitattributes", ".gitignore", ".clang-format",
+            }:
                 continue
             with self.subTest(path=path.relative_to(BASE)):
                 data = path.read_bytes()

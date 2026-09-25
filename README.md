@@ -4,10 +4,9 @@ Shipyard is the shared Xbox 360 platform checkout for LibUltraShip/Fast3D
 consumers. Consumers compile its reusable C++ implementations directly and
 provide narrow interfaces for game/version-specific behavior. Fast3D formulas,
 layout, lifecycle and version behavior stay in the consumers where their
-contracts differ; see their ownership reports for the exact boundaries.
-Shipyard requires
-the consuming port's upstream headers and Xbox 360 SDK and does not produce
-an XEX on its own.
+contracts differ. The selected consumer adapter and its pinned upstream
+revision define those boundaries. Shipyard needs that consumer's upstream
+headers and the Xbox 360 SDK; it does not produce an XEX on its own.
 
 ## Contents
 
@@ -26,6 +25,7 @@ an XEX on its own.
 - `sources/value_types/`, `sources/prism/`: XDK value-type and Prism compatibility contracts.
 - `sources/presentation/`, `sources/fast3d/`: shared pacing and bounded interpreter/geometry helpers.
 - `sources/atomic/`: native Xenon atomic operations and explicit memory-order policies.
+- `sources/json/`: bounded nlohmann-compatible DOM and native serialization backend.
 - `sources/math/`: scalar and color conversion shared by UI projections.
 - `sources/memory/`: optional saturating address-interval arithmetic.
 - `sources/thread-pool/`: support for the bounded BS thread-pool projection.
@@ -47,11 +47,45 @@ provide the declared adapters used by its selected files and check them against
 its pinned upstream version. See [BASELINE.md](BASELINE.md) for the ownership
 boundary.
 
+## Component and interface map
+
+Only select files required by the consumer's project. Include paths such as
+`services.h`, `shader_provider.h`, and `xenos_backend.h` in the renderer are
+consumer contracts, not missing Shipyard files.
+
+| Shipyard owns | Required input | Consumer owns |
+| --- | --- | --- |
+| `sources/xenos/` renderer, resource lifetimes and native counters; `sources/graphics/` shader lowering | Xbox SDK and pinned Fast3D shader types through `shader_provider.h` | `services.h` logging, fatal handling, reuse verification and file writes; `xenos_backend.h` device boundary; shader feature decoding, display lifecycle and optional cache location |
+| `sources/imgui/` native renderer and gamepad bindings | Xbox SDK and pinned `imgui.h` | Functions declared in `shipyard_imgui_xenos.h`, GUI lifecycle and input policy |
+| `sources/audio/` XAudio2 sink and PCM pool | Xbox SDK and pinned `ship/audio/AudioChannelsSetting.h` | `ShipyardAudioLog`/`ShipyardAudioFatal`, audio producer and allowed channel layouts |
+| `sources/diagnostics/` bounded record queue and worker | Xbox SDK synchronization primitives | Queue `Config` callbacks and context, sink, formatting, worker placement and shutdown timing |
+| `sources/environment/`, `sources/storage/`, `sources/network/` | Xbox SDK filesystem, storage and socket APIs | Launch-file path and absence policy; title identity, mount/socket lifetime and failure policy |
+| `sources/async/`, `sources/thread-pool/`, `sources/clock/`, `sources/libultra/` | Xbox SDK synchronization and timing APIs; pinned BS thread-pool projection where selected | Worker admission, task ownership, callback context and application shutdown order |
+| `sources/json/`, `sources/libzip/`, `sources/crt/` | Pinned nlohmann/libzip inputs and XDK CRT behavior | Selected archives, serializers, generated output staging and game data policy |
+| `sources/fast3d/` numeric, cache and lowering mechanisms | Pinned interpreter types and selected source anchors | Version-specific layout, formulas, capacity, observation and generated staging |
+| `python/xbox360_platform/` source-locked projectors | Pinned BS, JSON, libzip, spdlog and Prism inputs as required by the selected generator | Dependency acquisition, parser where required, project generation, application policy and source-lock integration |
+
+`sources/xenos/metrics.h` holds renderer counters accumulated on the graphics
+thread. Smash reads and resets their public snapshot through
+`ShipyardXenos::CaptureAndResetCounters`; Modern currently does not read it.
+The counters are maintained operational diagnostics, not a separate profiler;
+their integer increments occur in normal renderer builds even when a consumer
+does not request a snapshot.
+Native state and texture readback verification are opt-in through the
+consumer's `Shipyard_VerifyFast3DReuse` callback: Smash binds it to
+`SMASH360_VERIFY_NATIVE_REUSE=1`; Modern's setter is present but has no active
+caller, so its default is disabled. `Shipyard_Log` and `Shipyard_Fatal` are
+required operational hooks. Smash's full frame profiler is consumer-owned and
+has its own build and runtime switches.
+
 [NOTICE.md](NOTICE.md) records the known source lineage and licensing status.
 
 ## Using a checkout
 
 Verification requires Python 3.9 or newer and Git.
+Keep this checkout private until a coordinated release is explicitly authorized
+with the active 3Shipsty/OoT consumer. Consumer locks may select a local private
+checkout without publishing Shipyard source or artifacts.
 
 Clone this repository wherever the consumer can reach it. The consumer resolves
 the checkout path through its own configuration and passes that path and its lock
@@ -74,8 +108,8 @@ in its lock file. An interface change also requires a coordinated
 
 ## Test environments
 
-Run commands from the selected Shipyard checkout root (for this candidate,
-`D:\Projects\LibUltraShip+Fast3D360\scratch\queue-completion-worktree`).
+Run commands from the selected Shipyard checkout root. Check its Git revision
+against the active consumer lock before generating or compiling consumer code.
 Python 3.9+ and Git are enough for the package manifest, exact-revision lock,
 and pure projection checks. In PowerShell, set the import path and run that
 portable subset with:
@@ -114,3 +148,11 @@ native coverage was not executed; it is not evidence of a production failure
 or a passing full suite. The portable subset can still be reported on its
 own. Consumer PPC compile/link and Xenia/hardware behavior require the
 separate locked consumer build and runtime checks.
+
+## Cleanup check
+
+For maintained source changes, inspect ownership and caller contracts in both
+active consumers, edit the generator rather than its generated output, run the
+affected host and PPC checks, update `baseline.json`, and review the final
+source diff before updating consumer locks. An internal cleanup does not by
+itself change the package API version.
