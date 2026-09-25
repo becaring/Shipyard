@@ -72,11 +72,45 @@ After committing the package, update each consumer's revision and manifest hash
 in its lock file. An interface change also requires a coordinated
 `api_version` change and consumer adapter updates.
 
-Run the package checks from this repository's root:
+## Test environments
 
-```sh
-python -m unittest discover -s tests -v
+Run commands from the selected Shipyard checkout root (for this candidate,
+`D:\Projects\LibUltraShip+Fast3D360\scratch\queue-completion-worktree`).
+Python 3.9+ and Git are enough for the package manifest, exact-revision lock,
+and pure projection checks. In PowerShell, set the import path and run that
+portable subset with:
+
+```powershell
+$env:PYTHONPATH = (Resolve-Path .\python).Path
+python -B -m unittest -v tests.test_baseline tests.test_bs_thread_pool tests.test_combiner_lookup_projection tests.test_contract tests.test_cpp_syntax tests.test_logging_provider tests.test_parallel_build tests.test_prism_projector tests.test_triangle_certificate_projection
 ```
 
-These checks verify the package contents and lock behavior. PPC compilation and
-runtime behavior must be checked by each consumer.
+The full discovered suite also compiles and executes host C++ contracts. Run
+it from the same checkout root on Windows with `ComSpec`, the Visual Studio
+2022 C++ tools, and `cl.exe` available through `vcvars64.bat`:
+
+```powershell
+$env:PYTHONPATH = (Resolve-Path .\python).Path
+python -B -m unittest discover -s tests -p 'test_*.py' -v
+```
+
+Most host tests find Visual Studio using
+`%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe` and
+require `Microsoft.VisualStudio.Component.VC.Tools.x86.x64`. The material
+value-cache test currently calls the Community 2022 `vcvars64.bat` at
+`C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Auxiliary\Build`.
+The separate `python tests/combiner_lookup_contract.py` runner calls that
+Community edition's `vcvars32.bat`. The diagnostic queue tests compile with
+the real Windows thread/event/critical-section implementation through host
+MSVC and the small Xbox declaration shim in `tests/io-sdk`; they do not run
+on Linux as unmodified tests.
+
+`tests.test_coordinate` additionally compiles a PPC object with
+`C:\Program Files (x86)\Microsoft Xbox 360 SDK\bin\win32\cl.exe` and Xbox
+headers. The full suite is therefore green only when that XDK and the host
+prerequisites above are present. A missing `ProgramFiles(x86)`, `ComSpec`,
+`vswhere.exe`, Community `vcvars*.bat`, or XDK compiler means the relevant
+native coverage was not executed; it is not evidence of a production failure
+or a passing full suite. The portable subset can still be reported on its
+own. Consumer PPC compile/link and Xenia/hardware behavior require the
+separate locked consumer build and runtime checks.

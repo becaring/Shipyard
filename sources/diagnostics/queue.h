@@ -21,7 +21,10 @@ struct Metadata {
 
 // Payload is copied before publication. Preparation callbacks see it as const
 // and may change only metadata; this keeps byte accounting stable. Callback
-// context and formatter must remain alive until shutdown returns.
+// context and formatter must remain alive until an external shutdown returns.
+// Concurrent external shutdown calls each wait for the worker and its final
+// callback. A call from that worker only requests shutdown and cannot join;
+// its context must remain alive until a later external shutdown completes.
 struct Record {
     int level;
     std::string bytes;

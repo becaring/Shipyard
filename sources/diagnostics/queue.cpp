@@ -166,11 +166,15 @@ void Queue::flush() {
 void Queue::shutdown() {
     HANDLE wait = NULL;
     EnterCriticalSection(&gate_);
-    if (worker_ && !closed_ && GetCurrentThreadId() != worker_id_) {
-        stopping_ = true;
-        wait = worker_;
-        SetEvent(wake_);
-    } else if (!worker_) closed_ = true;
+    if (worker_) {
+        if (!closed_) {
+            stopping_ = true;
+            SetEvent(wake_);
+        }
+        // closed_ only means that the queue drained. The final worker
+        // callback may still be running, so every external caller joins.
+        if (GetCurrentThreadId() != worker_id_) wait = worker_;
+    } else closed_ = true;
     LeaveCriticalSection(&gate_);
     if (wait) WaitForSingleObject(wait, INFINITE);
 }
