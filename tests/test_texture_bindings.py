@@ -17,6 +17,14 @@ class TextureBindingTests(unittest.TestCase):
         self.assertEqual(upload.count('SelectTexture('), 0,
                          'SelectTexture binds the upload slot again before RebindSampledTextures')
 
+    def test_rebind_restores_sampler_after_native_texture(self):
+        source = (ROOT / 'sources/xenos/core.cpp').read_text()
+        rebind = source[source.index('void RebindSampledTextures() {'):source.index('\nvoid FinishFramebuffer()', source.index('void RebindSampledTextures() {'))]
+        self.assertLess(rebind.index('SetNativeTexture(i, texture);'),
+                        rebind.index('ApplySampler(i, *sampler);'))
+        upload = source[source.index('void Upload(const uint8_t* bytes,'):source.index('\nvoid Sampler(', source.index('void Upload(const uint8_t* bytes,'))]
+        self.assertIn('native_state.sampler_valid[i] = false;', upload)
+
     def test_six_slot_sampler_alias_and_invalidation(self):
         vswhere = Path(os.environ['ProgramFiles(x86)']) / 'Microsoft Visual Studio/Installer/vswhere.exe'
         installation = subprocess.check_output([

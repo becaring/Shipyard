@@ -557,10 +557,15 @@ void Upload(const uint8_t* bytes, uint32_t width, uint32_t height) {
         return;
     }
     snapshot.native = NULL;
-    if (tex.native) {
-        for (int i = 0; i < 6; ++i)
-            if (selected_fb[i] < 0 && selected[i] == selected[upload_tile])
+    for (int i = 0; i < 6; ++i)
+        if (selected_fb[i] < 0 && selected[i] == id) {
+            if (tex.native)
                 SetNativeTexture(i, NULL);
+            // The replacement may rebuild the combined Xenos fetch state.
+            // Restore this slot's sampler after binding the new image.
+            native_state.sampler_valid[i] = false;
+        }
+    if (tex.native) {
         ReleaseTexture(tex.native);
     }
     Shipyard_Check(xenos_device->CreateTexture(width, height, 1, 0, D3DFMT_LIN_A8R8G8B8,
@@ -900,14 +905,17 @@ void BeginFramebuffer() {
 void RebindSampledTextures() {
     for (int i = 0; i < 6; ++i) {
         IDirect3DTexture9* texture = NULL;
+        const TextureSampler* sampler = NULL;
         if (selected_fb[i] >= 0) {
             texture = buffers[selected_fb[i]].image;
-            ApplySampler(i, buffers[selected_fb[i]].sampler);
+            sampler = &buffers[selected_fb[i]].sampler;
         } else if (selected[i] < textures.size()) {
             texture = textures[selected[i]].native;
-            ApplySampler(i, textures[selected[i]].sampler);
+            sampler = &textures[selected[i]].sampler;
         }
         SetNativeTexture(i, texture);
+        if (sampler)
+            ApplySampler(i, *sampler);
     }
 }
 void FinishFramebuffer() {
