@@ -3,11 +3,12 @@
 #include <xtl.h>
 #include <xam.h>
 
-namespace Shipyard { namespace Storage {
+namespace Shipyard {
+namespace Storage {
 
 struct MountPolicy {
     unsigned userIndex;
-    unsigned long long requestedBytes;
+    unsigned long long requestedBytes; // Minimum requested storage size in bytes.
     const char* mountName;
     const char* containerFileName;
     const wchar_t* displayName;
@@ -31,4 +32,5 @@ MountResult SelectAndMount(const MountPolicy& policy, const StartupDisplay& disp
 DWORD Flush(const char* mountName);
 DWORD Close(const char* mountName);
 
-}}
+} // namespace Storage
+} // namespace Shipyard

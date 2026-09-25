@@ -5,7 +5,8 @@
 #include <deque>
 #include <string>
 
-namespace Shipyard { namespace Diagnostics {
+namespace Shipyard {
+namespace Diagnostics {
 
 typedef void (*Emit)(const char*, ...);
 typedef void (*Format)(const void*, Emit);
@@ -30,16 +31,22 @@ struct Record {
     std::string bytes;
     Format format;
     Metadata metadata;
-    Record() : level(2), format(NULL) {}
+    Record() : level(2), format(NULL) {
+    }
 };
 
 struct Config {
+    // The queue borrows the callbacks and context for its entire lifetime.
     void* context;
+    // Sink calls are serialized. sink_error is called when a sink or worker
+    // callback throws; failures from sink_error itself are contained.
     void (*consume)(const Record&, void*);
     void (*flush)(void*);
     void (*sink_error)(void*);
     // Exceptions from preparation callbacks reject that record. Worker and
     // sink callback exceptions are contained; later records remain available.
+    // Preparation runs under the queue lock before admission and may change
+    // metadata only. Worker lifecycle callbacks run on the worker thread.
     void (*begin_record)(const Record&, Metadata&, void*);
     void (*accepted)(const Record&, uint32_t, Metadata&, void*);
     void (*worker_started)(void*);
@@ -62,10 +69,13 @@ class Queue {
 public:
     explicit Queue(const Config& config);
     ~Queue();
+    // After shutdown, submissions use the synchronous sink path.
     bool submit(const Record& record, uint32_t capture_start = 0);
+    // Drains accepted records. External shutdown also joins worker callbacks.
     void flush();
     void shutdown();
     Stats stats();
+
 private:
     Queue(const Queue&);
     Queue& operator=(const Queue&);
@@ -77,12 +87,18 @@ private:
     Config config_;
     CRITICAL_SECTION gate_;
     CRITICAL_SECTION sink_gate_;
-    HANDLE wake_, drained_, space_, worker_;
+    HANDLE wake_;
+    HANDLE drained_;
+    HANDLE space_;
+    HANDLE worker_;
     DWORD worker_id_;
-    bool started_, stopping_, closed_;
+    bool started_;
+    bool stopping_;
+    bool closed_; // Queue drained; worker_stopped may still be running.
     std::deque<Record> pending_;
     size_t queued_bytes_;
     Stats stats_;
 };
 
-} }
+} // namespace Diagnostics
+} // namespace Shipyard

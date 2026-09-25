@@ -6,7 +6,8 @@
 #include <float.h>
 #endif
 
-namespace Shipyard { namespace Fast3D {
+namespace Shipyard {
+namespace Fast3D {
 
 // The two FPSCR RN bits are part of a projected value's identity. A finite
 // division can round differently even when all three source words match.
@@ -21,7 +22,9 @@ static __declspec(naked) uint32_t ProjectionRoundingMode() {
     }
 }
 #else
-inline uint32_t ProjectionRoundingMode() { return (_controlfp(0,0) & _MCW_RC) >> 8; }
+inline uint32_t ProjectionRoundingMode() {
+    return (_controlfp(0, 0) & _MCW_RC) >> 8;
+}
 #endif
 
 // Value only: the caller owns array capacity, vertex-index mapping, cull
@@ -32,18 +35,23 @@ struct ProjectionValueCache {
     uint32_t keyX, keyY, keyW, roundingMode;
     bool valid;
 
+    // The XDK uses __forceinline; host compilers use inline.
+    // clang-format off
 #ifdef _MSC_VER
     __forceinline
 #else
     inline
 #endif
     void Load(const float& inputX, const float& inputY, const float& inputW) {
-        uint32_t bitsX, bitsY, bitsW;
+        uint32_t bitsX;
+        uint32_t bitsY;
+        uint32_t bitsW;
         memcpy(&bitsX, &inputX, 4);
         memcpy(&bitsY, &inputY, 4);
         memcpy(&bitsW, &inputW, 4);
         const uint32_t mode = ProjectionRoundingMode();
-        if (valid && keyX == bitsX && keyY == bitsY && keyW == bitsW && roundingMode == mode) return;
+        if (valid && keyX == bitsX && keyY == bitsY && keyW == bitsW && roundingMode == mode)
+            return;
         x = inputX / inputW;
         y = inputY / inputW;
         keyX = bitsX;
@@ -52,11 +60,11 @@ struct ProjectionValueCache {
         roundingMode = mode;
         // Repeat exceptional operations, including either zero divisor and
         // any infinity/NaN input. Raw-bit keys retain signed zero and NaN data.
-        valid = (bitsX & 0x7f800000U) != 0x7f800000U &&
-                (bitsY & 0x7f800000U) != 0x7f800000U &&
-                (bitsW & 0x7f800000U) != 0x7f800000U &&
-                (bitsW & 0x7fffffffU) != 0;
+        valid = (bitsX & 0x7f800000U) != 0x7f800000U && (bitsY & 0x7f800000U) != 0x7f800000U &&
+                (bitsW & 0x7f800000U) != 0x7f800000U && (bitsW & 0x7fffffffU) != 0;
     }
+    // clang-format on
 };
 
-} }
+} // namespace Fast3D
+} // namespace Shipyard

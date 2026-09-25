@@ -4,8 +4,9 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
-char *shipyard_zip_resolve_path(const char *path, zip_error_t *error);
-int shipyard_zip_secure_random(unsigned char *buffer, unsigned short length);
+// Returns a malloc-owned path for libzip to release with free; NULL sets error.
+char* shipyard_zip_resolve_path(const char* path, zip_error_t* error);
+int shipyard_zip_secure_random(unsigned char* buffer, unsigned short length);
 #ifdef __cplusplus
 }
 #endif

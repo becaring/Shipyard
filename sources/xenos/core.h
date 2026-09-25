@@ -16,17 +16,17 @@ struct ShaderProgram;
 
 namespace ShipyardXenos {
 struct ShaderCacheOps {
-    ID3DXBuffer* (*load)(const std::string&,const char*,const char*);
-    void (*store)(const std::string&,const char*,const char*,ID3DXBuffer*);
+    ID3DXBuffer* (*load)(const std::string&, const char*, const char*);
+    void (*store)(const std::string&, const char*, const char*, ID3DXBuffer*);
 };
 void SetShaderCache(const ShaderCacheOps* operations);
 struct NativeCounters {
-    unsigned samplerAttempted,samplerWritten,samplerSuppressed;
-    unsigned constantsAttempted,constantsWritten,constantsSuppressed;
-    unsigned bindingAttempted,bindingWritten,bindingSuppressed;
-    unsigned uploadRequests,uploadReused,uploadSavedBytes;
-    unsigned clears,restoresAvoided,depthRestoresAvoided;
-    unsigned pendingTextures,pendingBytes,width,height,samples,tiles;
+    unsigned samplerAttempted, samplerWritten, samplerSuppressed;
+    unsigned constantsAttempted, constantsWritten, constantsSuppressed;
+    unsigned bindingAttempted, bindingWritten, bindingSuppressed;
+    unsigned uploadRequests, uploadReused, uploadSavedBytes;
+    unsigned clears, restoresAvoided, depthRestoresAvoided;
+    unsigned pendingTextures, pendingBytes, width, height, samples, tiles;
 };
 void CaptureAndResetCounters(NativeCounters* counters);
 GfxClipParameters ClipParameters();
@@ -40,7 +40,7 @@ void ShaderInfo(ShaderProgram* shader, uint8_t* inputs, bool used[2]);
 uint32_t NewTexture();
 void SelectTexture(int slot, uint32_t id);
 void UploadTexture(const uint8_t* pixels, uint32_t width, uint32_t height);
-void SetSamplerParameters(int slot, bool linear, uint32_t s, uint32_t t);
+void SetSamplerParameters(int slot, bool linear, uint32_t addressS, uint32_t addressT);
 void SetDepthTestAndMask(bool test, bool write);
 void SetZmodeDecal(bool decal);
 void SetViewport(int x, int y, int width, int height);
@@ -59,16 +59,21 @@ void FinishRender();
 void Shutdown();
 int CreateFramebuffer();
 void DestroyFramebuffer(int id);
-void UpdateFramebuffer(int id, uint32_t width, uint32_t height, uint32_t msaa,
-                       bool flip, bool target, bool depth, bool readDepth);
-void StartDrawToFramebuffer(int id, float noise);
-void CopyFramebuffer(int dst, int src, int sx0, int sy0, int sx1, int sy1,
-                     int dx0, int dy0, int dx1, int dy1);
+// flip/readDepth are compatibility arguments; this backend uses native
+// orientation and retains depth fragments whenever depth is enabled.
+void UpdateFramebuffer(int id, uint32_t width, uint32_t height, uint32_t msaa, bool flip,
+                       bool target, bool depth, bool readDepth);
+void StartDrawToFramebuffer(int id, float noiseScale);
+// Source and destination rectangles use framebuffer pixel coordinates.
+void CopyFramebuffer(int destination, int source, int sourceX0, int sourceY0, int sourceX1,
+                     int sourceY1, int destinationX0, int destinationY0, int destinationX1,
+                     int destinationY1);
 void ClearFramebuffer(bool color, bool depth);
 void SetColorWriteMask(bool enabled);
-void ClearColorRegion(float x0, float y0, float x1, float y1);
+// Region edges are normalized to [0, 1] and clamped to the current target.
+void ClearColorRegion(float left, float top, float right, float bottom);
 void ReadFramebufferToCPU(int id, uint32_t width, uint32_t height, uint16_t* pixels);
-void ResolveMSAAColorBuffer(int dst, int src);
+void ResolveMSAAColorBuffer(int destination, int source);
 std::unordered_map<std::pair<float, float>, uint16_t, hash_pair_ff>
 GetPixelDepth(int id, const std::set<std::pair<float, float> >& coordinates);
 void* GetFramebufferTextureId(int id);
@@ -79,5 +84,5 @@ void SetTextureFilter(FilteringMode mode);
 FilteringMode GetTextureFilter();
 ImTextureID GetTextureById(int id);
 bool ReadPresentedFrameRGBA(std::vector<uint8_t>& pixels, uint32_t& width, uint32_t& height);
-}
-}
+} // namespace ShipyardXenos
+} // namespace Fast

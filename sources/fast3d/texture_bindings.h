@@ -2,37 +2,42 @@
 
 #include <stdint.h>
 
-namespace Shipyard { namespace Fast3D {
+namespace Shipyard {
+namespace Fast3D {
 
 struct TextureSamplerState {
     bool linear;
     uint8_t s, t;
 
-    TextureSamplerState() : linear(false), s(0), t(0) {}
+    TextureSamplerState() : linear(false), s(0), t(0) {
+    }
     TextureSamplerState(bool linearValue, uint32_t sValue, uint32_t tValue)
-        : linear(linearValue), s(static_cast<uint8_t>(sValue)), t(static_cast<uint8_t>(tValue)) {}
+        : linear(linearValue), s(static_cast<uint8_t>(sValue)), t(static_cast<uint8_t>(tValue)) {
+    }
 
     bool operator==(const TextureSamplerState& other) const {
         return linear == other.linear && s == other.s && t == other.t;
     }
 };
 
-template<unsigned Count> class TextureBindings {
+template <unsigned Count> class TextureBindings {
     struct Slot {
         const void* node;
         uint32_t texture;
         TextureSamplerState sampler;
         bool valid;
-        Slot() : node(0), texture(0), sampler(), valid(false) {}
+        Slot() : node(0), texture(0), sampler(), valid(false) {
+        }
     };
     Slot slots[Count];
 
 public:
     void Invalidate() {
-        for (unsigned i = 0; i < Count; ++i) slots[i] = Slot();
+        for (unsigned i = 0; i < Count; ++i)
+            slots[i] = Slot();
     }
 
-    template<class Node> Node* Bound(unsigned slot) const {
+    template <class Node> Node* Bound(unsigned slot) const {
         return slots[slot].valid ? static_cast<Node*>(const_cast<void*>(slots[slot].node)) : 0;
     }
 
@@ -57,11 +62,17 @@ public:
     }
 
     void SamplerChanged(unsigned slot, const TextureSamplerState& sampler) {
-        if (slots[slot].valid) slots[slot].sampler = sampler;
+        if (slots[slot].valid)
+            slots[slot].sampler = sampler;
     }
 
-    bool Known(unsigned slot) const { return slots[slot].valid; }
-    TextureSamplerState Sampler(unsigned slot) const { return slots[slot].sampler; }
+    bool Known(unsigned slot) const {
+        return slots[slot].valid;
+    }
+    TextureSamplerState Sampler(unsigned slot) const {
+        return slots[slot].sampler;
+    }
 };
 
-} }
+} // namespace Fast3D
+} // namespace Shipyard

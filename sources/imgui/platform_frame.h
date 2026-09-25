@@ -1,6 +1,7 @@
 #pragma once
 
-namespace Shipyard { namespace ImGuiPlatform {
+namespace Shipyard {
+namespace ImGuiPlatform {
 
 struct Services {
     double (*now)();
@@ -13,4 +14,5 @@ void Shutdown();
 void NewFrame(unsigned width, unsigned height, bool menuVisible);
 void DrawCursor();
 
-} }
+} // namespace ImGuiPlatform
+} // namespace Shipyard

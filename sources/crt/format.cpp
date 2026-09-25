@@ -18,47 +18,56 @@ int RewriteFormat(const char* format, char* output, bool* changed) {
     *changed = false;
     while (*format) {
         if (*format != '%') {
-            if (output) output[written] = *format;
+            if (output)
+                output[written] = *format;
             ++written;
             ++format;
             continue;
         }
-        if (output) output[written] = *format;
+        if (output)
+            output[written] = *format;
         ++written;
         ++format;
         if (*format == '%') {
-            if (output) output[written] = *format;
+            if (output)
+                output[written] = *format;
             ++written;
             ++format;
             continue;
         }
         while (*format && strchr("-+ #0", *format)) {
-            if (output) output[written] = *format;
+            if (output)
+                output[written] = *format;
             ++written;
             ++format;
         }
         if (*format == '*') {
-            if (output) output[written] = *format;
+            if (output)
+                output[written] = *format;
             ++written;
             ++format;
         } else {
             while (*format >= '0' && *format <= '9') {
-                if (output) output[written] = *format;
+                if (output)
+                    output[written] = *format;
                 ++written;
                 ++format;
             }
         }
         if (*format == '.') {
-            if (output) output[written] = *format;
+            if (output)
+                output[written] = *format;
             ++written;
             ++format;
             if (*format == '*') {
-                if (output) output[written] = *format;
+                if (output)
+                    output[written] = *format;
                 ++written;
                 ++format;
             } else {
                 while (*format >= '0' && *format <= '9') {
-                    if (output) output[written] = *format;
+                    if (output)
+                        output[written] = *format;
                     ++written;
                     ++format;
                 }
@@ -73,26 +82,30 @@ int RewriteFormat(const char* format, char* output, bool* changed) {
             *changed = true;
         }
         if (*format) {
-            if (output) output[written] = *format;
+            if (output)
+                output[written] = *format;
             ++written;
             ++format;
         }
     }
-    if (output) output[written] = '\0';
+    if (output)
+        output[written] = '\0';
     return 0;
 }
-}
+} // namespace
 
 extern "C" int __cdecl SHIPYARD_CRT_VSNPRINTF(char* destination, size_t capacity,
-                                                  const char* format, va_list arguments) {
+                                              const char* format, va_list arguments) {
     if (!format || (!destination && capacity)) {
         errno = EINVAL;
         return -1;
     }
-    if (capacity) destination[0] = '\0';
+    if (capacity)
+        destination[0] = '\0';
 
     bool changed = false;
-    if (strchr(format, 'z') && RewriteFormat(format, 0, &changed) != 0) return -1;
+    if (strchr(format, 'z') && RewriteFormat(format, 0, &changed) != 0)
+        return -1;
     char stackFormat[512];
     char* heapFormat = 0;
     const char* nativeFormat = format;
@@ -123,14 +136,17 @@ extern "C" int __cdecl SHIPYARD_CRT_VSNPRINTF(char* destination, size_t capacity
         rendered = _vsnprintf_s(destination, capacity, _TRUNCATE, nativeFormat, writing);
         va_end(writing);
     }
-    if (heapFormat) free(heapFormat);
-    if (required < 0) return required;
-    if (rendered < 0 && static_cast<size_t>(required) < capacity) return rendered;
+    if (heapFormat)
+        free(heapFormat);
+    if (required < 0)
+        return required;
+    if (rendered < 0 && static_cast<size_t>(required) < capacity)
+        return rendered;
     return required;
 }
 
-extern "C" int __cdecl SHIPYARD_CRT_SNPRINTF(char* destination, size_t capacity,
-                                                 const char* format, ...) {
+extern "C" int __cdecl SHIPYARD_CRT_SNPRINTF(char* destination, size_t capacity, const char* format,
+                                             ...) {
     va_list arguments;
     va_start(arguments, format);
     const int result = SHIPYARD_CRT_VSNPRINTF(destination, capacity, format, arguments);

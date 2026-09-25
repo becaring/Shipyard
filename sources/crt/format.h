@@ -14,12 +14,15 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
-int SHIPYARD_CRT_VSNPRINTF(char* destination, size_t capacity, const char* format, va_list arguments);
+int SHIPYARD_CRT_VSNPRINTF(char* destination, size_t capacity, const char* format,
+                           va_list arguments);
 int SHIPYARD_CRT_SNPRINTF(char* destination, size_t capacity, const char* format, ...);
 #ifdef __cplusplus
 }
 #if defined(_XBOX) && !defined(SHIPYARD_CRT_HOST_TEST)
-namespace std { using ::snprintf; }
+namespace std {
+using ::snprintf;
+}
 #endif
 #endif
 

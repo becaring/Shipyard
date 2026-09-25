@@ -120,14 +120,18 @@ __declspec(align(128)) static const float kS16HighFloat[256] = {
 
 // Two-byte reconstruction is exact for every 16-bit integer.
 inline float SignedShortFloat(int16_t value) {
-    const uint16_t bits=(uint16_t)value;
-    return kS16HighFloat[bits >> 8]+kU8Float[bits & 255];
+    const uint16_t bits = (uint16_t)value;
+    return kS16HighFloat[bits >> 8] + kU8Float[bits & 255];
 }
 inline float UnsignedShortFloat(uint16_t value) {
-    return kU8Float[value >> 8]*256.0f+kU8Float[value & 255];
+    return kU8Float[value >> 8] * 256.0f + kU8Float[value & 255];
 }
-inline float NormalByteFloat(int8_t value) { return kS8Float[(uint8_t)value]; }
-inline float LightByteFloat(uint8_t value) { return kU8Float[value]; }
+inline float NormalByteFloat(int8_t value) {
+    return kS8Float[(uint8_t)value];
+}
+inline float LightByteFloat(uint8_t value) {
+    return kU8Float[value];
+}
 
 // The caller proves a finite nonnegative channel below 2^23 and truncates
 // after each separate multiply and add. Out-of-bound input remains in its
@@ -142,24 +146,24 @@ __forceinline float TruncateLightChannel(float value) {
 
 // Keep division for other rounding modes and exceptional values. Only exact
 // signed-byte normals may use the narrower no-finite-check helper.
-__forceinline float DivideNormal127(float value,bool nearest) {
-    if(nearest && value<=FLT_MAX && value>=-FLT_MAX)
-        return (float)((double)value*(1.0/127.0));
-    return value/127.0f;
+__forceinline float DivideNormal127(float value, bool nearest) {
+    if (nearest && value <= FLT_MAX && value >= -FLT_MAX)
+        return (float)((double)value * (1.0 / 127.0));
+    return value / 127.0f;
 }
-__forceinline float DivideNormalByte127(float value,bool nearest) {
-    return nearest?(float)((double)value*(1.0/127.0)):value/127.0f;
+__forceinline float DivideNormalByte127(float value, bool nearest) {
+    return nearest ? (float)((double)value * (1.0 / 127.0)) : value / 127.0f;
 }
 
 // The consumer publishes low bytes only after completing the current vertex.
 // Bounded channels have the same word conversion on the scalar fallback.
 struct DeferredVertexBytes {
     uint32_t channels[4];
-    __forceinline void Store(unsigned channel,float value) {
+    __forceinline void Store(unsigned channel, float value) {
 #ifdef _XBOX
-        __stfiwx(__fctiwz((double)value),(int)(channel*sizeof(uint32_t)),channels);
+        __stfiwx(__fctiwz((double)value), (int)(channel * sizeof(uint32_t)), channels);
 #else
-        channels[channel]=(uint32_t)(int32_t)value;
+        channels[channel] = (uint32_t)(int32_t)value;
 #endif
     }
     __forceinline uint8_t Load(unsigned channel) const {
@@ -167,22 +171,24 @@ struct DeferredVertexBytes {
     }
 };
 
-inline double SelectNonnegative(double test,double positive,double negative) {
+inline double SelectNonnegative(double test, double positive, double negative) {
 #ifdef _XBOX
-    return __fsel(test,positive,negative);
+    return __fsel(test, positive, negative);
 #else
-    return test>=0.0?positive:negative;
+    return test >= 0.0 ? positive : negative;
 #endif
 }
 
 // Finite positions only, as certified by the consumer's transform adapter.
 // Preserve the exact division and select behavior.
 inline float VertexFogReciprocalFinite(float w) {
-    const float denominator=(float)SelectNonnegative((double)fabsf(w)-(double)0.001f,(double)w,(double)0.001f);
-    const float reciprocal=1.0f/denominator;
-    return (float)SelectNonnegative((double)reciprocal,(double)reciprocal,32767.0);
+    const float denominator =
+        (float)SelectNonnegative((double)fabsf(w) - (double)0.001f, (double)w, (double)0.001f);
+    const float reciprocal = 1.0f / denominator;
+    return (float)SelectNonnegative((double)reciprocal, (double)reciprocal, 32767.0);
 }
 inline float VertexColorLimit(float value) {
-    return (float)SelectNonnegative((double)value-255.0,255.0,(double)value);
+    return (float)SelectNonnegative((double)value - 255.0, 255.0, (double)value);
 }
-} }
+} // namespace Fast3D
+} // namespace Shipyard

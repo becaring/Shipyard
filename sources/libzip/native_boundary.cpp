@@ -13,27 +13,44 @@
 #endif
 extern "C" int _zip_win32_error_to_errno(DWORD error);
 
-extern "C" char *shipyard_zip_resolve_path(const char *name, zip_error_t *error) {
+extern "C" char* shipyard_zip_resolve_path(const char* name, zip_error_t* error) {
     // XDK file APIs take narrow device paths. Reject encoding we cannot promise
     // to round-trip; ZIP entry names retain libzip's full UTF-8 implementation.
-    const unsigned char *scan = reinterpret_cast<const unsigned char *>(name);
-    if (!name) { zip_error_set(error, ZIP_ER_INVAL, 0); return NULL; }
+    if (!name) {
+        zip_error_set(error, ZIP_ER_INVAL, 0);
+        return NULL;
+    }
+    const unsigned char* scan = reinterpret_cast<const unsigned char*>(name);
     for (; *scan; ++scan) {
-        if (*scan >= 0x80) { zip_error_set(error, ZIP_ER_INVAL, 0); return NULL; }
+        if (*scan >= 0x80) {
+            zip_error_set(error, ZIP_ER_INVAL, 0);
+            return NULL;
+        }
     }
     try {
         std::error_code ec;
         std::string path = xbox_compat::filesystem::absolute(name, ec).lexically_normal().string();
-        if (ec) { zip_error_set(error, ZIP_ER_OPEN, _zip_win32_error_to_errno(static_cast<DWORD>(ec.value()))); return NULL; }
+        if (ec) {
+            zip_error_set(error, ZIP_ER_OPEN,
+                          _zip_win32_error_to_errno(static_cast<DWORD>(ec.value())));
+            return NULL;
+        }
         std::replace(path.begin(), path.end(), '/', '\\');
-        char *copy = static_cast<char *>(malloc(path.size()+1));
-        if (!copy) { zip_error_set(error, ZIP_ER_MEMORY, 0); return NULL; }
-        memcpy(copy, path.c_str(), path.size()+1);
+        char* copy = static_cast<char*>(malloc(path.size() + 1));
+        if (!copy) {
+            zip_error_set(error, ZIP_ER_MEMORY, 0);
+            return NULL;
+        }
+        memcpy(copy, path.c_str(), path.size() + 1);
         return copy;
-    } catch (...) { zip_error_set(error, ZIP_ER_MEMORY, 0); return NULL; }
+    } catch (...) {
+        zip_error_set(error, ZIP_ER_MEMORY, 0);
+        return NULL;
+    }
 }
 
-extern "C" int shipyard_zip_secure_random(unsigned char *buffer, unsigned short length) {
-    if (!buffer && length) return 0;
+extern "C" int shipyard_zip_secure_random(unsigned char* buffer, unsigned short length) {
+    if (!buffer && length)
+        return 0;
     return Shipyard::Entropy::FillBytes(buffer, length);
 }

@@ -8,7 +8,8 @@
 #include <wincrypt.h>
 #endif
 
-namespace Shipyard { namespace Entropy {
+namespace Shipyard {
+namespace Entropy {
 
 // The caller owns XNet startup and cleanup. Failure is reported to the caller;
 // no fallback algorithm, seed or process-lifetime state is installed here.
@@ -18,12 +19,14 @@ inline bool FillBytes(unsigned char* buffer, unsigned int length) {
 #else
     HCRYPTPROV provider;
     if (!CryptAcquireContext(&provider, NULL, NULL, PROV_RSA_AES,
-                             CRYPT_VERIFYCONTEXT | CRYPT_SILENT)) return false;
+                             CRYPT_VERIFYCONTEXT | CRYPT_SILENT))
+        return false;
     const BOOL filled = CryptGenRandom(provider, length, buffer);
     const BOOL released = CryptReleaseContext(provider, 0);
     return filled && released;
 #endif
 }
 
-} }
+} // namespace Entropy
+} // namespace Shipyard
 #endif

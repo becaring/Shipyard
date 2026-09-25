@@ -8,19 +8,33 @@
 #include <system_error>
 #include <stdint.h>
 
-namespace xbox_compat { namespace filesystem {
+namespace xbox_compat {
+namespace filesystem {
 class path {
 public:
-    path() {}
-    path(const char* value) : text_(value ? value : "") {}
-    path(const std::string& value) : text_(value) {}
-    const std::string& string() const { return text_; }
+    path() {
+    }
+    path(const char* value) : text_(value ? value : "") {
+    }
+    path(const std::string& value) : text_(value) {
+    }
+    const std::string& string() const {
+        return text_;
+    }
     std::string generic_string() const;
     path& make_preferred();
-    const char* c_str() const { return text_.c_str(); }
-    operator std::string() const { return text_; }
-    bool empty() const { return text_.empty(); }
-    void clear() { text_.clear(); }
+    const char* c_str() const {
+        return text_.c_str();
+    }
+    operator std::string() const {
+        return text_;
+    }
+    bool empty() const {
+        return text_.empty();
+    }
+    void clear() {
+        text_.clear();
+    }
     path root_name() const;
     path root_directory() const;
     path root_path() const;
@@ -33,6 +47,7 @@ public:
     path lexically_normal() const;
     path& replace_extension(const path& extension = path());
     path& operator/=(const path& right);
+
 private:
     std::string text_;
 };
@@ -44,17 +59,29 @@ bool operator<(const path& left, const path& right);
 class filesystem_error : public std::system_error {
 public:
     filesystem_error(const char* operation, const path& first, const std::error_code& error);
-    filesystem_error(const char* operation, const path& first, const path& second, const std::error_code& error);
-    const filesystem::path& path1() const { return first_; }
-    const filesystem::path& path2() const { return second_; }
+    filesystem_error(const char* operation, const path& first, const path& second,
+                     const std::error_code& error);
+    const filesystem::path& path1() const {
+        return first_;
+    }
+    const filesystem::path& path2() const {
+        return second_;
+    }
+
 private:
     filesystem::path first_, second_;
 };
-namespace file_type { enum type { none = 0, not_found = -1, regular = 1, directory = 2 }; }
+namespace file_type {
+enum type { none = 0, not_found = -1, regular = 1, directory = 2 };
+}
 class file_status {
 public:
-    explicit file_status(file_type::type value = file_type::none) : value_(value) {}
-    file_type::type type() const { return value_; }
+    explicit file_status(file_type::type value = file_type::none) : value_(value) {
+    }
+    file_type::type type() const {
+        return value_;
+    }
+
 private:
     file_type::type value_;
 };
@@ -62,26 +89,43 @@ private:
 // Native FILETIME ticks; no chrono clock conversion.
 class file_time_type {
 public:
-    file_time_type() : ticks_(0) {}
-    explicit file_time_type(uint64_t ticks) : ticks_(ticks) {}
-    static file_time_type min() { return file_time_type(); }
-    uint64_t native_ticks() const { return ticks_; }
-    bool operator==(const file_time_type& other) const { return ticks_ == other.ticks_; }
-    bool operator!=(const file_time_type& other) const { return ticks_ != other.ticks_; }
-    bool operator<(const file_time_type& other) const { return ticks_ < other.ticks_; }
+    file_time_type() : ticks_(0) {
+    }
+    explicit file_time_type(uint64_t ticks) : ticks_(ticks) {
+    }
+    static file_time_type min() {
+        return file_time_type();
+    }
+    uint64_t native_ticks() const {
+        return ticks_;
+    }
+    bool operator==(const file_time_type& other) const {
+        return ticks_ == other.ticks_;
+    }
+    bool operator!=(const file_time_type& other) const {
+        return ticks_ != other.ticks_;
+    }
+    bool operator<(const file_time_type& other) const {
+        return ticks_ < other.ticks_;
+    }
+
 private:
     uint64_t ticks_;
 };
-namespace directory_options { enum type { none = 0, follow_directory_symlink = 1 }; }
+namespace directory_options {
+enum type { none = 0, follow_directory_symlink = 1 };
+}
 namespace platform_properties {
 #if defined(_XBOX)
-    // Xbox mounts are roots; the XDK filesystem has no directory reparse links.
-    const bool directory_symlinks = false;
+// Xbox mounts are roots; the XDK filesystem has no directory reparse links.
+const bool directory_symlinks = false;
 #else
-    const bool directory_symlinks = true;
+const bool directory_symlinks = true;
 #endif
-}
+} // namespace platform_properties
 
+// Xbox uses a synchronized logical cwd, set to an existing absolute device
+// path before relative operations. Windows uses the process cwd.
 void InitWorkingDirectory(const path& directory);
 bool InitWorkingDirectory(const path& directory, std::error_code& error);
 path current_path();
@@ -121,28 +165,49 @@ bool write_file(const path& output, const void* bytes, size_t size, std::error_c
 
 class directory_entry {
 public:
-    directory_entry() {}
-    explicit directory_entry(const filesystem::path& value) : path_(value) {}
-    const filesystem::path& path() const { return path_; }
-    operator const filesystem::path&() const { return path_; }
-    bool is_directory() const { return filesystem::is_directory(path_); }
-    bool is_directory(std::error_code& error) const { return filesystem::is_directory(path_, error); }
-    bool is_regular_file() const { return filesystem::is_regular_file(path_); }
-    bool is_regular_file(std::error_code& error) const { return filesystem::is_regular_file(path_, error); }
+    directory_entry() {
+    }
+    explicit directory_entry(const filesystem::path& value) : path_(value) {
+    }
+    const filesystem::path& path() const {
+        return path_;
+    }
+    operator const filesystem::path&() const {
+        return path_;
+    }
+    bool is_directory() const {
+        return filesystem::is_directory(path_);
+    }
+    bool is_directory(std::error_code& error) const {
+        return filesystem::is_directory(path_, error);
+    }
+    bool is_regular_file() const {
+        return filesystem::is_regular_file(path_);
+    }
+    bool is_regular_file(std::error_code& error) const {
+        return filesystem::is_regular_file(path_, error);
+    }
+
 private:
     filesystem::path path_;
 };
 class directory_iterator {
 public:
-    directory_iterator() {}
+    directory_iterator() {
+    }
     explicit directory_iterator(const path& root);
     directory_iterator(const path& root, std::error_code& error);
     const directory_entry& operator*() const;
-    const directory_entry* operator->() const { return &**this; }
+    const directory_entry* operator->() const {
+        return &**this;
+    }
     directory_iterator& operator++();
     directory_iterator& increment(std::error_code& error);
     bool operator==(const directory_iterator& other) const;
-    bool operator!=(const directory_iterator& other) const { return !(*this == other); }
+    bool operator!=(const directory_iterator& other) const {
+        return !(*this == other);
+    }
+
 private:
     struct state;
     std::shared_ptr<state> state_;
@@ -153,17 +218,24 @@ directory_iterator end(const directory_iterator& iterator);
 
 class recursive_directory_iterator {
 public:
-    recursive_directory_iterator() {}
+    recursive_directory_iterator() {
+    }
     explicit recursive_directory_iterator(const path& root);
     recursive_directory_iterator(const path& root, std::error_code& error);
     recursive_directory_iterator(const path& root, directory_options::type options);
-    recursive_directory_iterator(const path& root, directory_options::type options, std::error_code& error);
+    recursive_directory_iterator(const path& root, directory_options::type options,
+                                 std::error_code& error);
     const directory_entry& operator*() const;
-    const directory_entry* operator->() const { return &**this; }
+    const directory_entry* operator->() const {
+        return &**this;
+    }
     recursive_directory_iterator& operator++();
     recursive_directory_iterator& increment(std::error_code& error);
     bool operator==(const recursive_directory_iterator& other) const;
-    bool operator!=(const recursive_directory_iterator& other) const { return !(*this == other); }
+    bool operator!=(const recursive_directory_iterator& other) const {
+        return !(*this == other);
+    }
+
 private:
     struct state;
     std::shared_ptr<state> state_;
@@ -171,5 +243,6 @@ private:
 };
 recursive_directory_iterator begin(recursive_directory_iterator iterator);
 recursive_directory_iterator end(const recursive_directory_iterator& iterator);
-} }
+} // namespace filesystem
+} // namespace xbox_compat
 #endif
