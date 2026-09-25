@@ -46,6 +46,16 @@ class PrismProjectorTests(unittest.TestCase):
         self.assertIn('SPDLOG_DEBUG("value");', result)
         self.assertNotIn('#if defined(SPDLOG_ACTIVE_LEVEL)', result)
 
+    def test_required_source_anchors_reject_drift(self):
+        projector = PrismProjector(
+            EmptyParser(), 'bbcbc7e3f890a5806b579361e7aa0336acd547e7')
+        with self.assertRaisesRegex(ValueError, 'Expected exactly one Prism anchor'):
+            projector.lower('size_t pos = 1;\n: input(text)', 'lexer.h')
+        with self.assertRaisesRegex(ValueError, 'Unexpected iterator string returns'):
+            projector.lower('return { start, c };', 'processor.cpp')
+        with self.assertRaisesRegex(ValueError, 'processor macro anchors'):
+            projector.lower('#define CONTAINS', 'processor.h')
+
 
 if __name__ == '__main__':
     unittest.main()

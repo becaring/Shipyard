@@ -18,8 +18,11 @@
 #define JSON_HEDLEY_LIKELY(x) (x)
 #define JSON_HEDLEY_UNLIKELY(x) (x)
 namespace ShipyardJsonAlgorithm {
-inline bool finite(double value) { return _finite(value) != 0; }
+inline bool finite(double value) {
+    return _finite(value) != 0;
+}
 inline bool signbit(double value) {
+    // Read the sign bit for negative zero and NaNs without relying on the XDK CRT.
     unsigned long long bits;
     std::memcpy(&bits, &value, sizeof(bits));
     return (bits >> 63) != 0;
@@ -27,9 +30,14 @@ inline bool signbit(double value) {
 namespace detail {
 template <class T> struct char_traits : std::char_traits<T> {};
 struct position_t {
-    size_t chars_read_total, chars_read_current_line, lines_read;
-    position_t() : chars_read_total(0), chars_read_current_line(0), lines_read(0) {}
-    operator size_t() const { return chars_read_total; }
+    size_t chars_read_total;
+    size_t chars_read_current_line;
+    size_t lines_read;
+    position_t() : chars_read_total(0), chars_read_current_line(0), lines_read(0) {
+    }
+    operator size_t() const {
+        return chars_read_total;
+    }
 };
 struct ByteRanges {
     int data[6];
@@ -52,18 +60,29 @@ struct ByteRanges {
         data[4] = e;
         data[5] = f;
     }
-    size_t size() const { return count; }
-    const int *begin() const { return data; }
-    const int *end() const { return data + count; }
+    size_t size() const {
+        return count;
+    }
+    const int* begin() const {
+        return data;
+    }
+    const int* end() const {
+        return data + count;
+    }
 };
 struct StringInput {
     typedef char char_type;
-    const std::string *source;
+    // The lexer borrows one of these inputs for its entire lifetime.
+    const std::string* source;
     size_t position;
-    std::istream *stream;
-    std::streambuf *buffer;
-    explicit StringInput(const std::string &text) : source(&text), position(0), stream(0), buffer(0) {}
-    explicit StringInput(std::istream &input) : source(0), position(0), stream(&input), buffer(input.rdbuf()) {}
+    std::istream* stream;
+    std::streambuf* buffer;
+    explicit StringInput(const std::string& text)
+        : source(&text), position(0), stream(0), buffer(0) {
+    }
+    explicit StringInput(std::istream& input)
+        : source(0), position(0), stream(&input), buffer(input.rdbuf()) {
+    }
     int get_character() {
         // Pinned input_stream_adapter bypasses sentry, skipws and fail/bad bits.
         if (stream) {

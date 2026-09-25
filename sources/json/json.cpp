@@ -15,32 +15,39 @@ std::string index_string(size_t v) {
     return s.str();
 }
 } // namespace detail
-static std::string Prefix(const char *kind, int id) {
+static std::string Prefix(const char* kind, int id) {
     return std::string("[json.exception.") + kind + "." + detail::index_string(id) + "] ";
 }
-json::type_error::type_error(int i, const std::string &s) : exception(i, Prefix("type_error", i) + s) {}
-json::out_of_range::out_of_range(int i, const std::string &s) : exception(i, Prefix("out_of_range", i) + s) {}
-json::invalid_iterator::invalid_iterator(int i, const std::string &s)
-    : exception(i, Prefix("invalid_iterator", i) + s) {}
-json::parse_error::parse_error(int i, size_t b, const std::string &s)
-    : exception(i, Prefix("parse_error", i) + s), byte(b) {}
-json::json(const json &o)
+json::type_error::type_error(int i, const std::string& s)
+    : exception(i, Prefix("type_error", i) + s) {
+}
+json::out_of_range::out_of_range(int i, const std::string& s)
+    : exception(i, Prefix("out_of_range", i) + s) {
+}
+json::invalid_iterator::invalid_iterator(int i, const std::string& s)
+    : exception(i, Prefix("invalid_iterator", i) + s) {
+}
+json::parse_error::parse_error(int i, size_t b, const std::string& s)
+    : exception(i, Prefix("parse_error", i) + s), byte(b) {
+}
+json::json(const json& o)
     : type_(o.type_), object_(o.object_.get() ? new ObjectStorage(*o.object_) : 0),
       array_(o.array_.get() ? new ArrayStorage(*o.array_) : 0), text_(o.text_), signed_(o.signed_),
-      unsigned_(o.unsigned_), real_(o.real_) {}
-json::json(json &&o)
-    : type_(o.type_), object_(std::move(o.object_)), array_(std::move(o.array_)), text_(std::move(o.text_)),
-      signed_(o.signed_), unsigned_(o.unsigned_), real_(o.real_) {
+      unsigned_(o.unsigned_), real_(o.real_) {
+}
+json::json(json&& o)
+    : type_(o.type_), object_(std::move(o.object_)), array_(std::move(o.array_)),
+      text_(std::move(o.text_)), signed_(o.signed_), unsigned_(o.unsigned_), real_(o.real_) {
     o.type_ = detail::value_t::null;
 }
-json &json::operator=(const json &o) {
+json& json::operator=(const json& o) {
     if (this != &o) {
         json copy(o);
         swap(copy);
     }
     return *this;
 }
-json &json::operator=(json &&o) {
+json& json::operator=(json&& o) {
     if (this != &o) {
         json copy(std::move(o));
         swap(copy);
@@ -71,14 +78,15 @@ json::~json() {
                     stack.push_back(std::move((*current.array_)[i]));
                 current.array_->clear();
             } else if (current.is_object()) {
-                for (object_t::iterator i = current.object_->begin(); i != current.object_->end(); ++i)
+                for (object_t::iterator i = current.object_->begin(); i != current.object_->end();
+                     ++i)
                     stack.push_back(std::move(i->second));
                 current.object_->clear();
             }
         }
     }
 }
-void json::swap(json &o) {
+void json::swap(json& o) {
     std::swap(type_, o.type_);
     object_.swap(o.object_);
     array_.swap(o.array_);
@@ -99,50 +107,58 @@ json json::array() {
     j.type_ = detail::value_t::array;
     return j;
 }
-const char *json::type_name() const {
-    static const char *names[] = {"null",   "object", "array",  "string", "boolean",
+const char* json::type_name() const {
+    static const char* names[] = {"null",   "object", "array",  "string", "boolean",
                                   "number", "number", "number", "binary", "discarded"};
     return names[type_];
 }
-bool json::contains(const std::string &k) const { return is_object() && object_->find(k) != object_->end(); }
-size_t json::size() const {
-    return is_object() ? object_->size() : is_array() ? array_->size() : is_null() ? 0 : 1;
+bool json::contains(const std::string& k) const {
+    return is_object() && object_->find(k) != object_->end();
 }
-json &json::operator[](const std::string &k) {
+size_t json::size() const {
+    if (is_object())
+        return object_->size();
+    if (is_array())
+        return array_->size();
+    return is_null() ? 0 : 1;
+}
+json& json::operator[](const std::string& k) {
     if (is_null())
         *this = object();
     if (!is_object())
-        throw type_error(305,
-                         std::string("cannot use operator[] with a string argument with ") + type_name());
+        throw type_error(305, std::string("cannot use operator[] with a string argument with ") +
+                                  type_name());
     return (*object_)[k];
 }
-const json &json::operator[](const std::string &k) const {
+const json& json::operator[](const std::string& k) const {
     if (!is_object())
-        throw type_error(305,
-                         std::string("cannot use operator[] with a string argument with ") + type_name());
+        throw type_error(305, std::string("cannot use operator[] with a string argument with ") +
+                                  type_name());
     object_t::const_iterator i = object_->find(k);
     assert(i != object_->end());
     return i->second;
 }
-json &json::operator[](size_t n) {
+json& json::operator[](size_t n) {
     if (is_null())
         *this = array();
     if (!is_array())
-        throw type_error(305,
-                         std::string("cannot use operator[] with a numeric argument with ") + type_name());
+        throw type_error(305, std::string("cannot use operator[] with a numeric argument with ") +
+                                  type_name());
     if (n >= array_->size())
         array_->resize(n + 1);
     return (*array_)[n];
 }
-const json &json::operator[](size_t n) const {
+const json& json::operator[](size_t n) const {
     if (!is_array())
-        throw type_error(305,
-                         std::string("cannot use operator[] with a numeric argument with ") + type_name());
+        throw type_error(305, std::string("cannot use operator[] with a numeric argument with ") +
+                                  type_name());
     assert(n < array_->size());
     return (*array_)[n];
 }
-json &json::at(const std::string &k) { return const_cast<json &>(static_cast<const json *>(this)->at(k)); }
-const json &json::at(const std::string &k) const {
+json& json::at(const std::string& k) {
+    return const_cast<json&>(static_cast<const json*>(this)->at(k));
+}
+const json& json::at(const std::string& k) const {
     if (!is_object())
         throw type_error(304, std::string("cannot use at() with ") + type_name());
     object_t::const_iterator i = object_->find(k);
@@ -150,8 +166,10 @@ const json &json::at(const std::string &k) const {
         throw out_of_range(403, "key '" + k + "' not found");
     return i->second;
 }
-json &json::at(size_t n) { return const_cast<json &>(static_cast<const json *>(this)->at(n)); }
-const json &json::at(size_t n) const {
+json& json::at(size_t n) {
+    return const_cast<json&>(static_cast<const json*>(this)->at(n));
+}
+const json& json::at(size_t n) const {
     if (!is_array())
         throw type_error(304, std::string("cannot use at() with ") + type_name());
     if (n >= size())
@@ -171,12 +189,12 @@ void json::clear() {
         real_ = 0;
     }
 }
-size_t json::erase(const std::string &k) {
+size_t json::erase(const std::string& k) {
     if (!is_object())
         throw type_error(307, std::string("cannot use erase() with ") + type_name());
     return object_->erase(k);
 }
-std::pair<json::iterator, bool> json::emplace(const std::string &k, const json &v) {
+std::pair<json::iterator, bool> json::emplace(const std::string& k, const json& v) {
     if (is_null())
         *this = object();
     if (!is_object())
@@ -187,14 +205,14 @@ std::pair<json::iterator, bool> json::emplace(const std::string &k, const json &
     i.object_ = result.first;
     return std::make_pair(i, result.second);
 }
-void json::push_back(const json &v) {
+void json::push_back(const json& v) {
     if (is_null())
         *this = array();
     if (!is_array())
         throw type_error(308, std::string("cannot use push_back() with ") + type_name());
     array_->push_back(v);
 }
-void json::push_back(json &&v) {
+void json::push_back(json&& v) {
     if (is_null())
         *this = array();
     if (!is_array())
@@ -231,45 +249,59 @@ json::const_iterator json::end() const {
         i.object_ = object_->end();
     return i;
 }
-// Reached modern SoH lookup and erase contracts follow pinned json.hpp.
-void json::update(const json &other, bool merge_objects) {
-    if (is_null()) *this=object();
-    if (!is_object()) throw type_error(312, std::string("cannot use update() with ")+type_name());
-    if (!other.is_object()) throw type_error(312, std::string("cannot use update() with ")+other.type_name());
-    for (const_iterator it=other.begin();it!=other.end();++it) {
+void json::update(const json& other, bool merge_objects) {
+    if (is_null())
+        *this = object();
+    if (!is_object())
+        throw type_error(312, std::string("cannot use update() with ") + type_name());
+    if (!other.is_object())
+        throw type_error(312, std::string("cannot use update() with ") + other.type_name());
+    for (const_iterator it = other.begin(); it != other.end(); ++it) {
         if (merge_objects && it.value().is_object()) {
-            object_t::iterator found=object_->find(it.key());
-            if (found!=object_->end()) { found->second.update(it.value(),true); continue; }
+            object_t::iterator found = object_->find(it.key());
+            if (found != object_->end()) {
+                found->second.update(it.value(), true);
+                continue;
+            }
         }
-        (*object_)[it.key()]=it.value();
+        (*object_)[it.key()] = it.value();
     }
 }
-json::iterator json::find(const std::string &key) {
-    iterator result=end();
-    if (is_object()) result.object_=object_->find(key);
+json::iterator json::find(const std::string& key) {
+    iterator result = end();
+    if (is_object())
+        result.object_ = object_->find(key);
     return result;
 }
-json::const_iterator json::find(const std::string &key) const {
-    const_iterator result=end();
-    if (is_object()) result.object_=object_->find(key);
+json::const_iterator json::find(const std::string& key) const {
+    const_iterator result = end();
+    if (is_object())
+        result.object_ = object_->find(key);
     return result;
 }
 json::iterator json::erase(iterator pos) {
-    if (pos.owner_ != this) throw invalid_iterator(202, "iterator does not fit current value");
-    iterator result=end();
+    if (pos.owner_ != this)
+        throw invalid_iterator(202, "iterator does not fit current value");
+    iterator result = end();
     if (is_object()) {
-        result=pos; ++result; object_->erase(pos.object_);
+        result = pos;
+        ++result;
+        object_->erase(pos.object_);
     } else if (is_array()) {
-        array_->erase(array_->begin()+pos.index_); result.index_=pos.index_;
+        array_->erase(array_->begin() + pos.index_);
+        result.index_ = pos.index_;
     } else if (is_null() || is_discarded()) {
-        throw type_error(307, std::string("cannot use erase() with ")+type_name());
+        throw type_error(307, std::string("cannot use erase() with ") + type_name());
     } else {
-        if (pos.index_ != 0) throw invalid_iterator(205, "iterator out of range");
-        *this=json();
+        if (pos.index_ != 0)
+            throw invalid_iterator(205, "iterator out of range");
+        *this = json();
     }
     return result;
 }
-detail::iteration_proxy<json::iterator> json::items() { return detail::iteration_proxy<iterator>(*this); }
+detail::iteration_proxy<json::iterator> json::items() {
+    return detail::iteration_proxy<iterator>(*this);
+}
 detail::iteration_proxy<json::const_iterator> json::items() const {
     return detail::iteration_proxy<const_iterator>(*this);
 }
@@ -277,20 +309,33 @@ detail::iteration_proxy<json::const_iterator> json::items() const {
 // Iterative DOM parser driven by the actual 3.12.0 scanner. Error construction
 // follows parser.hpp::exception_message and exceptions.hpp::parse_error.
 class Parser {
-    typedef ShipyardJsonAlgorithm::detail::lexer<json, ShipyardJsonAlgorithm::detail::StringInput> Lexer;
+    typedef ShipyardJsonAlgorithm::detail::lexer<json, ShipyardJsonAlgorithm::detail::StringInput>
+        Lexer;
     typedef Lexer::token_scope Tok;
     typedef Lexer::token_type Token;
     Lexer lexer;
     Token token;
     bool strict_scanned;
     struct Frame {
-        json *value;
-        int state;
+        enum Stage {
+            First = 0,
+            AfterObjectKey = 1,
+            BeforeObjectValue = 2,
+            AfterValue = 3,
+            AfterComma = 4
+        };
+        json* value;
+        Stage state;
         std::string key;
-        Frame(json *v) : value(v), state(0) {}
+        Frame(json* v) : value(v), state(First) {
+        }
     };
-    void next(bool final_scan = false) { if (final_scan) strict_scanned = true; token = lexer.scan(); }
-    void fail(Token expected, const std::string &context, const std::string &overrideText = "") {
+    void next(bool final_scan = false) {
+        if (final_scan)
+            strict_scanned = true;
+        token = lexer.scan();
+    }
+    void fail(Token expected, const std::string& context, const std::string& overrideText = "") {
         ShipyardJsonAlgorithm::detail::position_t p = lexer.get_position();
         std::string message = overrideText;
         if (message.empty()) {
@@ -305,10 +350,10 @@ class Parser {
         }
         throw json::parse_error(101, p.chars_read_total,
                                 "parse error at line " + detail::index_string(p.lines_read + 1) +
-                                    ", column " + detail::index_string(p.chars_read_current_line) + ": " +
-                                    message);
+                                    ", column " + detail::index_string(p.chars_read_current_line) +
+                                    ": " + message);
     }
-    bool value(json &target) {
+    bool value(json& target) {
         switch (token) {
         case Tok::begin_object:
             target = json::object();
@@ -336,7 +381,8 @@ class Parser {
             break;
         case Tok::value_float:
             if (!ShipyardJsonAlgorithm::finite(lexer.get_number_float()))
-                throw json::out_of_range(406, "number overflow parsing '" + lexer.get_token_string() + "'");
+                throw json::out_of_range(406, "number overflow parsing '" +
+                                                  lexer.get_token_string() + "'");
             target = lexer.get_number_float();
             break;
         case Tok::parse_error:
@@ -345,7 +391,8 @@ class Parser {
         case Tok::end_of_input:
             if (lexer.get_position().chars_read_total == 1)
                 fail(Tok::uninitialized, "value",
-                     "attempting to parse an empty input; check that your input string or stream contains "
+                     "attempting to parse an empty input; check that your input string or stream "
+                     "contains "
                      "the expected JSON");
         default:
             fail(Tok::literal_or_value, "value");
@@ -353,82 +400,96 @@ class Parser {
         return false;
     }
 
-  public:
-    Parser(const std::string &text, bool comments)
-        : lexer(ShipyardJsonAlgorithm::detail::StringInput(text), comments), token(Tok::uninitialized), strict_scanned(false) {}
-    Parser(std::istream &stream, bool comments)
-        : lexer(ShipyardJsonAlgorithm::detail::StringInput(stream), comments), token(Tok::uninitialized), strict_scanned(false) {}
-    void consume_strict_after_error() { if (!strict_scanned) next(); }
-    void parse(json &root, bool strict) {
+public:
+    Parser(const std::string& text, bool comments)
+        : lexer(ShipyardJsonAlgorithm::detail::StringInput(text), comments),
+          token(Tok::uninitialized), strict_scanned(false) {
+    }
+    Parser(std::istream& stream, bool comments)
+        : lexer(ShipyardJsonAlgorithm::detail::StringInput(stream), comments),
+          token(Tok::uninitialized), strict_scanned(false) {
+    }
+    void consume_strict_after_error() {
+        if (!strict_scanned)
+            next();
+    }
+    void parse(json& root, bool strict) {
         next();
         std::vector<Frame> stack;
         if (value(root))
             stack.push_back(Frame(&root));
-        if (!stack.empty() || strict) next(stack.empty());
+        if (!stack.empty() || strict)
+            next(stack.empty());
         while (!stack.empty()) {
-            Frame &f = stack.back();
-            json *target = 0;
+            Frame& f = stack.back();
+            json* target = 0;
             if (f.value->is_object()) {
-                if (f.state == 0 || f.state == 4) {
-                    if (f.state == 0 && token == Tok::end_object) {
+                if (f.state == Frame::First || f.state == Frame::AfterComma) {
+                    if (f.state == Frame::First && token == Tok::end_object) {
                         stack.pop_back();
-                        if (!stack.empty() || strict) next(stack.empty());
+                        if (!stack.empty() || strict)
+                            next(stack.empty());
                         continue;
                     }
                     if (token != Tok::value_string)
                         fail(Tok::value_string, "object key");
                     f.key = lexer.get_string();
                     (*f.value)[f.key]; // SAX key event inserts null before checking the colon.
-                    f.state = 1;
+                    f.state = Frame::AfterObjectKey;
                     next();
                     continue;
                 }
-                if (f.state == 1) {
+                if (f.state == Frame::AfterObjectKey) {
                     if (token != Tok::name_separator)
                         fail(Tok::name_separator, "object separator");
-                    f.state = 2;
+                    f.state = Frame::BeforeObjectValue;
                     next();
                     continue;
                 }
-                if (f.state == 2) {
+                if (f.state == Frame::BeforeObjectValue) {
                     target = &(*f.value)[f.key];
-                    f.state = 3;
-                } else if (f.state == 3) {
+                    f.state = Frame::AfterValue;
+                } else if (f.state == Frame::AfterValue) {
                     if (token == Tok::end_object) {
                         stack.pop_back();
-                        if (!stack.empty() || strict) next(stack.empty());
+                        if (!stack.empty() || strict)
+                            next(stack.empty());
                         continue;
                     }
                     if (token != Tok::value_separator)
                         fail(Tok::end_object, "object");
-                    f.state = 4;
+                    f.state = Frame::AfterComma;
                     next();
                     continue;
                 }
             } else {
-                if (f.state == 0 || f.state == 4) {
-                    if (f.state == 0 && token == Tok::end_array) {
+                if (f.state == Frame::First || f.state == Frame::AfterComma) {
+                    if (f.state == Frame::First && token == Tok::end_array) {
                         stack.pop_back();
-                        if (!stack.empty() || strict) next(stack.empty());
+                        if (!stack.empty() || strict)
+                            next(stack.empty());
                         continue;
                     }
                     json element;
-                    const bool structured = value(element); // Invalid tokens do not append an array element.
+                    // Invalid tokens throw before an array element is appended.
+                    const bool structured = value(element);
                     f.value->push_back(element);
                     target = &(*f.value)[f.value->size() - 1];
-                    f.state = 3;
-                    if (structured) stack.push_back(Frame(target));
+                    f.state = Frame::AfterValue;
+                    if (structured)
+                        stack.push_back(Frame(target));
                     next();
                     continue;
                 } else {
                     if (token == Tok::end_array) {
                         stack.pop_back();
-                        if (!stack.empty() || strict) next(stack.empty());
+                        if (!stack.empty() || strict)
+                            next(stack.empty());
                         continue;
                     }
                     if (token != Tok::value_separator)
                         fail(Tok::end_array, "array");
-                    f.state = 4;
+                    f.state = Frame::AfterComma;
                     next();
                     continue;
                 }
@@ -441,12 +502,12 @@ class Parser {
             fail(Tok::end_of_input, "value");
     }
 };
-json json::parse(const std::string &text, std::nullptr_t, bool allow, bool comments) {
+json json::parse(const std::string& text, std::nullptr_t, bool allow, bool comments) {
     try {
         json result;
         Parser(text, comments).parse(result, true);
         return result;
-    } catch (const exception &) {
+    } catch (const exception&) {
         if (allow)
             throw;
         json result;
@@ -457,19 +518,24 @@ json json::parse(const std::string &text, std::nullptr_t, bool allow, bool comme
 // Same lifetime cleanup as pinned input_stream_adapter; only eofbit survives.
 // With eofbit exceptions enabled, upstream may terminate from this destructor too.
 class StreamInputScope {
-    std::istream &stream;
-  public:
-    explicit StreamInputScope(std::istream &s) : stream(s) {}
-    ~StreamInputScope() { stream.clear(stream.rdstate() & std::ios::eofbit); }
+    std::istream& stream;
+
+public:
+    explicit StreamInputScope(std::istream& s) : stream(s) {
+    }
+    ~StreamInputScope() {
+        stream.clear(stream.rdstate() & std::ios::eofbit);
+    }
 };
-json json::parse(std::istream &stream, std::nullptr_t, bool allow, bool comments) {
+json json::parse(std::istream& stream, std::nullptr_t, bool allow, bool comments) {
     StreamInputScope scope(stream);
     json result;
     Parser parser(stream, comments);
     try {
         parser.parse(result, true);
-    } catch (const exception &) {
-        if (allow) throw;
+    } catch (const exception&) {
+        if (allow)
+            throw;
         // Upstream performs its strict trailing-token scan even after a suppressed SAX error.
         parser.consume_strict_after_error();
         result = json();
@@ -477,13 +543,13 @@ json json::parse(std::istream &stream, std::nullptr_t, bool allow, bool comments
     }
     return result;
 }
-std::istream &operator>>(std::istream &stream, json &result) {
+std::istream& operator>>(std::istream& stream, json& result) {
     StreamInputScope scope(stream);
     Parser(stream, false).parse(result, false);
     return stream;
 }
 
-static std::string EscapePointer(const std::string &text) {
+static std::string EscapePointer(const std::string& text) {
     std::string out;
     for (size_t i = 0; i < text.size(); ++i) {
         if (text[i] == '~')
@@ -495,12 +561,14 @@ static std::string EscapePointer(const std::string &text) {
     }
     return out;
 }
-json::json_pointer::json_pointer(const std::string &s) {
+json::json_pointer::json_pointer(const std::string& s) {
     if (s.empty())
         return;
     if (s[0] != '/')
         throw parse_error(
-            107, 1, "parse error at byte 1: JSON pointer must be empty or begin with '/' - was: '" + s + "'");
+            107, 1,
+            "parse error at byte 1: JSON pointer must be empty or begin with '/' - was: '" + s +
+                "'");
     size_t start = 1;
     while (true) {
         size_t slash = s.find('/', start);
@@ -510,8 +578,9 @@ json::json_pointer::json_pointer(const std::string &s) {
                 decoded += raw[i];
             else {
                 if (i + 1 == raw.size() || (raw[i + 1] != '0' && raw[i + 1] != '1'))
-                    throw parse_error(108, 0,
-                                      "parse error: escape character '~' must be followed with '0' or '1'");
+                    throw parse_error(
+                        108, 0,
+                        "parse error: escape character '~' must be followed with '0' or '1'");
                 decoded += raw[++i] == '0' ? '~' : '/';
             }
         }
@@ -527,12 +596,13 @@ std::string json::json_pointer::to_string() const {
         result += "/" + EscapePointer(tokens[i]);
     return result;
 }
-static size_t ArrayIndex(const std::string &s) {
+static size_t ArrayIndex(const std::string& s) {
     if (s.size() > 1 && s[0] == '0')
-        throw json::parse_error(106, 0, "parse error: array index '" + s + "' must not begin with '0'");
+        throw json::parse_error(106, 0,
+                                "parse error: array index '" + s + "' must not begin with '0'");
     if (s.size() > 1 && !(s[0] >= '1' && s[0] <= '9'))
         throw json::parse_error(109, 0, "parse error: array index '" + s + "' is not a number");
-    char *end = 0;
+    char* end = 0;
     errno = 0;
     unsigned long long result = _strtoui64(s.c_str(), &end, 10);
     if (s.empty() || end != s.c_str() + s.size() || errno == ERANGE)
@@ -541,10 +611,10 @@ static size_t ArrayIndex(const std::string &s) {
         throw json::out_of_range(410, "array index " + s + " exceeds size_type");
     return static_cast<size_t>(result);
 }
-json &json::pointer_get(const json_pointer &p, bool checked, bool unflatten) {
-    json *j = this;
+json& json::pointer_get(const json_pointer& p, bool checked, bool unflatten) {
+    json* j = this;
     for (size_t i = 0; i < p.tokens.size(); ++i) {
-        const std::string &token = p.tokens[i];
+        const std::string& token = p.tokens[i];
         if (j->is_null() && !checked) {
             bool numeric = !token.empty();
             for (size_t n = 0; n < token.size(); ++n)
@@ -571,15 +641,19 @@ json &json::pointer_get(const json_pointer &p, bool checked, bool unflatten) {
     }
     return *j;
 }
-json &json::operator[](const json_pointer &p) { return pointer_get(p, false, false); }
-const json &json::operator[](const json_pointer &p) const {
-    return const_cast<json *>(this)->pointer_get(p, true, false);
+json& json::operator[](const json_pointer& p) {
+    return pointer_get(p, false, false);
 }
-json &json::at(const json_pointer &p) { return pointer_get(p, true, false); }
-const json &json::at(const json_pointer &p) const {
-    return const_cast<json *>(this)->pointer_get(p, true, false);
+const json& json::operator[](const json_pointer& p) const {
+    return const_cast<json*>(this)->pointer_get(p, true, false);
 }
-void json::flatten_into(const std::string &path, json &out) const {
+json& json::at(const json_pointer& p) {
+    return pointer_get(p, true, false);
+}
+const json& json::at(const json_pointer& p) const {
+    return const_cast<json*>(this)->pointer_get(p, true, false);
+}
+void json::flatten_into(const std::string& path, json& out) const {
     if (is_object() && !empty()) {
         for (object_t::const_iterator i = object_->begin(); i != object_->end(); ++i)
             i->second.flatten_into(path + "/" + EscapePointer(i->first), out);
@@ -606,8 +680,8 @@ json json::unflatten() const {
     return out;
 }
 
-static void Hex4(std::string &out, unsigned cp) {
-    const char *h = "0123456789abcdef";
+static void Hex4(std::string& out, unsigned cp) {
+    const char* h = "0123456789abcdef";
     out += "\\u";
     out += h[(cp >> 12) & 15];
     out += h[(cp >> 8) & 15];
@@ -615,13 +689,13 @@ static void Hex4(std::string &out, unsigned cp) {
     out += h[cp & 15];
 }
 static std::string HexByte(unsigned byte) {
-    const char *h = "0123456789ABCDEF";
+    const char* h = "0123456789ABCDEF";
     std::string r;
     r += h[(byte >> 4) & 15];
     r += h[byte & 15];
     return r;
 }
-static void Quote(std::string &out, const std::string &text, bool ascii) {
+static void Quote(std::string& out, const std::string& text, bool ascii) {
     out += '"';
     for (size_t i = 0; i < text.size(); ++i) {
         unsigned char c = static_cast<unsigned char>(text[i]);
@@ -664,8 +738,8 @@ static void Quote(std::string &out, const std::string &text, bool ascii) {
                          : c >= 0xF0 && c <= 0xF4 ? 3
                                                   : 0;
         if (!count)
-            throw json::type_error(316, "invalid UTF-8 byte at index " + detail::index_string(i) + ": 0x" +
-                                            HexByte(c));
+            throw json::type_error(316, "invalid UTF-8 byte at index " + detail::index_string(i) +
+                                            ": 0x" + HexByte(c));
         unsigned cp = c & (0x7F >> count);
         for (unsigned k = 0; k < count; ++k) {
             if (++i == text.size())
@@ -684,8 +758,8 @@ static void Quote(std::string &out, const std::string &text, bool ascii) {
                     valid = valid && next <= 0x8F;
             }
             if (!valid)
-                throw json::type_error(316, "invalid UTF-8 byte at index " + detail::index_string(i) +
-                                                ": 0x" + HexByte(next));
+                throw json::type_error(316, "invalid UTF-8 byte at index " +
+                                                detail::index_string(i) + ": 0x" + HexByte(next));
             cp = (cp << 6) | (next & 63);
         }
         if (ascii) {
@@ -701,7 +775,8 @@ static void Quote(std::string &out, const std::string &text, bool ascii) {
     }
     out += '"';
 }
-void json::append(std::string &out, int indent, char indent_char, bool ascii, unsigned depth) const {
+void json::append(std::string& out, int indent, char indent_char, bool ascii,
+                  unsigned depth) const {
     char number[64];
     switch (type_) {
     case detail::value_t::null:
@@ -723,7 +798,7 @@ void json::append(std::string &out, int indent, char indent_char, bool ascii, un
         if (!ShipyardJsonAlgorithm::finite(real_))
             out += "null";
         else {
-            char *end = ShipyardJsonAlgorithm::detail::to_chars(number, number + 64, real_);
+            char* end = ShipyardJsonAlgorithm::detail::to_chars(number, number + 64, real_);
             out.append(number, end);
         }
         break;
@@ -769,7 +844,7 @@ std::string json::dump(int indent, char indent_char, bool ascii) const {
     return result;
 }
 #include "json/generated/stream_writer.hpp"
-std::ostream &operator<<(std::ostream &stream, const json &value) {
+std::ostream& operator<<(std::ostream& stream, const json& value) {
     const bool pretty = stream.width() > 0;
     const std::streamsize indentation = pretty ? stream.width() : 0;
     stream.width(0);
@@ -777,7 +852,7 @@ std::ostream &operator<<(std::ostream &stream, const json &value) {
     writer.dump(value, pretty, false, static_cast<unsigned int>(indentation));
     return stream;
 }
-bool json::operator==(const json &r) const {
+bool json::operator==(const json& r) const {
     if (type_ == r.type_) {
         switch (type_) {
         case detail::value_t::null:
@@ -802,15 +877,18 @@ bool json::operator==(const json &r) const {
     if (is_number_integer() && r.is_number_integer())
         return is_number_unsigned() ? unsigned_ == static_cast<unsigned long long>(r.signed_)
                                     : static_cast<unsigned long long>(signed_) == r.unsigned_;
-    if ((is_number_float() || is_number_integer()) && (r.is_number_float() || r.is_number_integer()))
+    if ((is_number_float() || is_number_integer()) &&
+        (r.is_number_float() || r.is_number_integer()))
         return get<double>() == r.get<double>();
     return false;
 }
 bool json::operator!=(const json& r) const {
     // Pinned 3.12.0 treats discarded and NaN/number comparisons as unordered.
-    if (is_discarded() || r.is_discarded()) return false;
+    if (is_discarded() || r.is_discarded())
+        return false;
     if ((is_number_float() && _isnan(real_) && (r.is_number_integer() || r.is_number_float())) ||
-        (r.is_number_float() && _isnan(r.real_) && (is_number_integer() || is_number_float()))) return false;
+        (r.is_number_float() && _isnan(r.real_) && (is_number_integer() || is_number_float())))
+        return false;
     return !(*this == r);
 }
 } // namespace nlohmann
