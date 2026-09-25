@@ -1,5 +1,9 @@
 # Shipyard
 
+The intended repository identity is `becaring/shipyard`. This working tree and
+its source remain private until a coordinated release with 3Shipsty/OoT is
+explicitly authorized.
+
 Shipyard is the shared Xbox 360 platform checkout for LibUltraShip/Fast3D
 consumers. Consumers compile its reusable C++ implementations directly and
 provide narrow interfaces for game/version-specific behavior. Fast3D formulas,
