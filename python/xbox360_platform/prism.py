@@ -137,13 +137,22 @@ def braces(text, parser):
     return _apply_edits(data, set(edits)).decode()
 
 
-def enum_wrappers(text):
+def enum_wrappers(text, *, default_constructible=False, integer_construction=False,
+                  preserve_underlying=False):
     def lower(match):
-        name, body = match[1], match[2]
+        name, storage, body = match[1], match[2], match[3]
+        if storage and not preserve_underlying:
+            return match[0]
+        storage = storage or 'Value'
+        default = (name + '() : value() {} ' if default_constructible else '')
+        integer = ( 'explicit ' + name + '(int v) : value(static_cast<' +
+                    storage + '>(v)) {} ' if integer_construction else '')
+        conversion = 'value' if storage == 'Value' else 'static_cast<Value>(value)'
         return ('struct ' + name + ' { enum Value {' + body +
-                '}; Value value; ' + name +
-                '(Value v) : value(v) {} operator Value() const { return value; } };')
-    return re.sub(r'enum class (\w+)\s*\{([^}]+)\};', lower, text)
+                '}; ' + storage + ' value; ' + default + integer + name +
+                '(Value v) : value(v) {} operator Value() const { return ' +
+                conversion + '; } };')
+    return re.sub(r'enum class (\w+)\s*(?::\s*(\w+)\s*)?\{([^}]+)\};', lower, text)
 
 
 def _lower_common_syntax(text):

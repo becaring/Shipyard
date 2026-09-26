@@ -7,7 +7,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'python'))
 
-from xbox360_platform.prism import PrismProjector
+from xbox360_platform.prism import PrismProjector, enum_wrappers
 
 
 class EmptyParser:
@@ -17,6 +17,24 @@ class EmptyParser:
 
 
 class PrismProjectorTests(unittest.TestCase):
+    def test_enum_construction_extensions_are_opt_in(self):
+        source = 'enum class Kind { First = 1, Last = 255 };'
+        legacy = enum_wrappers(source)
+        self.assertNotIn('Kind()', legacy)
+        self.assertNotIn('Kind(int', legacy)
+        result = enum_wrappers(source, default_constructible=True, integer_construction=True)
+        self.assertIn('Kind() : value()', result)
+        self.assertIn('Kind(int v) : value(static_cast<Value>(v))', result)
+
+    def test_enum_underlying_storage_is_preserved(self):
+        source = 'enum class Opcode : uint8_t { First = 0, Error = 255 };'
+        self.assertEqual(enum_wrappers(source), source)
+        result = enum_wrappers(source, default_constructible=True,
+                               integer_construction=True, preserve_underlying=True)
+        self.assertIn('uint8_t value;', result)
+        self.assertIn('static_cast<uint8_t>(v)', result)
+        self.assertIn('return static_cast<Value>(value)', result)
+
     def test_rejects_unreviewed_version(self):
         with self.assertRaisesRegex(ValueError, 'Unsupported Prism revision'):
             PrismProjector(EmptyParser(), 'unknown')
