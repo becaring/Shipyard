@@ -60,6 +60,8 @@ void SetNativeConstants(const float* values) { std::memcpy(constants,values,size
 void SetNativeBindingConstants(const float* values) { std::memcpy(bindings,values,sizeof(bindings)); }
 #include "draw_preparation_reference.inc"
 }
+bool timing_enabled;
+struct { unsigned preparationRebuilt, preparationReused; } timing_counts;
 #include "production.inc"
 void compare() {
     PrepareDrawState();Oracle::ReferencePrepareDrawState();
@@ -80,7 +82,10 @@ int main() {
     for(unsigned i=0;i<2;++i) { textures[i].native=(void*)(i+1);textures[i].shader_width=float(32+i);textures[i].shader_height=float(64+i); }
     for(int slot=0;slot<6;++slot)SelectTexture(slot,slot%2);
     constantCalls=bindingCalls=samplerCalls=0;
+    timing_enabled=true;
     for(unsigned i=0;i<100;++i)compare();
+    require(timing_counts.preparationRebuilt==1 && timing_counts.preparationReused==99,"actual opt-in preparation counts");
+    timing_enabled=false;
     require(constantCalls==1 && bindingCalls==1 && samplerCalls==6,"100 stable draws must prepare constants/bindings once and samplers six times");
     verifyReuse=true;verifyCalls=0;compare();require(verifyCalls==8,"reuse verification must cover both blocks and six samplers");verifyReuse=false;
     Sampler(1,true,1,2);repeated(); SelectTexture(0,1);repeated();Sampler(0,false,2,1);repeated();

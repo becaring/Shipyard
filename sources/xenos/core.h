@@ -29,6 +29,23 @@ struct NativeCounters {
     unsigned pendingTextures, pendingBytes, width, height, samples, tiles;
 };
 void CaptureAndResetCounters(NativeCounters* counters);
+// Graphics-thread-only opt-in CPU wall-clock buckets. Nested buckets overlap;
+// draw includes preparation, framebuffer setup and native submission, not GPU time.
+struct NativeTimingCounters {
+    uint64_t drawTicks, uploadTicks, framebufferSetupTicks, framebufferResolveTicks;
+    uint64_t framebufferClearTicks, uploadBytes, frequency;
+    unsigned drawCalls, uploadCalls, framebufferSetupCalls, framebufferResolveCalls;
+    unsigned framebufferClearCalls, preparationRebuilt, preparationReused;
+    unsigned activeWidth, activeHeight, activeSamples, activeTiles;
+    unsigned presentationWidth, presentationHeight;
+    unsigned buffer2Frames, presentationInterval;
+    bool enabled;
+};
+// A false-to-true transition starts a fresh interval. Repeated values preserve it.
+void SetTimingEnabled(bool enabled);
+// Resets counts; reads no clock. Upload bytes include requests served by reuse.
+void CaptureAndResetTimingCounters(NativeTimingCounters* counters);
+
 GfxClipParameters ClipParameters();
 void UnloadShader(ShaderProgram* shader);
 void LoadShader(ShaderProgram* shader);

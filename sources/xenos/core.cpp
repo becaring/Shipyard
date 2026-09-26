@@ -27,6 +27,29 @@ namespace {
 // Consumer callbacks may load/store shader bytecode. Shipyard owns the compiled
 // D3D objects and their lifetime regardless of the bytecode cache policy.
 ShipyardXenos::ShaderCacheOps shader_cache_ops = {NULL, NULL};
+ShipyardXenos::NativeTimingCounters timing_counts;
+bool timing_enabled;
+uint64_t timing_frequency;
+class NativeTimingScope {
+    uint64_t* ticks;
+    LARGE_INTEGER started;
+public:
+    NativeTimingScope(uint64_t& total, unsigned& calls) : ticks(NULL) {
+        if (timing_enabled) {
+            QueryPerformanceCounter(&started);
+            ticks = &total;
+            ++calls;
+        }
+    }
+    ~NativeTimingScope() {
+        if (ticks) {
+            LARGE_INTEGER ended;
+            QueryPerformanceCounter(&ended);
+            *ticks += (uint64_t)(ended.QuadPart - started.QuadPart);
+        }
+    }
+};
+
 struct TextureSampler {
     bool linear;
     uint32_t s, t, key;
@@ -550,12 +573,15 @@ void VerifyTextureUpload(Texture& tex, const uint8_t* bytes) {
         BeginFramebuffer();
 }
 void Upload(const uint8_t* bytes, uint32_t width, uint32_t height) {
+    NativeTimingScope timing(timing_counts.uploadTicks, timing_counts.uploadCalls);
     const uint32_t id = selected[upload_tile];
     Texture& tex = textures[id];
     if (!width || !height || width > 4096 || height > 4096)
         Shipyard_Fatal("texture dimensions", E_INVALIDARG);
     ++upload_counts.requests;
     const size_t size = width * height * 4;
+    if (timing_enabled)
+        timing_counts.uploadBytes += size;
     UploadSnapshot& snapshot = upload_snapshots[id & (UPLOAD_SNAPSHOT_SLOTS - 1)];
     if (size <= UPLOAD_SNAPSHOT_BYTES && tex.native && snapshot.native == tex.native &&
         snapshot.id == id && snapshot.width == width && snapshot.height == height &&
@@ -691,6 +717,8 @@ void VerifyPreparedDrawState() {
             VerifyNativeSampler(slot, native_state.sampler[slot]);
 }
 __declspec(noinline) void RebuildDrawState() {
+    if (timing_enabled)
+        ++timing_counts.preparationRebuilt;
     draw_sampler_mask = 0;
     __declspec(align(16)) float constants[12] = {shader_frame_number, noise_scale, 0, 0};
     for (int i = 0; i < 2; ++i)
@@ -746,11 +774,16 @@ __declspec(noinline) void RebuildDrawState() {
 __forceinline void PrepareDrawState() {
     if (!draw_state_prepared)
         RebuildDrawState();
-    else if (Shipyard_VerifyFast3DReuse())
-        VerifyPreparedDrawState();
+    else {
+        if (timing_enabled)
+            ++timing_counts.preparationReused;
+        if (Shipyard_VerifyFast3DReuse())
+            VerifyPreparedDrawState();
+    }
 }
 
 void Draw(float* vertices, size_t count, size_t triangles) {
+    NativeTimingScope timing(timing_counts.drawTicks, timing_counts.drawCalls);
     if (!current_shader || count != triangles * 3 * current_shader->floats)
         Shipyard_Fatal("Shipyard vertex buffer size", E_INVALIDARG);
     // EndTiling cannot submit a partially filled SDK ring. Retain the target and
@@ -892,6 +925,7 @@ void RestoreQuad(IDirect3DTexture9* color, IDirect3DTexture9* depth, uint32_t wi
         SetTileConstants();
 }
 void ClearFramebufferTargets(DWORD flags) {
+    NativeTimingScope timing(timing_counts.framebufferClearTicks, timing_counts.framebufferClearCalls);
     const Framebuffer& b = buffers[active_fb];
     D3DVIEWPORT9 previous;
     DWORD scissor;
@@ -909,6 +943,7 @@ void ClearFramebufferTargets(DWORD flags) {
 void BeginFramebuffer() {
     if (live_framebuffer)
         return;
+    NativeTimingScope timing(timing_counts.framebufferSetupTicks, timing_counts.framebufferSetupCalls);
     InvalidateNativeState();
     Framebuffer& b = buffers[active_fb];
     if (!b.color)
@@ -960,6 +995,7 @@ void RebindSampledTextures() {
 void FinishFramebuffer() {
     if (!live_framebuffer)
         return;
+    NativeTimingScope timing(timing_counts.framebufferResolveTicks, timing_counts.framebufferResolveCalls);
     Framebuffer& b = buffers[active_fb];
     StopTileConstants();
     for (int binding = 0; binding < 6; ++binding)
@@ -1642,6 +1678,46 @@ void SetShaderCache(const ShaderCacheOps* operations) {
         shader_cache_ops.load = NULL;
         shader_cache_ops.store = NULL;
     }
+}
+void SetTimingEnabled(bool enabled) {
+    if (enabled == timing_enabled)
+        return;
+    memset(&timing_counts, 0, sizeof(timing_counts));
+    timing_enabled = enabled;
+    if (enabled && !timing_frequency) {
+        LARGE_INTEGER frequency;
+        QueryPerformanceFrequency(&frequency);
+        timing_frequency = (uint64_t)frequency.QuadPart;
+    }
+}
+void CaptureAndResetTimingCounters(NativeTimingCounters* counters) {
+    if (!counters)
+        return;
+    *counters = timing_counts;
+    counters->enabled = timing_enabled;
+    counters->frequency = timing_frequency;
+    if (active_fb >= 0 && (size_t)active_fb < buffers.size()) {
+        const Framebuffer& b = buffers[active_fb];
+        counters->activeWidth = b.width;
+        counters->activeHeight = b.height;
+        counters->activeSamples = b.samples;
+        counters->activeTiles = (unsigned)b.tiles.size();
+    }
+    if (xenos_device) {
+        DWORD value;
+        xenos_device->GetRenderState(D3DRS_BUFFER2FRAMES, &value);
+        counters->buffer2Frames = value;
+        xenos_device->GetRenderState(D3DRS_PRESENTINTERVAL, &value);
+        counters->presentationInterval = value;
+    }
+    if (presentation_color) {
+        D3DSURFACE_DESC description;
+        if (SUCCEEDED(presentation_color->GetDesc(&description))) {
+            counters->presentationWidth = description.Width;
+            counters->presentationHeight = description.Height;
+        }
+    }
+    memset(&timing_counts, 0, sizeof(timing_counts));
 }
 void CaptureAndResetCounters(NativeCounters* counters) {
     if (!counters)
