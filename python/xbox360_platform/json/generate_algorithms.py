@@ -179,7 +179,7 @@ def generate(source, out):
         else:
             projected = _project_to_chars(projected)
 
-        generated = _wrapped_header(name, path, projected)
+        generated = _wrapped_header(name, Path("nlohmann") / relative, projected)
         outputs.append((out / (name + ".hpp"), generated))
         results[relative] = {
             "source_sha256": HASHES[name],

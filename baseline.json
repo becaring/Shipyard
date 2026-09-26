@@ -17,7 +17,7 @@
     "python/xbox360_platform/fast3d_triangle_split.py": "d7d76b5b50f9f8e72b0ffea6f1cf7145bed6c71f94e19919d7a41dbe5d6d75f1",
     "python/xbox360_platform/json/__init__.py": "00cbce8da54f719cb9b23b0f03eab323dc2ecf0a5bc1dfa122f515e6bd1bda5b",
     "python/xbox360_platform/json/backend.py": "8c02ec02149d94ce71d728fe9bcd200f9c1bd8612a874eab78d158393d6b1b4b",
-    "python/xbox360_platform/json/generate_algorithms.py": "f60fa96ac0616a745c93b7d809dbd358e28b8c691bffde78e223e63cf2b1aaf4",
+    "python/xbox360_platform/json/generate_algorithms.py": "240caba0036a6712861c49679298c6d193cf274be461f2d690b384f41c96a305",
     "python/xbox360_platform/json/generate_ordered.py": "ab251d214b9532945d055dd211b0f7a9e54a08cc6309a4813feaf733c44129da",
     "python/xbox360_platform/json/generate_streams.py": "612eacc34bbe40851b758ce8d4d9fbd3a43c9728cc1048b99ea8651d7f0db31c",
     "python/xbox360_platform/libzip.py": "1d1181a118757e87a4aaeddd859d96b33397bc3e500576f2cb161fb48e6a5905",
