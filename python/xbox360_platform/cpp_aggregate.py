@@ -32,7 +32,7 @@ def lower_macro_arguments(text, parser, walk, *, function, argument, macros, typ
     return data.decode()
 
 
-def lower_assignments(text, parser, walk, targets):
+def lower_assignments(text, parser, walk, targets, *, initializer_macros=()):
     data = text.encode()
     edits = []
     counts = dict.fromkeys(targets, 0)
@@ -40,7 +40,9 @@ def lower_assignments(text, parser, walk, targets):
         if node.type != 'assignment_expression':
             continue
         right = node.child_by_field_name('right')
-        if right is None or right.type != 'initializer_list':
+        is_macro = (right is not None and right.type == 'call_expression' and
+                    right.child_by_field_name('function').text.decode() in initializer_macros)
+        if right is None or (right.type != 'initializer_list' and not is_macro):
             continue
         left = node.child_by_field_name('left').text.decode()
         if left not in targets or node.parent.type != 'expression_statement':

@@ -23,6 +23,19 @@ class AggregateTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 lower_assignments(source, self.parser, walk, targets)
 
+    def test_macro_assignment_preserves_scope_and_single_evaluation(self):
+        source = 'void f(){if(c) a=MAKE(next()); else a={};}'
+        result = lower_assignments(source, self.parser, walk, {'a': ('Key', 2)},
+                                   initializer_macros=('MAKE',))
+        self.assertEqual(result.count('next()'), 1)
+        self.assertIn('if(c) { Key ', result)
+        self.assertIn(' = MAKE(next()); a = ', result)
+        self.assertFalse(self.parser.parse(result.encode()).root_node.has_error)
+        for unknown in ('void f(){a=OTHER();}', 'void f(){g(a=MAKE());}'):
+            with self.assertRaises(ValueError):
+                lower_assignments(unknown, self.parser, walk, {'a': ('Key', 1)},
+                                  initializer_macros=('MAKE',))
+
     def test_initializer_macro_argument_preserves_conditional_scope(self):
         source = 'void f(){if(c) patch(1, MAKE(next())); else patch(2, saved);}'
         result = lower_macro_arguments(source, self.parser, walk, function='patch', argument=1,
