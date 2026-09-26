@@ -55,8 +55,13 @@ class ResourceLookupProjectionTests(unittest.TestCase):
         source=constructor+path_hash(SOURCE)+cache+loader
         result=borrowed_cache_source(source)
         self.assertTrue(result.endswith(loader))
-        self.assertIn('Path(other.LookupData(), other.LookupSize())',result)
-        self.assertIn('if (loadExact || !mAltAssetsEnabled)',result)
+        self.assertIn('Path(other.LookupView().Owned())',result)
+        self.assertIn('const bool tryAlternate = !loadExact && mAltAssetsEnabled',result)
+        self.assertEqual(result.count('lock(mMutex)'),1)
+        self.assertEqual(result.count('mResourceCache.find('),2)
+        self.assertIn('prefix.data(), prefix.size()',result)
+        self.assertIn('!= ResourceLoadError::NotCached',result)
+        self.assertNotIn('operator=(const ResourceIdentifier&',result)
         with self.assertRaises(ValueError): borrowed_cache_source(source.replace('Path == rhs.Path','Path != rhs.Path'))
 
     def test_stateless_signature_keeps_pointer_guards(self):
