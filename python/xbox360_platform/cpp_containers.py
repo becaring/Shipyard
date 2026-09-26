@@ -31,18 +31,21 @@ def materialize(type_name, initializer, *, prefix):
         if node.type != 'initializer_list':
             return node.text.decode()
         name, args = template_parts(typ)
-        if name not in ('std::map', 'std::unordered_map', 'std::vector', 'std::set', 'std::unordered_set', 'std::pair'):
+        if name not in ('std::map', 'std::unordered_map', 'std::vector', 'std::set', 'std::unordered_set', 'std::pair', 'std::tuple'):
             raise ValueError('Unreviewed initialized container: '+typ)
-        if len(args) != (2 if name in ('std::map', 'std::unordered_map', 'std::pair') else 1):
+        if name == 'std::tuple':
+            if not 1 <= len(args) <= 10:
+                raise ValueError('Tuple arity exceeds the legacy STL contract')
+        elif len(args) != (2 if name in ('std::map', 'std::unordered_map', 'std::pair') else 1):
             raise ValueError('Unreviewed container parameters: '+typ)
         values = [child for child in node.named_children if child.type != 'comment']
         temporary = prefix+str(counter[0])
         counter[0] += 1
-        if name == 'std::pair':
-            if len(values) != 2:
-                raise ValueError('Pair initializer must have two fields')
-            first, second = emit(args[0], values[0]), emit(args[1], values[1])
-            declarations.append(typ+' '+temporary+'('+first+', '+second+');')
+        if name in ('std::pair', 'std::tuple'):
+            if len(values) != len(args):
+                raise ValueError('Pair or tuple initializer must supply every field')
+            fields = [emit(arg, value) for arg, value in zip(args, values)]
+            declarations.append(typ+' '+temporary+'('+', '.join(fields)+');')
         else:
             declarations.append(typ+' '+temporary+';')
             for value in values:

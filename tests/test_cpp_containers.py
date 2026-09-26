@@ -8,6 +8,7 @@ from tree_sitter import Language, Parser
 import tree_sitter_cpp
 from xbox360_platform.cpp_bindings import lower_pairs
 from xbox360_platform.cpp_containers import materialize, lower_constructor_arguments
+from xbox360_platform.cpp_initializers import lower_lookup_keys
 from xbox360_platform.prism import walk, lower_ranges
 
 
@@ -22,12 +23,15 @@ class ContainerTests(unittest.TestCase):
     def test_runtime_nested_maps_and_binding_ownership(self):
         declarations, result = materialize('std::map<int, std::vector<std::pair<int, int>>>',
             self.initializer('{{1,{{2,3},{4,5}}},{1,{{9,9}}},{2,{}}}'), prefix='value')
+        tuples, tuple_result = materialize('std::map<std::tuple<short,int,int>,std::tuple<int,int>>',
+            self.initializer('{{{1,2,3},{4,5}},{{1,2,3},{9,9}},{{1,2,4},{6,7}}}'), prefix='tuples')
         source = '''#include <map>
 #include <vector>
 #include <utility>
 #include <iterator>
 #include <cassert>
 #include <set>
+#include <tuple>
 struct Registration {
     std::set<int> values;
     Registration(int, const std::set<int>& input) : values(input) {}
@@ -35,7 +39,7 @@ struct Registration {
 Registration registered(1, {2, 2, 3});
 int main(){
 assert(registered.values.size()==2 && registered.values.count(3)==1);
-''' + declarations + '\nauto& values = '+result+''';
+''' + tuples+'\nassert('+tuple_result+'.size()==2);\nassert(std::get<0>('+tuple_result+'.find({1,2,3})->second)==4);\n'+declarations + '\nauto& values = '+result+''';
 assert(values.size()==2 && values[1].size()==2 && values[1][0].second==3);
 for(auto [key, rows] : values) { rows.clear(); }
 assert(values[1].size()==2);
@@ -48,6 +52,8 @@ assert(key==1 && rows.size()==2);
 }
 '''
         source = lower_pairs(source, self.parser, walk, expected=5)
+        source = lower_lookup_keys(source, self.parser, walk,
+            {tuple_result+'.find': ('std::tuple<short,int,int>', 1)})
         source = lower_constructor_arguments(source, self.parser, walk, constructor='Registration',
             argument=1, type_name='std::set<int>', expected=1)
         source = lower_ranges(source.encode(), self.parser, 'std::begin', 'std::end').decode()
@@ -61,7 +67,7 @@ assert(key==1 && rows.size()==2);
             batch.write_text('@echo off\ncall "'+installation+'/VC/Auxiliary/Build/vcvars64.bat" >nul\n'
                 'if errorlevel 1 exit /b 1\ncl /nologo /EHsc /MT case.cpp /Fe:case.exe\nexit /b %errorlevel%\n')
             built = subprocess.run([os.environ['ComSpec'], '/d', '/c', str(batch)], cwd=out, capture_output=True, text=True)
-            self.assertEqual(built.returncode, 0, built.stdout+built.stderr)
+            self.assertEqual(built.returncode, 0, built.stdout+built.stderr+'\n'+source)
             self.assertEqual(subprocess.run([str(out/'case.exe')]).returncode, 0)
 
     def test_unsupported_forms_fail(self):
@@ -69,6 +75,8 @@ assert(key==1 && rows.size()==2);
             materialize('Unknown', self.initializer('{1,2}'), prefix='x')
         with self.assertRaises(ValueError):
             materialize('std::pair<int,int>', self.initializer('{1}'), prefix='x')
+        with self.assertRaises(ValueError):
+            materialize('std::tuple<int,int,int>', self.initializer('{1,2}'), prefix='x')
         for source in ('void f(){auto [x,y,z]=v;}', 'void f(){auto&& [x,y]=v;}', 'void f(){}'):
             with self.assertRaises(ValueError):
                 lower_pairs(source, self.parser, walk, expected=1)
