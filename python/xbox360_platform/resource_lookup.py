@@ -8,6 +8,7 @@ def _once(source, old, new):
 
 
 def borrowed_cache_header(source):
+    source = '#include "resources/path_span.h"\n' + source
     source = _once(source,
         'GetCachedResource(xbox_compat::variant<ResourceLoadError, std::shared_ptr<IResource>> cacheLine)',
         'GetCachedResource(const xbox_compat::variant<ResourceLoadError, std::shared_ptr<IResource>>& cacheLine)')
@@ -20,11 +21,17 @@ def borrowed_cache_header(source):
     struct BorrowedLookup {};
     // Only synchronous map lookup borrows. Copying a key always owns its path.
     ResourceIdentifier(const char* path, uintptr_t owner,
-                       const std::shared_ptr<Archive>& parent, BorrowedLookup);
+                       const std::shared_ptr<Archive>& parent, BorrowedLookup,
+                       const char* prefix = "", size_t prefixLength = 0);
     const char* mBorrowedPath;
     size_t mBorrowedLength;
-    const char* LookupData() const { return mBorrowedPath ? mBorrowedPath : Path.data(); }
-    size_t LookupSize() const { return mBorrowedPath ? mBorrowedLength : Path.size(); }''')
+    const char* mBorrowedPrefix;
+    size_t mBorrowedPrefixLength;
+    Shipyard::Resources::PathSpan LookupView() const {
+        return mBorrowedPath ? Shipyard::Resources::PathSpan(mBorrowedPrefix, mBorrowedPrefixLength,
+                                                           mBorrowedPath, mBorrowedLength)
+                             : Shipyard::Resources::PathSpan(Path.data(), Path.size());
+    }''')
     anchor = '    std::shared_ptr<IResource> LoadResourceProcess(const std::string& filePath, bool loadExact = false,'
     return _once(source, anchor, '''    std::shared_ptr<IResource> LoadResourceProcess(const char* filePath, bool loadExact = false,
                                                    std::shared_ptr<ResourceInitData> initData = nullptr);
@@ -43,24 +50,25 @@ def borrowed_cache_source(source):
     begin = source.index('ResourceIdentifier::ResourceIdentifier(')
     end = source.index('\n}', begin) + 2
     body = _once(source[begin:end], ': Path(path), Owner(owner), Parent(parent) {',
-                 ': Path(path), Owner(owner), Parent(parent), mBorrowedPath(NULL), mBorrowedLength(0) {')
+                 ': Path(path), Owner(owner), Parent(parent), mBorrowedPath(NULL), mBorrowedLength(0), mBorrowedPrefix(""), mBorrowedPrefixLength(0) {')
     source = source[:begin] + body + '''
 
 ResourceIdentifier::ResourceIdentifier(const ResourceIdentifier& other)
-    : Path(other.LookupData(), other.LookupSize()), Owner(other.Owner), Parent(other.Parent),
-      mHash(other.mHash), mBorrowedPath(NULL), mBorrowedLength(0) {
+    : Path(other.LookupView().Owned()), Owner(other.Owner), Parent(other.Parent),
+      mHash(other.mHash), mBorrowedPath(NULL), mBorrowedLength(0), mBorrowedPrefix(""), mBorrowedPrefixLength(0) {
 }
 
 ResourceIdentifier::ResourceIdentifier(const char* path, uintptr_t owner,
-                                       const std::shared_ptr<Archive>& parent, BorrowedLookup)
-    : Path(), Owner(owner), Parent(parent), mBorrowedPath(path), mBorrowedLength(std::strlen(path)) {
+                                       const std::shared_ptr<Archive>& parent, BorrowedLookup,
+                                       const char* prefix, size_t prefixLength)
+    : Path(), Owner(owner), Parent(parent), mBorrowedPath(path), mBorrowedLength(std::strlen(path)),
+      mBorrowedPrefix(prefix), mBorrowedPrefixLength(prefixLength) {
     mHash = CalculateHash();
 }''' + source[end:]
     source = _once(source, 'return Owner == rhs.Owner && Path == rhs.Path && Parent == rhs.Parent;',
-        'return Owner == rhs.Owner && LookupSize() == rhs.LookupSize() &&\n'
-        '           std::memcmp(LookupData(), rhs.LookupData(), LookupSize()) == 0 && Parent == rhs.Parent;')
+        'return Owner == rhs.Owner && LookupView() == rhs.LookupView() && Parent == rhs.Parent;')
     source = _once(source, 'Shipyard::Resources::PathHash()(Path)',
-                   'Shipyard::Resources::PathHash()(LookupData(), LookupSize())')
+                   'LookupView().Hash()')
     anchor = 'std::shared_ptr<IResource> ResourceManager::LoadResourceProcess(const std::string& filePath'
     start = source.index(anchor)
     source = source[:start] + '''std::shared_ptr<IResource> ResourceManager::LoadResourceProcess(const char* filePath, bool loadExact,
@@ -69,11 +77,32 @@ ResourceIdentifier::ResourceIdentifier(const char* path, uintptr_t owner,
         filePath += 7;
         loadExact = false;
     }
-    // Alternate resolution retains the authoritative loader's ordering/error rules.
-    if (loadExact || !mAltAssetsEnabled) {
+    // Only settled cache hits bypass the loader. Missing, dirty and null alternate
+    // resources still take its authoritative load/error path after releasing the lock.
+    {
+        const std::string& prefix = IResource::gAltAssetPrefix;
+        const bool tryAlternate = !loadExact && mAltAssetsEnabled &&
+            std::strncmp(filePath, prefix.c_str(), prefix.size()) != 0;
+        bool tryBase = !tryAlternate;
+        const Shipyard::Async::lock_guard<Shipyard::Async::mutex> lock(mMutex);
+        if (tryAlternate) {
+            ResourceIdentifier alternate(filePath, mDefaultCacheOwner, mDefaultCacheArchive,
+                ResourceIdentifier::BorrowedLookup(), prefix.data(), prefix.size());
+            const auto altFound = mResourceCache.find(alternate);
+            if (altFound != mResourceCache.end()) {
+                if (xbox_compat::holds_alternative<std::shared_ptr<IResource>>(altFound->second)) {
+                    const std::shared_ptr<IResource>& resource =
+                        xbox_compat::get<std::shared_ptr<IResource>>(altFound->second);
+                    if (resource != nullptr && resource.use_count() > 0 && !resource->IsDirty())
+                        return resource;
+                } else if (xbox_compat::holds_alternative<ResourceLoadError>(altFound->second)) {
+                    tryBase = xbox_compat::get<ResourceLoadError>(altFound->second) != ResourceLoadError::NotCached;
+                }
+            }
+        }
+        if (tryBase) {
         ResourceIdentifier key(filePath, mDefaultCacheOwner, mDefaultCacheArchive,
                                ResourceIdentifier::BorrowedLookup());
-        const Shipyard::Async::lock_guard<Shipyard::Async::mutex> lock(mMutex);
         const auto found = mResourceCache.find(key);
         if (found != mResourceCache.end() &&
             xbox_compat::holds_alternative<std::shared_ptr<IResource>>(found->second)) {
@@ -81,6 +110,7 @@ ResourceIdentifier::ResourceIdentifier(const char* path, uintptr_t owner,
                 xbox_compat::get<std::shared_ptr<IResource>>(found->second);
             if (resource != nullptr && resource.use_count() > 0 && !resource->IsDirty())
                 return resource;
+        }
         }
     }
     return LoadResourceProcess(std::string(filePath), loadExact, initData);
