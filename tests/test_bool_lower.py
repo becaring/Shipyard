@@ -38,6 +38,22 @@ class BoolLowerTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "boolean-parameter"):
             lower(source, active_source=selected)
 
+    def test_explicitly_approved_byte_pointer_call(self):
+        source = (b'#line 1 "game.h"\n'
+                  b'void set_flag(_Bool* flag);\n'
+                  b'#line 1 "game.c"\n'
+                  b'int run(void) { unsigned char flag = 0; set_flag(&flag); return flag; }\n')
+        emitted, stats = lower(source, active_source=selected,
+                               approved_calls=frozenset({b"set_flag"}))
+        self.assertIn(b'void set_flag(unsigned char* flag)', emitted)
+        self.assertEqual(stats['approved_boolean_calls'], 1)
+
+    def test_approved_call_must_still_be_present(self):
+        source = b'#line 1 "game.c"\nint run(void) { return 0; }\n'
+        with self.assertRaisesRegex(ValueError, "no longer match"):
+            lower(source, active_source=selected,
+                  approved_calls=frozenset({b"set_flag"}))
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -20,7 +20,8 @@ LINE = re.compile(rb'^#line\s+\d+\s+"([^"]+)"')
 BOOL = re.compile(rb'\b_Bool\b')
 
 
-def lower(source: bytes, *, active_source: Callable[[bytes], bool]) -> tuple[bytes, dict[str, int]]:
+def lower(source: bytes, *, active_source: Callable[[bytes], bool],
+          approved_calls: frozenset[bytes] = frozenset()) -> tuple[bytes, dict[str, int]]:
     view = bytearray(source)
     selected = bytearray(len(source))
     offset = 0
@@ -95,9 +96,14 @@ def lower(source: bytes, *, active_source: Callable[[bytes], bool]) -> tuple[byt
     if field_overlap:
         raise ValueError('Selected source accesses boolean fields: ' + repr(sorted(field_overlap)[:8]))
     call_overlap = bool_parameter_functions & selected_calls
+    if approved_calls - call_overlap:
+        raise ValueError('Approved boolean calls no longer match selected source: ' +
+                         repr(sorted(approved_calls - call_overlap)[:8]))
+    call_overlap -= approved_calls
     if call_overlap:
         raise ValueError('Selected source calls boolean-parameter functions: ' + repr(sorted(call_overlap)[:8]))
 
     for start in sorted(positions, reverse=True):
         source = source[:start] + b'unsigned char' + source[start + 5:]
-    return source, {'type_tokens': len(positions), 'selected_bool_operations': 0}
+    return source, {'type_tokens': len(positions), 'selected_bool_operations': 0,
+                    'approved_boolean_calls': len(approved_calls)}
