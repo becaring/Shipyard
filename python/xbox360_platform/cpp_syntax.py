@@ -81,3 +81,29 @@ def lower_if_initializers(text, parser, walk, expected=None, max_depth=16):
         for start, end, replacement in sorted(edits, reverse=True):
             data = data[:start] + replacement + data[end:]
     raise ValueError('Unexpected nested if-initializer depth')
+
+
+def lift_captureless_callbacks(text, parser, walk, *, parameters, return_type, prefix, expected):
+    """Return checked named callback definitions for a consumer-selected signature."""
+    data = text.encode()
+    edits, definitions = [], []
+    for node in walk(parser.parse(data).root_node):
+        if node.type != 'lambda_expression':
+            continue
+        declarator = node.child_by_field_name('declarator')
+        if declarator is None or declarator.text.decode() != parameters:
+            continue
+        capture = next(child for child in node.named_children if child.type == 'lambda_capture_specifier')
+        body = node.child_by_field_name('body')
+        if capture.text != b'[]' or body is None:
+            raise ValueError('Callback requires captured state')
+        name = prefix+str(len(definitions))
+        if name.encode() in data:
+            raise ValueError('Callback name collision: '+name)
+        definitions.append('static '+return_type+' '+name+parameters+' '+body.text.decode())
+        edits.append((node.start_byte, node.end_byte, name.encode()))
+    if len(definitions) != expected:
+        raise ValueError('Captureless callback inventory changed')
+    for first, last, replacement in sorted(edits, reverse=True):
+        data = data[:first]+replacement+data[last:]
+    return data.decode(), '\n\n'.join(definitions)

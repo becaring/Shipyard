@@ -270,6 +270,14 @@ def _free_functions(names):
         'V::template index_of<U>::value);',
         '}',
     ]
+    for cv in ('', 'const '):
+        lines += [
+            'template<\n    class U,\n    ' + parameters + '\n>',
+            f'{cv}U* get_if({cv}variant<\n    {arguments}\n>* value) throw() {{',
+            '    return value && holds_alternative<U>(*value)',
+            '        ? std::addressof(value->template access<U>()) : 0;',
+            '}',
+        ]
     return lines
 
 
