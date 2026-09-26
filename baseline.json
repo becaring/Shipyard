@@ -52,6 +52,7 @@
     "sources/diagnostics/queue.cpp": "99a838c169bc5dd2ee2b4d41e8155d2ca59173c2a59479a4671f52048180bc8c",
     "sources/diagnostics/queue.h": "3ebf192779f813279b103f20e30fbfef260dae79f4785d17649264ee47f61e46",
     "sources/entropy/native.h": "7f676343729585f991bdf5395a17c9e5cab2ea3ab10cd89e07071b607febafe6",
+    "sources/environment/app_directories.h": "9612b9c018e2ee9ef9e6cda94053285c581fe3ee1abb5c7f21073a74b59e32be",
     "sources/environment/launch_environment.h": "35c6f9d1cb0fd675f978f0f1b6081e3e6a4de15df466235d42b20fceaa3b2a55",
     "sources/fast3d/clip_quantize.cpp": "17d01beb2a71f969b06899401608a0abce119ad6c36a300d84e62a4fd15fe930",
     "sources/fast3d/clip_quantize.h": "1941da22c6610f9e56a664f25d59c73bb28e726685f768e3355d0ca6117b0c5f",
