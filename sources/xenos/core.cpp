@@ -138,12 +138,17 @@ typedef char NativeConstantsAligned[(__alignof(NativeStateCache) >= 16 &&
                                      offsetof(NativeStateCache, constants) % 16 == 0)
                                         ? 1
                                         : -1];
+// A prepared draw reuses the existing native-state payloads; no resource pointer
+// is retained. Mutations and external drawing revoke this render-thread certificate.
+bool draw_state_prepared;
+unsigned draw_sampler_mask;
 ShipyardNativeStateCounts native_state_counts;
 unsigned binding_attempted, binding_written, binding_suppressed;
 const D3DSAMPLERSTATETYPE sampler_fields[5] = {
     D3DSAMP_MINFILTER, D3DSAMP_MAGFILTER, D3DSAMP_MIPFILTER, D3DSAMP_ADDRESSU, D3DSAMP_ADDRESSV};
 
 void InvalidateNativeState() {
+    draw_state_prepared = false;
     for (int i = 0; i < 6; ++i) {
         native_state.sampler_valid[i] = false;
     }
@@ -189,7 +194,7 @@ __declspec(noinline) void VerifyNativeConstants(const float* constants) {
         Shipyard_Fatal("reused native pixel constants differ from requested values", E_FAIL);
 }
 __forceinline bool SameNativeConstants(const float* constants) {
-    // Draw's sole source and the cache member are explicitly 16-byte aligned.
+    // The preparation source and cache member are explicitly 16-byte aligned.
     // Compare all 48 bytes as integer bits, preserving signed zero and NaNs.
     const __vector4 d0 = __vxor(__lvx(native_state.constants, 0), __lvx(constants, 0));
     const __vector4 d1 = __vxor(__lvx(native_state.constants, 16), __lvx(constants, 16));
@@ -216,6 +221,14 @@ void SetNativeConstants(const float* constants) {
     ++native_state_counts.constants_written;
 }
 
+__declspec(noinline) void VerifyNativeBindingConstants(const float* values) {
+    float actual[24];
+    Shipyard_Check(xenos_device->GetPixelShaderConstantF(8, actual, 6),
+                   "verify native binding constants");
+    if (memcmp(actual, values, sizeof(actual)))
+        Shipyard_Fatal("reused binding constants differ", E_FAIL);
+}
+
 void SetNativeBindingConstants(const float* values) {
     ++binding_attempted;
     float* cached = native_state.binding_constants;
@@ -231,13 +244,8 @@ void SetNativeBindingConstants(const float* values) {
     __vcmpequwR(__vor(__vor(__vor(d0, d1), __vor(d2, d3)), __vor(d4, d5)), __vspltisw(0),
                 &condition);
     if (native_state.binding_constants_valid && (condition & 0x80) != 0) {
-        if (Shipyard_VerifyFast3DReuse()) {
-            float actual[24];
-            Shipyard_Check(xenos_device->GetPixelShaderConstantF(8, actual, 6),
-                           "verify native binding constants");
-            if (memcmp(actual, values, sizeof(actual)))
-                Shipyard_Fatal("reused binding constants differ", E_FAIL);
-        }
+        if (Shipyard_VerifyFast3DReuse())
+            VerifyNativeBindingConstants(values);
         ++binding_suppressed;
         return;
     }
@@ -297,6 +305,7 @@ template <int tile> void ApplySamplerSlot(const TextureSampler& sampler) {
 }
 
 void ApplySampler(int tile, const TextureSampler& sampler) {
+    draw_state_prepared = false;
     switch (tile) {
     case 0:
         ApplySamplerSlot<0>(sampler);
@@ -326,11 +335,14 @@ GfxClipParameters ClipParameters() {
     return parameters;
 }
 void UnloadShader(ShaderProgram*) {
+    draw_state_prepared = false;
     current_shader = NULL;
 }
 void LoadShader(ShaderProgram* shader) {
     // Application c0-c2 are explicit in every generated program. Shader binds
     // preserve those registers; external rendering invalidates the whole cache.
+    if (current_shader != shader)
+        draw_state_prepared = false;
     current_shader = shader;
     if (native_state.declaration != shader->declaration) {
         Shipyard_Check(xenos_device->SetVertexDeclaration(shader->declaration),
@@ -463,6 +475,7 @@ void ShaderInfo(ShaderProgram* shader, uint8_t* inputs, bool used[2]) {
     used[1] = shader->features.usedTextures[1];
 }
 uint32_t NewTexture() {
+    draw_state_prepared = false;
     textures.push_back(Texture());
     return (uint32_t)textures.size() - 1;
 }
@@ -502,6 +515,7 @@ void ReleaseTexture(IDirect3DTexture9* texture) {
     pending_texture_bytes += bytes;
 }
 void SelectTexture(int tile, uint32_t id) {
+    draw_state_prepared = false;
     if (tile < 0 || tile > 5 || id >= textures.size())
         Shipyard_Fatal("texture index", E_INVALIDARG);
     upload_tile = tile;
@@ -669,16 +683,15 @@ void Alpha(bool enable) {
     ApplyAlpha();
 }
 
-void Draw(float* vertices, size_t count, size_t triangles) {
-    if (!current_shader || count != triangles * 3 * current_shader->floats)
-        Shipyard_Fatal("Shipyard vertex buffer size", E_INVALIDARG);
-    // EndTiling cannot submit a partially filled SDK ring. Retain the target and
-    // restart the native bracket before it consumes its reserved command space.
-    // The allowance includes state-command space for each Fast3D batch.
-    if (live_framebuffer && buffers[active_fb].tiles.size() > 1 &&
-        tiling_draw_bytes + count * sizeof(float) + 8192 > 2 * 1024 * 1024)
-        FinishFramebuffer();
-    BeginFramebuffer();
+void VerifyPreparedDrawState() {
+    VerifyNativeConstants(native_state.constants);
+    VerifyNativeBindingConstants(native_state.binding_constants);
+    for (int slot = 0; slot < 6; ++slot)
+        if (draw_sampler_mask & (1u << slot))
+            VerifyNativeSampler(slot, native_state.sampler[slot]);
+}
+__declspec(noinline) void RebuildDrawState() {
+    draw_sampler_mask = 0;
     __declspec(align(16)) float constants[12] = {shader_frame_number, noise_scale, 0, 0};
     for (int i = 0; i < 2; ++i)
         if (current_shader->features.usedTextures[i]) {
@@ -698,6 +711,7 @@ void Draw(float* vertices, size_t count, size_t triangles) {
                 // The same cached texture may occupy both slots. A sampler update
                 // through either slot applies to that texture, as in D3D11/GL.
                 ApplySampler(i, *sampler);
+                draw_sampler_mask |= 1u << i;
                 constants[6 + i * 4] =
                     filtering == FILTER_THREE_POINT && sampler->linear ? 1.0f : 0.0f;
             }
@@ -716,13 +730,37 @@ void Draw(float* vertices, size_t count, size_t triangles) {
         }
         if (binding >= 2) {
             const int base = binding % 2;
-            if (selected_fb[base] >= 0)
+            if (selected_fb[base] >= 0) {
                 ApplySampler(binding, buffers[selected_fb[base]].sampler);
-            else if (selected[base] < textures.size())
+                draw_sampler_mask |= 1u << binding;
+            } else if (selected[base] < textures.size()) {
                 ApplySampler(binding, textures[selected[base]].sampler);
+                draw_sampler_mask |= 1u << binding;
+            }
         }
     }
     SetNativeBindingConstants(binding_info);
+    draw_state_prepared = true;
+}
+
+__forceinline void PrepareDrawState() {
+    if (!draw_state_prepared)
+        RebuildDrawState();
+    else if (Shipyard_VerifyFast3DReuse())
+        VerifyPreparedDrawState();
+}
+
+void Draw(float* vertices, size_t count, size_t triangles) {
+    if (!current_shader || count != triangles * 3 * current_shader->floats)
+        Shipyard_Fatal("Shipyard vertex buffer size", E_INVALIDARG);
+    // EndTiling cannot submit a partially filled SDK ring. Retain the target and
+    // restart the native bracket before it consumes its reserved command space.
+    // The allowance includes state-command space for each Fast3D batch.
+    if (live_framebuffer && buffers[active_fb].tiles.size() > 1 &&
+        tiling_draw_bytes + count * sizeof(float) + 8192 > 2 * 1024 * 1024)
+        FinishFramebuffer();
+    BeginFramebuffer();
+    PrepareDrawState();
     ApplyAlpha(); // Also handles shader-only changes and external state restoration.
     Shipyard_Check(xenos_device->DrawPrimitiveUP(D3DPT_TRIANGLELIST, (UINT)triangles, vertices,
                                                  (UINT)(current_shader->floats * 4)),
@@ -903,6 +941,7 @@ void BeginFramebuffer() {
     SetTileConstants();
 }
 void RebindSampledTextures() {
+    draw_state_prepared = false;
     for (int i = 0; i < 6; ++i) {
         IDirect3DTexture9* texture = NULL;
         const TextureSampler* sampler = NULL;
@@ -1138,8 +1177,10 @@ void BindFramebuffer(int id, float scale) {
     if (active_fb != id)
         FinishFramebuffer();
     active_fb = id;
-    if (scale != 0)
+    if (scale != 0) {
+        draw_state_prepared = false;
         noise_scale = 1.0f / scale;
+    }
     // Defer restoration until drawing or setting target-dependent viewport /
     // scissor state. A full color/depth clear may follow this bind.
 }
@@ -1275,6 +1316,7 @@ void SelectFramebuffer(int id) {
 }
 
 void DeleteTexture(uint32_t id) {
+    draw_state_prepared = false;
     UploadSnapshot& snapshot = upload_snapshots[id & (UPLOAD_SNAPSHOT_SLOTS - 1)];
     if (snapshot.id == id)
         snapshot.native = NULL;
@@ -1287,6 +1329,7 @@ void DeleteTexture(uint32_t id) {
     }
 }
 void Filter(FilteringMode mode) {
+    draw_state_prepared = false;
     filtering = mode;
     filtering_key = unsigned(mode) << 4;
 }
