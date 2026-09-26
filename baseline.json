@@ -49,6 +49,8 @@
     "sources/crt/format.cpp": "b7c48189f1fb783e8f696cd1e4b8d007c20dc631c8f9af65e2e095da95a8aa3c",
     "sources/crt/format.h": "a8138a106cfbb19e8384ae0fa9835faee4f5d711b5786e35d44bd53eee0f2419",
     "sources/crt/stdbool.h": "e5db3f4a7e601b288d6a9941b4c8f7d659c0e0fe2c472625e04d8076afb6b4b5",
+    "sources/diagnostics/exception_filter.cpp": "6e2e12a7582f2ef9993504e0ab1fedc9e4c3bffc2f6327ddb30242c2ab622adb",
+    "sources/diagnostics/exception_filter.h": "59c0ada28c4e188c038d5e1e642fa9e4618038cccdec61e13598c35e091d252b",
     "sources/diagnostics/queue.cpp": "99a838c169bc5dd2ee2b4d41e8155d2ca59173c2a59479a4671f52048180bc8c",
     "sources/diagnostics/queue.h": "3ebf192779f813279b103f20e30fbfef260dae79f4785d17649264ee47f61e46",
     "sources/entropy/native.h": "7f676343729585f991bdf5395a17c9e5cab2ea3ab10cd89e07071b607febafe6",
