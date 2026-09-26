@@ -9,6 +9,7 @@ Consumers remain pinned to `58d4344`; this branch is a separate adoption candida
 - The destination's final element count is already available. Reserve once before copying elements instead of repeatedly growing and relocating the vector. The destination owns its storage, does not alias the input, and preserves conversion order and type checks; no persistent cache or invalidation is introduced.
 - Actual ordinary/ordered conversion tests cover 0/1/64/1024 entries, values/order, ownership after source destruction, invalid types/elements, allocation failure, and cleanup. A 64-element host conversion previously allocated destination storage 12 times; now it allocates once. Empty conversion allocates zero times.
 - Host contracts and affected PowerPC source/contract compilation pass. Ordered generated output contains the reviewed reservation. No target runtime timing or FPS measurement was performed.
+- The pinned [nlohmann 3.12.0 conversion](https://github.com/nlohmann/json/blob/55f93686c01528224f448c19128836e7df245f72/include/nlohmann/detail/conversions/from_json.hpp#L256-L277) already reserves before converting elements. This restores that lost efficiency and its allocation-failure ordering; an additional regression covers allocation failure with an invalid first element.
 
 ## Empty and singleton normal batches
 
