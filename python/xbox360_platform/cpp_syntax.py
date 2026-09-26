@@ -35,6 +35,13 @@ def collect_member_defaults(text, classname, parser, walk, parse_source=None):
         for default in member.children_by_field_name('default_value'):
             declarator = next((node for node in reversed(declarators)
                                if node.end_byte <= default.start_byte), None)
+            # tree-sitter can classify an empty inline method followed by a
+            # semicolon as a field with a brace initializer. It has no data
+            # member default to move into a constructor.
+            if (declarator is not None and declarator.type == 'function_declarator' and
+                    declarator.child_by_field_name('declarator').type == 'field_identifier' and
+                    default.type == 'initializer_list' and not default.named_children):
+                continue
             if declarator is None or declarator.type == 'function_declarator' or typ is None:
                 raise ValueError('Unsupported member default ' + member.text.decode())
             names = [node for node in walk(declarator) if node.type == 'field_identifier']

@@ -7,7 +7,7 @@ import unittest
 from tree_sitter import Language, Parser
 import tree_sitter_cpp
 from xbox360_platform.cpp_bindings import lower_pairs
-from xbox360_platform.cpp_containers import materialize
+from xbox360_platform.cpp_containers import materialize, lower_constructor_arguments
 from xbox360_platform.prism import walk, lower_ranges
 
 
@@ -27,7 +27,14 @@ class ContainerTests(unittest.TestCase):
 #include <utility>
 #include <iterator>
 #include <cassert>
+#include <set>
+struct Registration {
+    std::set<int> values;
+    Registration(int, const std::set<int>& input) : values(input) {}
+};
+Registration registered(1, {2, 2, 3});
 int main(){
+assert(registered.values.size()==2 && registered.values.count(3)==1);
 ''' + declarations + '\nauto& values = '+result+''';
 assert(values.size()==2 && values[1].size()==2 && values[1][0].second==3);
 for(auto [key, rows] : values) { rows.clear(); }
@@ -41,6 +48,8 @@ assert(key==1 && rows.size()==2);
 }
 '''
         source = lower_pairs(source, self.parser, walk, expected=5)
+        source = lower_constructor_arguments(source, self.parser, walk, constructor='Registration',
+            argument=1, type_name='std::set<int>', expected=1)
         source = lower_ranges(source.encode(), self.parser, 'std::begin', 'std::end').decode()
         vswhere = Path(os.environ['ProgramFiles(x86)'])/'Microsoft Visual Studio/Installer/vswhere.exe'
         installation = subprocess.check_output([str(vswhere), '-latest', '-products', '*', '-requires',
@@ -63,3 +72,7 @@ assert(key==1 && rows.size()==2);
         for source in ('void f(){auto [x,y,z]=v;}', 'void f(){auto&& [x,y]=v;}', 'void f(){}'):
             with self.assertRaises(ValueError):
                 lower_pairs(source, self.parser, walk, expected=1)
+        for source in ('void f(){Registration value(1, {2});}', 'Registration value(1, values);'):
+            with self.assertRaises(ValueError):
+                lower_constructor_arguments(source, self.parser, walk, constructor='Registration',
+                    argument=1, type_name='std::set<int>', expected=1)

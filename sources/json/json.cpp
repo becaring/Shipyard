@@ -329,9 +329,12 @@ class Parser {
             AfterComma = 4
         };
         json* value;
+        bool object;
         Stage state;
         std::string key;
-        Frame(json* v) : value(v), state(First) {
+        Frame(json* v) : value(v), object(v->is_object()), state(First) {
+        }
+        Frame(json* v, bool is_object) : value(v), object(is_object), state(First) {
         }
     };
     void next(bool final_scan = false) {
@@ -417,7 +420,7 @@ public:
         if (!strict_scanned)
             next();
     }
-    void parse(json& root, bool strict) {
+    void parse(json& root, bool strict, size_t maximum_depth = static_cast<size_t>(-1)) {
         next();
         std::vector<Frame> stack;
         if (value(root))
@@ -427,7 +430,7 @@ public:
         while (!stack.empty()) {
             Frame& f = stack.back();
             json* target = 0;
-            if (f.value->is_object()) {
+            if (f.object) {
                 if (f.state == Frame::First || f.state == Frame::AfterComma) {
                     if (f.state == Frame::First && token == Tok::end_object) {
                         stack.pop_back();
@@ -438,7 +441,8 @@ public:
                     if (token != Tok::value_string)
                         fail(Tok::value_string, "object key");
                     f.key = lexer.get_string();
-                    (*f.value)[f.key]; // SAX key event inserts null before checking the colon.
+                    if (f.value && stack.size() <= maximum_depth)
+                        (*f.value)[f.key]; // SAX key event inserts null before checking the colon.
                     f.state = Frame::AfterObjectKey;
                     next();
                     continue;
@@ -451,7 +455,8 @@ public:
                     continue;
                 }
                 if (f.state == Frame::BeforeObjectValue) {
-                    target = &(*f.value)[f.key];
+                    if (f.value && stack.size() <= maximum_depth)
+                        target = &(*f.value)[f.key];
                     f.state = Frame::AfterValue;
                 } else if (f.state == Frame::AfterValue) {
                     if (token == Tok::end_object) {
@@ -477,11 +482,13 @@ public:
                     json element;
                     // Invalid tokens throw before an array element is appended.
                     const bool structured = value(element);
-                    f.value->push_back(element);
-                    target = &(*f.value)[f.value->size() - 1];
+                    if (f.value && stack.size() <= maximum_depth) {
+                        f.value->push_back(element);
+                        target = &(*f.value)[f.value->size() - 1];
+                    }
                     f.state = Frame::AfterValue;
                     if (structured)
-                        stack.push_back(Frame(target));
+                        stack.push_back(Frame(target, element.is_object()));
                     next();
                     continue;
                 } else {
@@ -498,8 +505,10 @@ public:
                     continue;
                 }
             }
-            if (target && value(*target))
-                stack.push_back(Frame(target));
+            json discarded;
+            json& destination = target ? *target : discarded;
+            if (value(destination))
+                stack.push_back(Frame(target, destination.is_object()));
             next();
         }
         if (strict && token != Tok::end_of_input)
@@ -551,6 +560,13 @@ std::istream& operator>>(std::istream& stream, json& result) {
     StreamInputScope scope(stream);
     Parser(stream, false).parse(result, false);
     return stream;
+}
+
+json json::parse_depth_limited(std::istream& stream, size_t maximum_depth) {
+    StreamInputScope scope(stream);
+    json result;
+    Parser(stream, false).parse(result, true, maximum_depth);
+    return result;
 }
 
 static std::string EscapePointer(const std::string& text) {

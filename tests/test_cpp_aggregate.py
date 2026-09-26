@@ -1,7 +1,7 @@
 import unittest
 from tree_sitter import Language, Parser
 import tree_sitter_cpp
-from xbox360_platform.cpp_aggregate import lower_assignments, lower_macro_arguments
+from xbox360_platform.cpp_aggregate import lower_assignments, lower_macro_arguments, lower_returns
 from xbox360_platform.prism import walk
 
 
@@ -22,6 +22,16 @@ class AggregateTests(unittest.TestCase):
                                 ('void f(){g(a={});}', {'a': ('Key', 1)})]:
             with self.assertRaises(ValueError):
                 lower_assignments(source, self.parser, walk, targets)
+
+    def test_return_preserves_partial_initialization_and_evaluation(self):
+        source = 'Pair f(){if(c) return Pair{next(), {}}; return Pair{7};}'
+        result = lower_returns(source, self.parser, walk, {'Pair': 2})
+        self.assertEqual(result.count('next()'), 1)
+        self.assertIn(' = {next(), {}}; return ', result)
+        self.assertIn(' = {7}; return ', result)
+        self.assertFalse(self.parser.parse(result.encode()).root_node.has_error)
+        with self.assertRaises(ValueError):
+            lower_returns(source, self.parser, walk, {'Pair': 1})
 
     def test_macro_assignment_preserves_scope_and_single_evaluation(self):
         source = 'void f(){if(c) a=MAKE(next()); else a={};}'

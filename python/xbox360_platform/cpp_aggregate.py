@@ -62,6 +62,36 @@ def lower_assignments(text, parser, walk, targets, *, initializer_macros=()):
     return data.decode()
 
 
+def lower_returns(text, parser, walk, types):
+    """Retain reviewed aggregate return initialization through a local value."""
+    data = text.encode()
+    counts = dict.fromkeys(types, 0)
+    edits = []
+    for node in walk(parser.parse(data).root_node):
+        if node.type != 'return_statement' or len(node.named_children) != 1:
+            continue
+        value = node.named_children[0]
+        if value.type != 'compound_literal_expression':
+            continue
+        typ = value.child_by_field_name('type').text.decode()
+        if typ not in types:
+            continue
+        initializer = value.child_by_field_name('value')
+        if initializer.type != 'initializer_list':
+            raise ValueError('Unreviewed aggregate return')
+        temporary = '_aggregateReturn'+str(node.start_byte)
+        if temporary.encode() in data:
+            raise ValueError('Aggregate return temporary collision')
+        replacement = '{ '+typ+' '+temporary+' = '+initializer.text.decode()+'; return '+temporary+'; }'
+        edits.append((node.start_byte, node.end_byte, replacement.encode()))
+        counts[typ] += 1
+    if counts != types:
+        raise ValueError('Aggregate return inventory changed: '+repr(counts))
+    for first, last, replacement in sorted(edits, reverse=True):
+        data = data[:first]+replacement+data[last:]
+    return data.decode()
+
+
 def lower_union_payloads(text, parser, walk, *, union_name, expected_members, expected_assignments):
     """Name POD payloads and retain partial aggregate zero initialization in factories."""
     data = text.encode()

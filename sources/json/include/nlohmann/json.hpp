@@ -226,6 +226,9 @@ public:
     }
     static json parse(std::istream& stream, std::nullptr_t callback = nullptr,
                       bool allow_exceptions = true, bool ignore_comments = false);
+    // Retain values through the selected depth while validating the entire
+    // input. Equivalent to a parser callback returning depth <= maximum_depth.
+    static json parse_depth_limited(std::istream& stream, size_t maximum_depth);
     friend std::istream& operator>>(std::istream&, json&);
     friend std::ostream& operator<<(std::ostream&, const json&);
     friend class StreamWriter;

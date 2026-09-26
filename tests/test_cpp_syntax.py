@@ -76,6 +76,17 @@ def walk(node):
 
 
 class SyntaxTests(unittest.TestCase):
+    def test_inline_override_is_not_a_member_default(self):
+        from tree_sitter import Language, Parser as RealParser
+        import tree_sitter_cpp
+        parser = RealParser(Language(tree_sitter_cpp.language()))
+        source = 'struct State { void Draw() override{}; int count = 4; };'
+        lowered, fields = collect_member_defaults(source, 'State', parser, walk)
+        self.assertIn('void Draw() override{};', lowered)
+        self.assertEqual([(field.name, field.value) for field in fields], [('count', '4')])
+        with self.assertRaisesRegex(ValueError, 'Unsupported member default'):
+            collect_member_defaults('struct State { void (*callback)() = nullptr; };', 'State', parser, walk)
+
     def test_member_defaults(self):
         source = 'struct State { int count = 4; float scales[2] = {1.0f, 2.0f}; bool enabled = true; };'
         lowered, fields = collect_member_defaults(source, 'State', MemberParser(), walk)
