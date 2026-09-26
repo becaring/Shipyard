@@ -8,6 +8,28 @@ import re
 _STRING = r'"(?:[^"\\]|\\.)*"'
 
 
+def lower_binary_integers(text, parser):
+    """Convert binary integer tokens to hex, preserving C++ integer suffixes."""
+    data = text.encode()
+    pending = [parser.parse(data).root_node]
+    edits = []
+    while pending:
+        node = pending.pop()
+        pending.extend(node.named_children)
+        if node.type == 'user_defined_literal' and node.text.lower().startswith(b'0b'):
+            raise ValueError('Unaudited binary integer literal')
+        if node.type != 'number_literal' or not node.text.lower().startswith(b'0b'):
+            continue
+        match = re.fullmatch(rb'0[bB]([01]+)([uUlL]*)', node.text)
+        if match is None or match[2].lower() not in (b'', b'u', b'l', b'ul', b'lu', b'll', b'ull', b'llu'):
+            raise ValueError('Unaudited binary integer literal')
+        value = ('0x%x' % int(match[1], 2)).encode() + match[2]
+        edits.append((node.start_byte, node.end_byte, value))
+    for start, end, value in sorted(edits, reverse=True):
+        data = data[:start] + value + data[end:]
+    return data.decode()
+
+
 def lower_ascii_array(text, declaration, expected_length, expected_sha256):
     """Keep exact bytes while replacing a concatenated literal with integers."""
     if text.count(declaration) != 1:

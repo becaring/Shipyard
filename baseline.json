@@ -11,7 +11,7 @@
     "python/xbox360_platform/c89_lower.py": "4e5cfa3ae4a13742d1490fd8a68baf3778689993f9e0af24b4f2582e392884de",
     "python/xbox360_platform/combiner_lookup.py": "bdb7c2158a8bfeeccf5f6e9e10a9a0d4c31c1ed89cdddd2258f02e7a8aa77b48",
     "python/xbox360_platform/contract.py": "588fef79b831e0496021ee1341f20ca156ebf5fdb9f24f2eba8f68c3df87c165",
-    "python/xbox360_platform/cpp_literals.py": "bf949b3901a7515e3abd22a7c359a2283cef7f636c6abc372f9b13c1feae7e52",
+    "python/xbox360_platform/cpp_literals.py": "eb7342f7e84e14df25d250e77f3fbaef45237dc510e22e4a3ca64564d069aef0",
     "python/xbox360_platform/cpp_syntax.py": "aec3d2f2c443293f4dcc4f04816c7566c0e546ad84ac8a96359ad697c8769eed",
     "python/xbox360_platform/fast3d_opcode.py": "96c9aba7254c62ac0c6e0bf4e216afb38b0cad093be7aec32e7023dadecaca20",
     "python/xbox360_platform/fast3d_triangle_certificate.py": "1d562b1676eaeb2bb5f11ae3b93c33eee37d22d02fbdc5896dd4a1401da9ac98",
