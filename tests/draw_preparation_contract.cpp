@@ -32,6 +32,7 @@ struct NativeState { unsigned sampler[6][5];float constants[12],binding_constant
     bool sampler_valid[6],constants_valid,alpha_valid,binding_constants_valid;void *vertex,*pixel,*declaration;
 } native_state={};
 unsigned constantCalls,bindingCalls,samplerCalls,verifyCalls;
+std::vector<int> productionOrder, referenceOrder;
 bool verifyReuse;
 void require(bool b,const char* message) { if(!b) { std::fprintf(stderr,"FAIL %s\n",message);std::exit(1); } }
 void Shipyard_Fatal(const char*,int) { throw std::runtime_error("fatal"); }
@@ -50,19 +51,22 @@ void VerifyNativeConstants(const float* values) { ++verifyCalls;require(!std::me
 void VerifyNativeBindingConstants(const float* values) { ++verifyCalls;require(!std::memcmp(values,native_state.binding_constants,sizeof(native_state.binding_constants)),"verify bindings"); }
 void VerifyNativeSampler(int slot,const unsigned* values) { ++verifyCalls;require(!std::memcmp(values,native_state.sampler[slot],sizeof(native_state.sampler[slot])),"verify sampler"); }
 void SamplerValues(unsigned* dst,const TextureSampler& s) { dst[0]=s.linear;dst[1]=s.s;dst[2]=s.t;dst[3]=filtering;dst[4]=0; }
-void ApplySampler(int slot,const TextureSampler& s) { draw_state_prepared=false;++samplerCalls;SamplerValues(native_state.sampler[slot],s);native_state.sampler_valid[slot]=true; }
-void SetNativeConstants(const float* values) { ++constantCalls;std::memcpy(native_state.constants,values,sizeof(native_state.constants)); }
-void SetNativeBindingConstants(const float* values) { ++bindingCalls;std::memcpy(native_state.binding_constants,values,sizeof(native_state.binding_constants)); }
+void ApplySampler(int slot,const TextureSampler& s) { productionOrder.push_back(slot);draw_state_prepared=false;++samplerCalls;SamplerValues(native_state.sampler[slot],s);native_state.sampler_valid[slot]=true; }
+void SetNativeConstants(const float* values) { productionOrder.push_back(10);++constantCalls;std::memcpy(native_state.constants,values,sizeof(native_state.constants)); }
+void SetNativeBindingConstants(const float* values) { productionOrder.push_back(11);++bindingCalls;std::memcpy(native_state.binding_constants,values,sizeof(native_state.binding_constants)); }
 namespace Oracle {
 float constants[12],bindings[24];unsigned samplers[6][5];
-void ApplySampler(int slot,const TextureSampler& s) { SamplerValues(samplers[slot],s); }
-void SetNativeConstants(const float* values) { std::memcpy(constants,values,sizeof(constants)); }
-void SetNativeBindingConstants(const float* values) { std::memcpy(bindings,values,sizeof(bindings)); }
+void ApplySampler(int slot,const TextureSampler& s) { referenceOrder.push_back(slot);SamplerValues(samplers[slot],s); }
+void SetNativeConstants(const float* values) { referenceOrder.push_back(10);std::memcpy(constants,values,sizeof(constants)); }
+void SetNativeBindingConstants(const float* values) { referenceOrder.push_back(11);std::memcpy(bindings,values,sizeof(bindings)); }
 #include "draw_preparation_reference.inc"
 }
 #include "production.inc"
 void compare() {
+    bool rebuilt = !draw_state_prepared;
+    productionOrder.clear();referenceOrder.clear();
     PrepareDrawState();Oracle::ReferencePrepareDrawState();
+    if (rebuilt) require(productionOrder == referenceOrder,"native preparation order differs");
     require(!std::memcmp(native_state.constants,Oracle::constants,sizeof(Oracle::constants)),"original constants differ");
     require(!std::memcmp(native_state.binding_constants,Oracle::bindings,sizeof(Oracle::bindings)),"original bindings differ");
     // Only slots written by original preparation are authoritative for this draw.
@@ -102,5 +106,23 @@ int main() {
         RebindSampledTextures();SelectTexture(i%6,id);Sampler(i%6,(i&1)!=0,i%4,(i/4)%4);
         Filter(FilteringMode(i%3));LoadShader(&shaders[i%3]);repeated();
     }
-    std::puts("PASS original draw preparation differential: stable 100 draws blocks 100->1 each, sampler preparations 600->6; aliases/filter/shader/resource/framebuffer/native invalidation");
+    ShaderProgram exhaustive = {};
+    current_shader = &exhaustive;
+    for (unsigned pattern = 0; pattern < 729; ++pattern) {
+        unsigned value = pattern;
+        for (unsigned slot = 0; slot < 6; ++slot) {
+            unsigned kind = value % 3; value /= 3;
+            selected_fb[slot] = kind == 1 ? int(slot % 2) : -1;
+            selected[slot] = kind == 0 ? slot % textures.size() : UINT32_MAX;
+        }
+        for (unsigned mask = 0; mask < 4; ++mask) {
+            exhaustive.features.usedTextures[0] = (mask & 1) != 0;
+            exhaustive.features.usedTextures[1] = (mask & 2) != 0;
+            for (unsigned filter = 0; filter < 3; ++filter) {
+                filtering = FilteringMode(filter);
+                InvalidateNativeState();repeated();
+            }
+        }
+    }
+    std::puts("PASS original draw preparation differential: stable reuse and 8748 texture/framebuffer/unbound, shader-mask and filter combinations; exact sampler/constant order");
 }
