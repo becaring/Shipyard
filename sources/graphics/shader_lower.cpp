@@ -1,5 +1,6 @@
 #include "shader_lower.h"
 #include <cstdio>
+#include <cctype>
 
 namespace {
 
@@ -206,6 +207,25 @@ bool Shipyard_LowerShader(const std::string& hlsl, std::string& lowered, std::st
         !Block(text, "cbuffer PerDrawCB : register(b1)", "float4 texInfo[2] : register(c1);\n")) {
         error = "Malformed Fast3D PerDrawCB";
         return false;
+    }
+    const size_t primitive = text.find("cbuffer PerPrimDepthCB");
+    if (primitive != std::string::npos) {
+        const size_t end = text.find('}', primitive);
+        std::string shape;
+        if (end != std::string::npos) {
+            for (size_t i = primitive; i <= end; ++i)
+                if (!std::isspace(static_cast<unsigned char>(text[i]))) shape += text[i];
+        }
+        if ((shape != "cbufferPerPrimDepthCB:register(b2){floatprim_depth;float3_pad;}" &&
+             shape != "cbufferPerPrimDepthCB:register(b2){floatprim_depth;float3_pad;//padto16-bytecbufferalignment}") ||
+            text.find("cbuffer PerPrimDepthCB", primitive + 1) != std::string::npos ||
+            text.find("float depth : SV_Depth;") == std::string::npos) {
+            error = "Unsupported Fast3D primitive-depth contract";
+            return false;
+        }
+        text.replace(primitive, end - primitive + 1,
+                     "float4 primDepthInfo : register(c3);\n#define prim_depth primDepthInfo.x\n");
+        Replace(text, "float depth : SV_Depth;", "float depth : DEPTH;");
     }
 
     // Clamp shaders need dimensions even when three-point filtering is off.

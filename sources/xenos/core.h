@@ -32,6 +32,8 @@ void CaptureAndResetCounters(NativeCounters* counters);
 GfxClipParameters ClipParameters();
 void UnloadShader(ShaderProgram* shader);
 void LoadShader(ShaderProgram* shader);
+void ClearShaderCache();
+void SetCurrentPrimDepth(float depth);
 ShaderProgram* CreateShader(const ShaderProgramKey& key);
 ShaderProgram* LookupShader(const ShaderProgramKey& key);
 ShaderProgramKey ShaderKey(const ShaderProgram* shader);

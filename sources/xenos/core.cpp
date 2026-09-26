@@ -3,7 +3,6 @@
 #include "pixels.h"
 #include "shader_provider.h"
 
-#include "xenos_backend.h"
 #include "metrics.h"
 #include <xgraphics.h>
 #include <vectorintrinsics.h>
@@ -95,6 +94,8 @@ std::vector<Framebuffer> buffers;
 std::vector<int> free_framebuffers;
 unsigned framebuffer_clear_count, framebuffer_restore_avoided, framebuffer_depth_restore_avoided;
 ShaderProgram* current_shader;
+float primitive_depth;
+bool primitive_depth_enabled, primitive_depth_valid;
 uint32_t selected[6];
 int selected_fb[6] = {-1, -1, -1, -1, -1, -1};
 int upload_tile, active_fb;
@@ -144,6 +145,7 @@ const D3DSAMPLERSTATETYPE sampler_fields[5] = {
     D3DSAMP_MINFILTER, D3DSAMP_MAGFILTER, D3DSAMP_MIPFILTER, D3DSAMP_ADDRESSU, D3DSAMP_ADDRESSV};
 
 void InvalidateNativeState() {
+    primitive_depth_valid = false;
     for (int i = 0; i < 6; ++i) {
         native_state.sampler_valid[i] = false;
     }
@@ -703,6 +705,11 @@ void Draw(float* vertices, size_t count, size_t triangles) {
             }
         }
     SetNativeConstants(constants);
+    if (primitive_depth_enabled && !primitive_depth_valid) {
+        const float depth[4] = {primitive_depth, 0, 0, 0};
+        Shipyard_Check(xenos_device->SetPixelShaderConstantF(3, depth, 1), "primitive depth");
+        primitive_depth_valid = true;
+    }
     __declspec(align(16)) float binding_info[24] = {0};
     for (int binding = 0; binding < 6; ++binding) {
         if (selected_fb[binding] >= 0) {
@@ -1642,6 +1649,33 @@ void UnloadShader(ShaderProgram* shader) {
 }
 void LoadShader(ShaderProgram* shader) {
     ::Fast::LoadShader(shader);
+}
+void SetCurrentPrimDepth(float depth) {
+    if (!primitive_depth_enabled || primitive_depth != depth) primitive_depth_valid = false;
+    primitive_depth = depth;
+    primitive_depth_enabled = true;
+}
+void ClearShaderCache() {
+    if (xenos_device) {
+        FinishFramebuffer();
+        xenos_device->SetVertexShader(NULL);
+        xenos_device->SetPixelShader(NULL);
+        xenos_device->SetVertexDeclaration(NULL);
+        xenos_device->BlockUntilIdle();
+    }
+    for (std::map<ShaderProgramKey, ShaderProgram*>::iterator it = shaders.begin();
+         it != shaders.end(); ++it) {
+        ShaderProgram* shader = it->second;
+        shader->vertex->Release();
+        shader->pixel->Release();
+        shader->declaration->Release();
+        delete shader;
+    }
+    shaders.clear();
+    vertex_programs.clear();
+    vertex_declarations.clear();
+    current_shader = NULL;
+    InvalidateNativeState();
 }
 ShaderProgram* CreateShader(const ShaderProgramKey& key) {
     return ::Fast::CreateShader(key);
