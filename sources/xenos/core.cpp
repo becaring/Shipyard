@@ -119,6 +119,7 @@ std::vector<int> free_framebuffers;
 unsigned framebuffer_clear_count, framebuffer_restore_avoided, framebuffer_depth_restore_avoided;
 unsigned framebuffer_depth_resolves, framebuffer_depth_resolves_skipped;
 unsigned framebuffer_early_depth_fences;
+unsigned tiling_draw_restarts, tiling_peak_bytes;
 bool discard_presentation_depth_on_end;
 ShaderProgram* current_shader;
 uint32_t selected[6];
@@ -792,8 +793,10 @@ void Draw(float* vertices, size_t count, size_t triangles) {
     // restart the native bracket before it consumes its reserved command space.
     // The allowance includes state-command space for each Fast3D batch.
     if (live_framebuffer && buffers[active_fb].tiles.size() > 1 &&
-        tiling_draw_bytes + count * sizeof(float) + 8192 > 2 * 1024 * 1024)
+        tiling_draw_bytes + count * sizeof(float) + 8192 > 2 * 1024 * 1024) {
+        ++tiling_draw_restarts;
         FinishFramebuffer();
+    }
     BeginFramebuffer();
     PrepareDrawState();
     ApplyAlpha(); // Also handles shader-only changes and external state restoration.
@@ -801,6 +804,8 @@ void Draw(float* vertices, size_t count, size_t triangles) {
                                                  (UINT)(current_shader->floats * 4)),
                    "Shipyard DrawPrimitiveUP");
     tiling_draw_bytes += count * sizeof(float) + 8192;
+    if (buffers[active_fb].tiles.size() > 1 && tiling_draw_bytes > tiling_peak_bytes)
+        tiling_peak_bytes = (unsigned)tiling_draw_bytes;
 }
 void ValidateFramebuffer(int id) {
     if (id < 0 || (size_t)id >= buffers.size() ||
@@ -1773,6 +1778,8 @@ void CaptureAndResetCounters(NativeCounters* counters) {
     counters->depthResolves = framebuffer_depth_resolves;
     counters->depthResolvesSkipped = framebuffer_depth_resolves_skipped;
     counters->earlyDepthFences = framebuffer_early_depth_fences;
+    counters->tilingDrawRestarts = tiling_draw_restarts;
+    counters->tilingPeakBytes = tiling_peak_bytes;
     counters->pendingTextures = (unsigned)pending_texture_releases.size();
     counters->pendingBytes = (unsigned)pending_texture_bytes;
     for (size_t i = 0; i < buffers.size(); ++i)
@@ -1789,6 +1796,7 @@ void CaptureAndResetCounters(NativeCounters* counters) {
     framebuffer_clear_count = framebuffer_restore_avoided = framebuffer_depth_restore_avoided = 0;
     framebuffer_depth_resolves = framebuffer_depth_resolves_skipped = 0;
     framebuffer_early_depth_fences = 0;
+    tiling_draw_restarts = tiling_peak_bytes = 0;
 }
 GfxClipParameters ClipParameters() {
     return ::Fast::ClipParameters();
