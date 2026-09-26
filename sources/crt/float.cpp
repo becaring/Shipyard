@@ -14,6 +14,10 @@ typedef char
 #define SHIPYARD_CRT_NEARBYINTF nearbyintf
 #endif
 
+#ifndef SHIPYARD_CRT_NEARBYINT
+#define SHIPYARD_CRT_NEARBYINT nearbyint
+#endif
+
 namespace {
 enum Rounding { NearestEven, TowardZero, Downward, Upward, AwayAtHalf };
 
@@ -55,6 +59,41 @@ float Integral(float value, Rounding mode) {
     memcpy(&value, &result, sizeof(value));
     return value;
 }
+
+double Integral(double value, Rounding mode) {
+    typedef unsigned long long Bits;
+    typedef char Binary64[(sizeof(double) == 8 && sizeof(Bits) == 8 &&
+                           DBL_MANT_DIG == 53 && DBL_MAX_EXP == 1024) ? 1 : -1];
+    Bits bits;
+    memcpy(&bits, &value, sizeof(bits));
+    const Bits sign = bits & 0x8000000000000000ULL;
+    const Bits magnitude = bits & 0x7fffffffffffffffULL;
+    const unsigned int exponent = static_cast<unsigned int>(magnitude >> 52);
+    if (exponent == 2047)
+        return (magnitude & 0x000fffffffffffffULL) ? value + value : value;
+    if (exponent >= 1075 || magnitude == 0)
+        return value;
+    Bits result;
+    if (exponent < 1023) {
+        bool increment = (mode == Downward && sign != 0) || (mode == Upward && sign == 0);
+        if (mode == NearestEven)
+            increment = magnitude > 0x3fe0000000000000ULL;
+        result = sign | (increment ? 0x3ff0000000000000ULL : 0);
+    } else {
+        const Bits unit = 1ULL << (1075 - exponent);
+        const Bits mask = unit - 1;
+        const Bits remainder = magnitude & mask;
+        if (remainder == 0)
+            return value;
+        const Bits half = unit >> 1;
+        bool increment = (mode == Downward && sign != 0) || (mode == Upward && sign == 0);
+        if (mode == NearestEven)
+            increment = remainder > half || (remainder == half && (magnitude & unit) != 0);
+        result = (bits & ~mask) + (increment ? unit : 0);
+    }
+    memcpy(&value, &result, sizeof(value));
+    return value;
+}
 } // namespace
 
 extern "C" float __cdecl SHIPYARD_CRT_ROUNDF(float value) {
@@ -66,6 +105,15 @@ extern "C" float __cdecl SHIPYARD_CRT_TRUNCF(float value) {
 }
 
 extern "C" float __cdecl SHIPYARD_CRT_NEARBYINTF(float value) {
+    const unsigned int control = _controlfp(0, 0) & _MCW_RC;
+    const Rounding mode = control == _RC_DOWN   ? Downward
+                          : control == _RC_UP   ? Upward
+                          : control == _RC_CHOP ? TowardZero
+                                                : NearestEven;
+    return Integral(value, mode);
+}
+
+extern "C" double __cdecl SHIPYARD_CRT_NEARBYINT(double value) {
     const unsigned int control = _controlfp(0, 0) & _MCW_RC;
     const Rounding mode = control == _RC_DOWN   ? Downward
                           : control == _RC_UP   ? Upward
