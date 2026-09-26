@@ -6,8 +6,8 @@ import tempfile
 import unittest
 from tree_sitter import Language, Parser
 import tree_sitter_cpp
-from xbox360_platform.cpp_initializers import lower
-from xbox360_platform.cpp_call_initializers import lower as lower_calls
+from xbox360_platform.cpp_initializers import lower, lower_returns
+from xbox360_platform.cpp_call_initializers import lower as lower_calls, lower_designated
 from xbox360_platform.prism import walk
 
 
@@ -24,6 +24,11 @@ int calls=0;
 int next(){return ++calls;}
 struct Pod { int first; int second; };
 void take(Pod x, Pod y) { assert(x.first==1 && x.second==0 && y.first==2 && y.second==3); }
+void takePod(Pod x) { assert(x.first==7 && x.second==0); }
+struct Defaults { int first, second; Defaults():first(12),second(23){} };
+void takeDefaults(Defaults x) { assert(x.first==12 && x.second==45); }
+void takeNamed(int tag, Defaults x) { assert(tag==3 && x.first==12 && x.second==45); }
+std::vector<int> values(int input) { return {input,input+1}; }
 const std::vector<int> globalValues = {next(), next()};
 int inspect(int input) {
     static std::vector<int> empty = {};
@@ -34,7 +39,10 @@ int inspect(int input) {
     assert(localValues[0]==input);
     return localValues[1];
 }
-int main(){take({1}, {2,3}); assert(calls==2 && globalValues[0]==1 && globalValues[1]==2);
+int main(){takePod(Pod{.first=7}); takeDefaults({.second=45});
+takeNamed(3, {.second=45});
+assert(values(8)[1]==9);
+take({1}, {2,3}); assert(calls==2 && globalValues[0]==1 && globalValues[1]==2);
 assert(inspect(7)==5); assert(inspect(8)==6); assert(calls==6);}
 '''
         generated = lower(source, self.parser, walk, {
@@ -44,6 +52,13 @@ assert(inspect(7)==5); assert(inspect(8)==6); assert(calls==6);}
             'localValues': ('std::vector<int>', 1)})
         self.assertIn('empty = std::vector<int>()', generated)
         generated = lower_calls(generated, self.parser, walk, function='take', types=('Pod','Pod'), expected=1)
+        generated = lower_designated(generated, self.parser, walk, function='takePod',
+            type_name='Pod', fields=('first',), expected=1)
+        generated = lower_designated(generated, self.parser, walk, function='takeDefaults',
+            type_name='Defaults', fields=('second',), expected=1)
+        generated = lower_returns(generated, self.parser, walk, {'values': ('std::vector<int>', 1)})
+        generated = lower_designated(generated, self.parser, walk, function='takeNamed',
+            type_name='Defaults', fields=[('second',)], expected=1, argument=1, arity=2)
         vswhere = Path(os.environ['ProgramFiles(x86)'])/'Microsoft Visual Studio/Installer/vswhere.exe'
         installation = subprocess.check_output([str(vswhere), '-latest', '-products', '*', '-requires',
             'Microsoft.VisualStudio.Component.VC.Tools.x86.x64', '-property', 'installationPath'], text=True).strip()
@@ -61,3 +76,9 @@ assert(inspect(7)==5); assert(inspect(8)==6); assert(calls==6);}
                        'void f(){std::vector<int> values(3);}', 'struct A{std::vector<int> values={1};};'):
             with self.assertRaises(ValueError):
                 lower(source, self.parser, walk, {'values': ('std::vector<int>', 1)})
+        with self.assertRaises(ValueError):
+            lower_designated('void f(){take({.second=1});}', self.parser, walk,
+                function='take', type_name='Pod', fields=('first',), expected=1)
+        with self.assertRaises(ValueError):
+            lower_returns('std::vector<float> f(){return {1};}', self.parser, walk,
+                {'f': ('std::vector<int>', 1)})

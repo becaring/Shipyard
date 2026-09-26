@@ -35,6 +35,44 @@ def lower_lookup_keys(text, parser, walk, lookups):
     return data.decode()
 
 
+def lower_returns(text, parser, walk, functions):
+    """Materialize container return lists in explicitly selected functions."""
+    data = text.encode()
+    counts = dict.fromkeys(functions, 0)
+    edits = []
+    for node in walk(parser.parse(data).root_node):
+        if node.type != 'return_statement' or len(node.named_children) != 1:
+            continue
+        value = node.named_children[0]
+        if value.type != 'initializer_list':
+            continue
+        owner = node.parent
+        while owner is not None and owner.type not in ('function_definition', 'lambda_expression'):
+            owner = owner.parent
+        if owner is None or owner.type != 'function_definition':
+            continue
+        declaration = owner.child_by_field_name('declarator')
+        if declaration.type != 'function_declarator':
+            continue
+        name = declaration.child_by_field_name('declarator').text.decode()
+        if name not in functions:
+            continue
+        typ, expected = functions[name]
+        if owner.child_by_field_name('type').text.decode() != typ or value.has_error:
+            raise ValueError('Container return signature changed')
+        if b'_containerReturn' in data:
+            raise ValueError('Container return temporary collision')
+        statements, result = materialize(typ, value, prefix='_containerReturn')
+        replacement = '{ '+statements+'\nreturn '+result+'; }'
+        edits.append((node.start_byte, node.end_byte, replacement.encode()))
+        counts[name] += 1
+    if any(counts[name] != functions[name][1] for name in functions):
+        raise ValueError('Container return inventory changed: '+repr(counts))
+    for first, last, replacement in sorted(edits, reverse=True):
+        data = data[:first]+replacement+data[last:]
+    return data.decode()
+
+
 def lower(text, parser, walk, declarations):
     data = text.encode()
     if b'_containerInitializer' in data:
