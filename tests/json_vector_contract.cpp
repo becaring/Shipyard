@@ -93,6 +93,16 @@ template <class Json> void check(const char* kind) {
     catch (const std::bad_alloc&) {}
     fail_allocation = false;
     require(live_allocations == 0 && mixed.dump() == before, "allocation failure ownership");
+
+    // Pinned nlohmann reserves before converting even the first array element.
+    Json invalid_first = Json::array();
+    invalid_first.push_back("invalid integer");
+    fail_allocation = true;
+    try { (void)invalid_first.template get<Vector>(); require(false, "reservation failure ignored"); }
+    catch (const std::bad_alloc&) {}
+    fail_allocation = false;
+    require(live_allocations == 0 && invalid_first[0].template get<std::string>() == "invalid integer",
+            "first-element reservation failure ownership");
 }
 
 int main() {
