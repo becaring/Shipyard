@@ -26,7 +26,7 @@
     "python/xbox360_platform/resource_lookup.py": "aebb6a894bf54224d4fbdde5fb73c26e76493c24e5c24d4753a744a37ad6d9a3",
     "python/xbox360_platform/shade_cache.py": "ec2f6c766d4069af2783dd402b700d61b1e229b4016779d22820401232b42002",
     "python/xbox360_platform/value_types.py": "2c0be47c442ae8235a1fff275de9e133707dd27a0d4b4556b71c06f071cb7370",
-    "python/xbox360_platform/vertex_stream.py": "ad42ae41527ba9961c589f498b5345bfa7fd8b27446349a43dc325d9deb7eadd",
+    "python/xbox360_platform/vertex_stream.py": "92f3e5ed8843ea7bfd74102e2e690c41f6d29580d9461be8d946845093feda0a",
     "sources/async/detached.cpp": "520b1ea6252bf21666402d55a4d8079e0850cc11a03eb8e1c5fc3a0ee0122e28",
     "sources/async/detached.h": "91dd1d3fa29e38b0a0b15c57948cf7851a552a64e2c376a90b5a5d789ac8e257",
     "sources/async/future.h": "685fe2baf65cee30841c5c195c7502d3918934f14af0704345bad8a7d5a193f8",

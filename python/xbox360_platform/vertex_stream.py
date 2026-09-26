@@ -8,6 +8,30 @@ Nothing here chooses material, texture, shader, or game behavior.
 import re
 
 
+def hoist_clamp_bounds(source, *, start, end, cursor, used_textures, axes):
+    """Evaluate each used slot/axis bound once, retaining its exact expression.
+
+    The consumer supplies audited invariant expressions and guards. No value
+    survives the packing call; unused textures and axes remain unevaluated.
+    """
+    if source.count(start) != 1 or source.count(end) != 1:
+        raise ValueError('Fast3D clamp loop anchors changed')
+    begin = source.index(start)
+    finish = source.index(end, begin)
+    body = source[begin:finish]
+    prelude = ''.join('    float %s[2];\n' % name for name, guard, expr in axes)
+    prelude += '    for (int t = 0; t < 2; ++t) {\n'
+    prelude += '        if (!%s[t]) continue;\n' % used_textures
+    for name, guard, expr in axes:
+        assignment = '*%s++ = %s;' % (cursor, expr)
+        if body.count(assignment) != 1:
+            raise ValueError('Fast3D clamp expression changed: ' + name)
+        body = body.replace(assignment, '*%s++ = %s[t];' % (cursor, name))
+        prelude += '        if (%s) %s[t] = %s;\n' % (guard, name, expr)
+    prelude += '    }\n'
+    return source[:begin] + prelude + body + source[finish:]
+
+
 def lower(source, *, start, end, color_pattern, namespace, cursor,
           expected_writes, expected_colors):
     if source.count(start) != 1 or source.count(end) != 1:
