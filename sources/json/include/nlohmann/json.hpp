@@ -483,6 +483,7 @@ template <class T, class A> struct conversion<std::vector<T, A> > {
         if (!j.is_array())
             throw json::type_error(302, std::string("type must be array, but is ") + j.type_name());
         std::vector<T, A> result;
+        result.reserve(j.size());
         for (size_t i = 0; i < j.size(); ++i)
             result.push_back(j[i].get<T>());
         return result;
