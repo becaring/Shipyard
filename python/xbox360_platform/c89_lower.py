@@ -15,7 +15,7 @@ def upstream_source(name: bytes) -> bool:
 
 
 def lower(source: bytes, *, active_source=upstream_source,
-          float_union_type: bytes | None = None) -> tuple[bytes, int]:
+          float_union_type: bytes | None = None, xdk_inline: bool = False) -> tuple[bytes, int]:
     # Mask non-source spans only in the parser view. XDK intrinsic headers are
     # not valid tree-sitter C input, and byte offsets must remain unchanged.
     if b'#line ' in source:
@@ -43,6 +43,9 @@ def lower(source: bytes, *, active_source=upstream_source,
 
     def visit(node):
         nonlocal count
+        if xdk_inline and node.type == 'storage_class_specifier' and node.text == b'inline':
+            edits.append((node.start_byte, node.end_byte, b'__inline'))
+            count += 1
         if node.type == 'initializer_pair' and float_union_type is not None:
             designator = node.child_by_field_name('designator')
             value = node.child_by_field_name('value')
