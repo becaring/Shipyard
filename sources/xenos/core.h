@@ -27,7 +27,7 @@ struct NativeCounters {
     unsigned bindingAttempted, bindingWritten, bindingSuppressed;
     unsigned uploadRequests, uploadReused, uploadSavedBytes;
     unsigned clears, restoresAvoided, depthRestoresAvoided;
-    unsigned depthResolves, depthResolvesSkipped;
+    unsigned depthResolves, depthResolvesSkipped, earlyDepthFences;
     unsigned pendingTextures, pendingBytes, width, height, samples, tiles;
 };
 void CaptureAndResetCounters(NativeCounters* counters);

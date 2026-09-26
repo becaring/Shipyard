@@ -118,6 +118,7 @@ std::vector<Framebuffer> buffers;
 std::vector<int> free_framebuffers;
 unsigned framebuffer_clear_count, framebuffer_restore_avoided, framebuffer_depth_restore_avoided;
 unsigned framebuffer_depth_resolves, framebuffer_depth_resolves_skipped;
+unsigned framebuffer_early_depth_fences;
 bool discard_presentation_depth_on_end;
 ShaderProgram* current_shader;
 uint32_t selected[6];
@@ -1041,6 +1042,14 @@ void FinishFramebuffer(bool preserveDepth) {
         Shipyard_Check(xenos_device->EndTiling(0, NULL, NULL, &clear, 1, 0, NULL),
                        "finish framebuffer tiling");
     }
+    // Seal the resolved depth resource's SDK fence before later presentation
+    // commands enter the same interval. PixelDepth may lock this texture during
+    // the next game update; this fence submits work but does not wait for it.
+    // EndTiling must be complete before inserting a fence.
+    if (b.tiles.size() > 1 && b.depth && preserveDepth) {
+        xenos_device->InsertFence();
+        ++framebuffer_early_depth_fences;
+    }
     b.stored = true;
     b.depth_stored = preserveDepth && b.depth != NULL;
     live_framebuffer = false;
@@ -1763,6 +1772,7 @@ void CaptureAndResetCounters(NativeCounters* counters) {
     counters->depthRestoresAvoided = framebuffer_depth_restore_avoided;
     counters->depthResolves = framebuffer_depth_resolves;
     counters->depthResolvesSkipped = framebuffer_depth_resolves_skipped;
+    counters->earlyDepthFences = framebuffer_early_depth_fences;
     counters->pendingTextures = (unsigned)pending_texture_releases.size();
     counters->pendingBytes = (unsigned)pending_texture_bytes;
     for (size_t i = 0; i < buffers.size(); ++i)
@@ -1778,6 +1788,7 @@ void CaptureAndResetCounters(NativeCounters* counters) {
     binding_attempted = binding_written = binding_suppressed = 0;
     framebuffer_clear_count = framebuffer_restore_avoided = framebuffer_depth_restore_avoided = 0;
     framebuffer_depth_resolves = framebuffer_depth_resolves_skipped = 0;
+    framebuffer_early_depth_fences = 0;
 }
 GfxClipParameters ClipParameters() {
     return ::Fast::ClipParameters();
