@@ -5,6 +5,7 @@
   "platform": "Xbox 360",
   "files": {
     "python/xbox360_platform/__init__.py": "4f5a09a20bfd3f0cec494d708433bffc547508c3296212ed7b071aa66aa31253",
+    "python/xbox360_platform/bool_lower.py": "a2be8865de62b3b7b66aad031397d12341e38a315c4d9e1503d8095c803caf4a",
     "python/xbox360_platform/bs_thread_pool.py": "441294ae253f552914fd53432aa8ac1f783784b5a0d72e57f75dedd3b6b98fe2",
     "python/xbox360_platform/build_policy.py": "e996420eaf2f8924059640e273deeb8dd9216ca79d61831f48854278f9ed27b0",
     "python/xbox360_platform/c89_lower.py": "4e5cfa3ae4a13742d1490fd8a68baf3778689993f9e0af24b4f2582e392884de",
@@ -45,6 +46,7 @@
     "sources/crt/float.cpp": "e4f77462c4737890b5f309f8d385373826d76e81f2ff27e7ace3f0de835e14ec",
     "sources/crt/format.cpp": "b7c48189f1fb783e8f696cd1e4b8d007c20dc631c8f9af65e2e095da95a8aa3c",
     "sources/crt/format.h": "a8138a106cfbb19e8384ae0fa9835faee4f5d711b5786e35d44bd53eee0f2419",
+    "sources/crt/stdbool.h": "e5db3f4a7e601b288d6a9941b4c8f7d659c0e0fe2c472625e04d8076afb6b4b5",
     "sources/diagnostics/queue.cpp": "99a838c169bc5dd2ee2b4d41e8155d2ca59173c2a59479a4671f52048180bc8c",
     "sources/diagnostics/queue.h": "3ebf192779f813279b103f20e30fbfef260dae79f4785d17649264ee47f61e46",
     "sources/entropy/native.h": "7f676343729585f991bdf5395a17c9e5cab2ea3ab10cd89e07071b607febafe6",
@@ -120,6 +122,7 @@
     "sources/xenos/pixels.h": "9425ff73bb6274f435cde970587903e39a8d0a0d3d528e13228d61e907d8427e",
     "sources/xenos/shader_cache.cpp": "00e182b113a5b25176af900149a282db467a4af29ca5ddb6ad892b0c3496d7fd",
     "sources/xenos/shader_cache.h": "5a907009bb2167f8a79beefd50937f72fd444473890dfc4d84e1369e53c44958",
+    "tests/test_bool_lower.py": "866b769d9855471a1d5571bd3fe51977e87e8de9426080490276d450ed954b16",
     "third_party/nlohmann-3.12.0/LICENSE.MIT": "c0d068392ea65358b798b8c165103560f06e9e3b38c4ab4e2d8810a7b931af86",
     "third_party/nlohmann-3.12.0/README.md": "db956b02ff2ec454bd5fc35b84508b3c5f3ff0e3c76484fde79be3ecb5ae794b",
     "third_party/nlohmann-3.12.0/include/nlohmann/detail/conversions/to_chars.hpp": "20b9bc4469ee490bc626d8dbcdee060a494292473df4bdbcecfe2f2145ed562d",
