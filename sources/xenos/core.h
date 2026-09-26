@@ -35,9 +35,10 @@ void CaptureAndResetCounters(NativeCounters* counters);
 // draw includes preparation, framebuffer setup and native submission, not GPU time.
 struct NativeTimingCounters {
     uint64_t drawTicks, uploadTicks, framebufferSetupTicks, framebufferResolveTicks;
-    uint64_t framebufferClearTicks, uploadBytes, frequency;
+    uint64_t framebufferClearTicks, depthReadTicks, depthLockTicks, uploadBytes, frequency;
     unsigned drawCalls, uploadCalls, framebufferSetupCalls, framebufferResolveCalls;
-    unsigned framebufferClearCalls, preparationRebuilt, preparationReused;
+    unsigned framebufferClearCalls, depthReadCalls, depthLockCalls, depthSamples;
+    unsigned preparationRebuilt, preparationReused;
     unsigned activeWidth, activeHeight, activeSamples, activeTiles;
     unsigned presentationWidth, presentationHeight;
     unsigned buffer2Frames, presentationInterval;

@@ -1288,6 +1288,9 @@ PixelDepth(int id, const std::set<std::pair<float, float> >& coords) {
     std::unordered_map<std::pair<float, float>, uint16_t, hash_pair_ff> result;
     if (coords.empty())
         return result;
+    NativeTimingScope depthReading(timing_counts.depthReadTicks, timing_counts.depthReadCalls);
+    if (timing_enabled)
+        timing_counts.depthSamples += (unsigned)coords.size();
     bool resume = live_framebuffer;
     FinishFramebuffer();
     Framebuffer& b = buffers[id];
@@ -1309,7 +1312,10 @@ PixelDepth(int id, const std::set<std::pair<float, float> >& coords) {
                      b.samples);
     }
     D3DLOCKED_RECT lock;
-    Shipyard_Check(depth_texture->LockRect(0, &lock, NULL, D3DLOCK_READONLY), "depth LockRect");
+    {
+        NativeTimingScope depthLock(timing_counts.depthLockTicks, timing_counts.depthLockCalls);
+        Shipyard_Check(depth_texture->LockRect(0, &lock, NULL, D3DLOCK_READONLY), "depth LockRect");
+    }
     XGTEXTURE_DESC desc;
     XGGetTextureDesc(depth_texture, 0, &desc);
     // The caller asks for individual occlusion samples. Let the SDK address
