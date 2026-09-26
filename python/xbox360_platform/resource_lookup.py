@@ -227,4 +227,23 @@ def texture_hash_cache_handler(source):
         // need to do proper profiling to see whether or not it is worth it to keep the caching system.
 
 ''', '')
+    source = source[:begin] + body + source[end:]
+    begin = source.index('bool gfx_set_timg_handler_rdp(')
+    end = source.index('\nbool ', begin + 5)
+    body = source[begin:end]
+    old = '''            std::shared_ptr<Fast::Texture> tex = std::static_pointer_cast<Fast::Texture>(
+                Ship::Context::GetInstance()->GetResourceManager()->LoadResourceProcess(imgData));'''
+    new = '''            const auto resourceManager = Ship::Context::GetInstance()->GetResourceManager();
+            const uint64_t cacheKey = static_cast<uint64_t>(reinterpret_cast<uintptr_t>(imgData));
+            const unsigned lookupGeneration = resourceManager->GetXboxLookupGeneration();
+            std::shared_ptr<Fast::Texture> tex =
+                gfx->mXboxTextureHashCache.Lookup(cacheKey, imgData, lookupGeneration);
+            if (!tex) {
+                tex = std::static_pointer_cast<Fast::Texture>(
+                    resourceManager->LoadResourceProcess(imgData));
+                if (tex && !tex->IsDirty() &&
+                    resourceManager->GetXboxLookupGeneration() == lookupGeneration)
+                    gfx->mXboxTextureHashCache.Store(cacheKey, imgData, lookupGeneration, tex);
+            }'''
+    body = _once(body, old, new)
     return source[:begin] + body + source[end:]
