@@ -163,3 +163,68 @@ def texture_command_manager(source):
     first = body.index(manager) + len(manager)
     body = body[:first] + body[first:].replace(manager, 'resourceManager')
     return source[:begin] + body + source[end:]
+
+
+def lookup_generation_header(source):
+    source = _once(source, '    bool IsAltAssetsEnabled();',
+        '    unsigned GetXboxLookupGeneration() const;\n    bool IsAltAssetsEnabled();')
+    return _once(source, '    bool mAltAssetsEnabled;',
+        '    volatile LONG mXboxLookupGeneration;\n    bool mAltAssetsEnabled;')
+
+
+def lookup_generation_source(source):
+    source = _once(source, 'ResourceManager::ResourceManager() : mAltAssetsEnabled(false)',
+        'ResourceManager::ResourceManager() : mXboxLookupGeneration(1), mAltAssetsEnabled(false)')
+    source = _once(source, '        mResourceCache[identifier] = ResourceLoadError::NotFound;\n        return nullptr;',
+        '        mResourceCache[identifier] = ResourceLoadError::NotFound;\n'
+        '        InterlockedIncrement(&mXboxLookupGeneration);\n        return nullptr;')
+    source = _once(source, '    }\n\n    if (resource != nullptr) {\n        SPDLOG_TRACE("Loaded Resource',
+        '        InterlockedIncrement(&mXboxLookupGeneration);\n    }\n\n'
+        '    if (resource != nullptr) {\n        SPDLOG_TRACE("Loaded Resource')
+    source = _once(source, 'void ResourceManager::DirtyResources(const ResourceFilter& filter) {',
+        'void ResourceManager::DirtyResources(const ResourceFilter& filter) {\n'
+        '    InterlockedIncrement(&mXboxLookupGeneration);')
+    source = _once(source, '        mResourceCache.erase(identifier);',
+        '        mResourceCache.erase(identifier);\n'
+        '        InterlockedIncrement(&mXboxLookupGeneration);')
+    source = _once(source, 'void ResourceManager::SetAltAssetsEnabled(bool isEnabled) {\n'
+        '    mAltAssetsEnabled = isEnabled;',
+        'void ResourceManager::SetAltAssetsEnabled(bool isEnabled) {\n'
+        '    if (mAltAssetsEnabled != isEnabled)\n'
+        '        InterlockedIncrement(&mXboxLookupGeneration);\n'
+        '    mAltAssetsEnabled = isEnabled;')
+    source = _once(source, 'bool ResourceManager::IsAltAssetsEnabled() {',
+        'unsigned ResourceManager::GetXboxLookupGeneration() const {\n'
+        '    return static_cast<unsigned>(InterlockedCompareExchange(\n'
+        '        const_cast<volatile LONG*>(&mXboxLookupGeneration), 0, 0));\n'
+        '}\n\nbool ResourceManager::IsAltAssetsEnabled() {')
+    return source
+
+
+def texture_hash_cache_handler(source):
+    begin = source.index('bool gfx_set_timg_otr_hash_handler_custom(')
+    end = source.index('\nbool ', begin + 5)
+    body = source[begin:end]
+    old = '''    std::shared_ptr<Fast::Texture> texture =
+        std::static_pointer_cast<Fast::Texture>(resourceManager->LoadResourceProcess(
+            fileName));'''
+    new = '''    Interpreter* gfx = XboxDispatchInterpreter();
+    const unsigned lookupGeneration = resourceManager->GetXboxLookupGeneration();
+    std::shared_ptr<Fast::Texture> texture =
+        gfx->mXboxTextureHashCache.Lookup(hash, fileName, lookupGeneration);
+    if (!texture) {
+        texture = std::static_pointer_cast<Fast::Texture>(
+            resourceManager->LoadResourceProcess(fileName));
+        if (texture && !texture->IsDirty() &&
+            resourceManager->GetXboxLookupGeneration() == lookupGeneration)
+            gfx->mXboxTextureHashCache.Store(hash, fileName, lookupGeneration, texture);
+    }'''
+    body = _once(body, old, new)
+    body = _once(body, '            Interpreter* gfx = XboxDispatchInterpreter();\n'
+        '            gfx->GfxDpSetTextureImage', '            gfx->GfxDpSetTextureImage')
+    body = _once(body, '''        // OTRTODO: We have disabled caching for now to fix a texture corruption issue with HD texture
+        // support. In doing so, there is a potential performance hit since we are not caching lookups. We
+        // need to do proper profiling to see whether or not it is worth it to keep the caching system.
+
+''', '')
+    return source[:begin] + body + source[end:]
