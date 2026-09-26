@@ -117,6 +117,7 @@ size_t pending_texture_bytes;
 std::vector<Framebuffer> buffers;
 std::vector<int> free_framebuffers;
 unsigned framebuffer_clear_count, framebuffer_restore_avoided, framebuffer_depth_restore_avoided;
+unsigned framebuffer_depth_resolves, framebuffer_depth_resolves_skipped;
 ShaderProgram* current_shader;
 uint32_t selected[6];
 int selected_fb[6] = {-1, -1, -1, -1, -1, -1};
@@ -133,7 +134,7 @@ IDirect3DStateBlock9* restore_state;
 bool live_framebuffer, tile_constants_owned;
 size_t tiling_draw_bytes;
 void BeginFramebuffer();
-void FinishFramebuffer();
+void FinishFramebuffer(bool preserveDepth = true);
 void RebindSampledTextures();
 void Resolve(int id);
 unsigned frame_number;
@@ -991,7 +992,7 @@ void RebindSampledTextures() {
             ApplySampler(i, *sampler);
     }
 }
-void FinishFramebuffer() {
+void FinishFramebuffer(bool preserveDepth) {
     if (!live_framebuffer)
         return;
     NativeTimingScope timing(timing_counts.framebufferResolveTicks, timing_counts.framebufferResolveCalls);
@@ -1010,11 +1011,15 @@ void FinishFramebuffer() {
         rectangle.y2 = std::min(rectangle.y2, (LONG)b.height);
         D3DPOINT destination = {rectangle.x1, rectangle.y1};
         for (uint32_t sample = 0; sample < b.samples; ++sample) {
-            if (b.depth)
+            if (b.depth && preserveDepth) {
                 Shipyard_Check(xenos_device->Resolve(D3DRESOLVE_DEPTHSTENCIL | fragments[sample],
                                                      &rectangle, b.depth_samples[sample],
                                                      &destination, 0, 0, NULL, 1, 0, NULL),
                                "retain depth fragment");
+                ++framebuffer_depth_resolves;
+            } else if (b.depth) {
+                ++framebuffer_depth_resolves_skipped;
+            }
             if (b.samples > 1)
                 Shipyard_Check(xenos_device->Resolve(D3DRESOLVE_RENDERTARGET0 | fragments[sample],
                                                      &rectangle, b.color_samples[sample],
@@ -1036,7 +1041,7 @@ void FinishFramebuffer() {
                        "finish framebuffer tiling");
     }
     b.stored = true;
-    b.depth_stored = b.depth != NULL;
+    b.depth_stored = preserveDepth && b.depth != NULL;
     live_framebuffer = false;
     InvalidateNativeState();
     RebindSampledTextures();
@@ -1670,6 +1675,10 @@ void ClearRegion(float x0, float y0, float x1, float y1) {
 } // namespace
 
 namespace ShipyardXenos {
+void DiscardFramebufferDepth(int id) {
+    if (live_framebuffer && active_fb == id && buffers[id].depth)
+        FinishFramebuffer(false);
+}
 void SetShaderCache(const ShaderCacheOps* operations) {
     if (operations)
         shader_cache_ops = *operations;
@@ -1737,6 +1746,8 @@ void CaptureAndResetCounters(NativeCounters* counters) {
     counters->clears = framebuffer_clear_count;
     counters->restoresAvoided = framebuffer_restore_avoided;
     counters->depthRestoresAvoided = framebuffer_depth_restore_avoided;
+    counters->depthResolves = framebuffer_depth_resolves;
+    counters->depthResolvesSkipped = framebuffer_depth_resolves_skipped;
     counters->pendingTextures = (unsigned)pending_texture_releases.size();
     counters->pendingBytes = (unsigned)pending_texture_bytes;
     for (size_t i = 0; i < buffers.size(); ++i)
@@ -1751,6 +1762,7 @@ void CaptureAndResetCounters(NativeCounters* counters) {
     memset(&upload_counts, 0, sizeof(upload_counts));
     binding_attempted = binding_written = binding_suppressed = 0;
     framebuffer_clear_count = framebuffer_restore_avoided = framebuffer_depth_restore_avoided = 0;
+    framebuffer_depth_resolves = framebuffer_depth_resolves_skipped = 0;
 }
 GfxClipParameters ClipParameters() {
     return ::Fast::ClipParameters();
