@@ -118,6 +118,7 @@ std::vector<Framebuffer> buffers;
 std::vector<int> free_framebuffers;
 unsigned framebuffer_clear_count, framebuffer_restore_avoided, framebuffer_depth_restore_avoided;
 unsigned framebuffer_depth_resolves, framebuffer_depth_resolves_skipped;
+bool discard_presentation_depth_on_end;
 ShaderProgram* current_shader;
 uint32_t selected[6];
 int selected_fb[6] = {-1, -1, -1, -1, -1, -1};
@@ -1450,12 +1451,17 @@ void ReadFramebufferPixels(IDirect3DTexture9* image, uint32_t width, uint32_t he
     image->UnlockRect(0);
 }
 void End() {
+    const bool discardPresentationDepth = discard_presentation_depth_on_end;
+    discard_presentation_depth_on_end = false;
     BeginFramebuffer();
-    FinishFramebuffer();
+    if (active_fb == 0)
+        FinishFramebuffer(!discardPresentationDepth);
+    else
+        FinishFramebuffer();
     if (active_fb != 0) {
         active_fb = 0;
         BeginFramebuffer();
-        FinishFramebuffer();
+        FinishFramebuffer(!discardPresentationDepth);
     }
     if (buffers[0].color != presentation_color) {
         Shipyard_Check(xenos_device->SetRenderTarget(0, presentation_color), "presentation target");
@@ -1681,6 +1687,9 @@ void ClearRegion(float x0, float y0, float x1, float y1) {
 } // namespace
 
 namespace ShipyardXenos {
+void DiscardPresentationDepthOnEnd() {
+    discard_presentation_depth_on_end = true;
+}
 void DiscardFramebufferDepth(int id) {
     if (live_framebuffer && active_fb == id && buffers[id].depth)
         FinishFramebuffer(false);
