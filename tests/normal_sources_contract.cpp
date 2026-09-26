@@ -19,9 +19,23 @@ int main() {
     uint8_t sources[257];
     memset(sources, 0xa5, sizeof(sources));
     require(Shipyard::Fast3D::BatchNormalSources(nullptr, 0, nullptr), "zero count");
+#if defined(SHIPYARD_TEST_NORMAL_COUNTS)
+    require(normalSlotWrites == 0 && normalRecordReads == 0, "empty batch performed hash work");
+#endif
     require(!Shipyard::Fast3D::BatchNormalSources(nullptr, 1, sources), "null input");
     require(!Shipyard::Fast3D::BatchNormalSources(vertices, 1, nullptr), "null output");
     require(sources[0] == 0xa5, "invalid input wrote output");
+
+    for (unsigned value = 0; value < 256; ++value) {
+        normal(vertices, 0, uint8_t(value), uint8_t(value ^ 0x55), uint8_t(~value));
+        sources[0] = 0xa5;
+        require(Shipyard::Fast3D::BatchNormalSources(vertices, 1, sources), "singleton batch");
+        require(sources[0] == 0 && sources[1] == 0xa5, "singleton source or output bounds");
+#if defined(SHIPYARD_TEST_NORMAL_COUNTS)
+        require(normalSlotWrites == 0 && normalRecordReads == 0,
+                "singleton batch performed hash work");
+#endif
+    }
 
     // Normal bytes start at offset 12; position, UV, and alpha do not enter the key.
     normal(vertices, 0, 1, 2, 3);
@@ -29,6 +43,9 @@ int main() {
     normal(vertices, 2, 1, 2, 3);
     vertices[2 * 16 + 15] = 71;
     require(Shipyard::Fast3D::BatchNormalSources(vertices, 3, sources), "small batch");
+#if defined(SHIPYARD_TEST_NORMAL_COUNTS)
+    require(normalSlotWrites == 64 && normalRecordReads == 3, "larger batch hash work changed");
+#endif
     require(sources[0] == 0 && sources[1] == 1 && sources[2] == 0,
             "normal source selection or non-normal bytes");
 
