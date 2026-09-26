@@ -1,6 +1,30 @@
 #pragma once
 // Included inside namespace Fast after the authoritative RDP/RenderingState
 // types. No resource ownership or game state is duplicated here.
+// SHIPYARD BYTE EQUALITY BEGIN
+__forceinline bool XboxTriangleBytesEqual(const void* left, const void* right, size_t size) {
+    const unsigned char* a = static_cast<const unsigned char*>(left);
+    const unsigned char* b = static_cast<const unsigned char*>(right);
+    // XDK lowers small memcpy calls to word loads. Keep arbitrary callers safe.
+    if ((reinterpret_cast<uintptr_t>(a) | reinterpret_cast<uintptr_t>(b)) & 3)
+        return std::memcmp(a, b, size) == 0;
+    while (size >= sizeof(uint32_t)) {
+        uint32_t x, y;
+        std::memcpy(&x, a, sizeof(x));
+        std::memcpy(&y, b, sizeof(y));
+        if (x != y)
+            return false;
+        a += sizeof(x);
+        b += sizeof(y);
+        size -= sizeof(x);
+    }
+    while (size--)
+        if (*a++ != *b++)
+            return false;
+    return true;
+}
+// SHIPYARD BYTE EQUALITY END
+
 struct XboxTrianglePipelineResult {
     ColorCombiner* comb;
     uint64_t ccId;
@@ -40,8 +64,16 @@ struct XboxTrianglePipelineKey {
     uint8_t firstTile;
     const void* backend;
     GfxClipParameters clip;
-    unsigned char rendering[sizeof(RenderingState)];
-    unsigned char tiles[2][sizeof(((RDP*)0)->texture_tile[0])];
+    // Alignment-only union members are never accessed; captured bytes retain
+    // their complete object representations, including padding and float bits.
+    union {
+        uint32_t renderingAlignment;
+        unsigned char rendering[sizeof(RenderingState)];
+    };
+    union {
+        uint32_t tileAlignment;
+        unsigned char tiles[2][sizeof(((RDP*)0)->texture_tile[0])];
+    };
     uint32_t loaded[2][4];
     uint8_t sampler[2][3];
     XboxTrianglePipelineKey() : valid(false) {
@@ -59,7 +91,7 @@ struct XboxTrianglePipelineKey {
             clip.invertY != currentClip.invertY ||
             shaderPresent != XboxTrianglePipelineTraits::ShaderPresent(owner) ||
             (shaderPresent && shaderTop != XboxTrianglePipelineTraits::ShaderIdentity(owner)) ||
-            std::memcmp(rendering, &owner.mRenderingState, sizeof(rendering)))
+            !XboxTriangleBytesEqual(rendering, &owner.mRenderingState, sizeof(rendering)))
             return false;
         for (unsigned i = 0; i < 2; ++i) {
             if (masked[i] != r.loaded_texture[i].masked ||
@@ -71,7 +103,7 @@ struct XboxTrianglePipelineKey {
                 return false;
             const unsigned tile = XboxTrianglePipelineTraits::EffectiveTile(owner, i);
             if (tile >= 8 || r.texture_tile[tile].tmem_index >= 2 ||
-                std::memcmp(tiles[i], &r.texture_tile[tile], sizeof(tiles[i])))
+                !XboxTriangleBytesEqual(tiles[i], &r.texture_tile[tile], sizeof(tiles[i])))
                 return false;
             const unsigned tmem = r.texture_tile[tile].tmem_index;
             if (loaded[i][0] != r.loaded_texture[tmem].size_bytes ||

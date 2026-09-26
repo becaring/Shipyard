@@ -63,7 +63,7 @@
     "sources/fast3d/shade_cache.h": "b002338e533d1cb326f19caf7754c19a58af112ead344dd1659900f062b37b46",
     "sources/fast3d/shader_metadata_cache.h": "8d8b67df3be2f79a890e02d1a7807bbf336ac0f5657723ac3110d155716b4aa2",
     "sources/fast3d/texture_bindings.h": "7979045071f3647ee57937a0429ee4ac1071354ba9b63b8b9fbc44f124a1383b",
-    "sources/fast3d/triangle_pipeline.h": "124c661886dd3c5a94c20961258df3cdc3bbdfceec231d073dc97b6f649b4804",
+    "sources/fast3d/triangle_pipeline.h": "4850e3bdfcf96a570a43ff6e31789d834033985c2ecdda949babe36d508806e8",
     "sources/fast3d/unit_color.h": "8006e0bea6945083ba0999df471041e2ac8b2240c7b6034b9f426bd74b56f654",
     "sources/fast3d/value_init.h": "9452882f213a480bf668415fc111f4ce5464ad038dc897f26ffdcc7c87e55883",
     "sources/fast3d/vertex_transform.cpp": "d7c07755f7c84d7c611f44897c9f8297f1b89bb20715fe9927e1a5625b03cd4f",
