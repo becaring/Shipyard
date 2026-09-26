@@ -38,7 +38,7 @@ def _apply_edits(source, edits):
     return source
 
 
-def _range_replacement(source, node):
+def _range_replacement(source, node, begin='PrismBegin', end_func='PrismEnd'):
     right = field(node, 'right')
     body = field(node, 'body')
     declarator = field(node, 'declarator')
@@ -50,18 +50,18 @@ def _range_replacement(source, node):
     suffix = str(node.start_byte)
     range_name = '_prismRange' + suffix
     iterator = '_prismIt' + suffix
-    end = '_prismEnd' + suffix
+    end_name = '_prismEnd' + suffix
     inner = tx(body)[1:-1] if body.type == 'compound_statement' else tx(body)
     return (
         '{ auto&& ' + range_name + ' = ' + tx(right) + '; auto ' + iterator +
-        ' = PrismBegin(' + range_name + '); auto ' + end + ' = PrismEnd(' +
-        range_name + '); for (; ' + iterator + ' != ' + end + '; ++' +
+        ' = ' + begin + '(' + range_name + '); auto ' + end_name + ' = ' + end_func + '(' +
+        range_name + '); for (; ' + iterator + ' != ' + end_name + '; ++' +
         iterator + ') { ' + declaration + ' = *' + iterator + '; ' + inner +
         ' } }'
     ).encode()
 
 
-def lower_ranges(source, parser):
+def lower_ranges(source, parser, begin='PrismBegin', end='PrismEnd'):
     # Lower innermost loops first. The end expression is cached once, as
     # C++ range-for requires, and each parse supplies fresh byte offsets.
     for _iteration in range(64):
@@ -73,7 +73,7 @@ def lower_ranges(source, parser):
             if any(child.type == 'for_range_loop' for child in list(walk(node))[1:]):
                 continue
             edits.append((node.start_byte, node.end_byte,
-                          _range_replacement(source, node)))
+                          _range_replacement(source, node, begin, end)))
         if not edits:
             return source
         source = _apply_edits(source, edits)

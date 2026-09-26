@@ -11,11 +11,14 @@ class MemberDefault:
     is_array: bool
 
 
-def collect_member_defaults(text, classname, parser, walk):
+def collect_member_defaults(text, classname, parser, walk, parse_source=None):
     source = text.encode()
-    classes = [node for node in walk(parser.parse(source).root_node)
+    if parse_source is not None and len(parse_source) != len(source):
+        raise ValueError('Masked C++ source must preserve byte offsets')
+    classes = [node for node in walk(parser.parse(parse_source or source).root_node)
                if node.type in ('class_specifier', 'struct_specifier')
                and node.child_by_field_name('name')
+               and node.child_by_field_name('body')
                and node.child_by_field_name('name').text.decode() == classname]
     if len(classes) != 1:
         raise ValueError('Expected single class ' + classname)
