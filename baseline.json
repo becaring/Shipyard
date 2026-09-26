@@ -9,7 +9,7 @@
     "python/xbox360_platform/bs_thread_pool.py": "441294ae253f552914fd53432aa8ac1f783784b5a0d72e57f75dedd3b6b98fe2",
     "python/xbox360_platform/build_policy.py": "e996420eaf2f8924059640e273deeb8dd9216ca79d61831f48854278f9ed27b0",
     "python/xbox360_platform/c89_lower.py": "4e5cfa3ae4a13742d1490fd8a68baf3778689993f9e0af24b4f2582e392884de",
-    "python/xbox360_platform/c_bool_scalars.py": "b0ea06c6517073b74df4ca4ec8321f5ecd6c58506fc680b0d193e973ca164adb",
+    "python/xbox360_platform/c_bool_scalars.py": "c67c1762dc2252770abebadb81f99b9530e0df5fc6338729de41563d0c0339b7",
     "python/xbox360_platform/combiner_lookup.py": "bdb7c2158a8bfeeccf5f6e9e10a9a0d4c31c1ed89cdddd2258f02e7a8aa77b48",
     "python/xbox360_platform/contract.py": "588fef79b831e0496021ee1341f20ca156ebf5fdb9f24f2eba8f68c3df87c165",
     "python/xbox360_platform/cpp_literals.py": "eb7342f7e84e14df25d250e77f3fbaef45237dc510e22e4a3ca64564d069aef0",

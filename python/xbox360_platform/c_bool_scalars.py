@@ -27,6 +27,11 @@ def lower(source: bytes, expected_types: int, *, approved_addresses=frozenset())
         elif owner.type == 'declaration' and owner.child_by_field_name('type') == node:
             for declarator in owner.children_by_field_name('declarator'):
                 name = declarator.child_by_field_name('declarator') if declarator.type == 'init_declarator' else declarator
+                if name is not None and name.type == 'function_declarator':
+                    function_name = name.child_by_field_name('declarator')
+                    if function_name is None or function_name.type != 'identifier':
+                        raise ValueError('Unsupported boolean function declarator')
+                    continue
                 if name is None or name.type != 'identifier':
                     raise ValueError('Unsupported non-scalar boolean declaration')
                 variables.add(name.text)

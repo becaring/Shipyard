@@ -3,6 +3,10 @@ from xbox360_platform.c_bool_scalars import lower
 
 
 class ScalarBooleanTests(unittest.TestCase):
+    def test_function_prototype_matches_normalized_definition(self):
+        result = lower(b'bool f(int x); bool f(int x) { return x & 256; }', 2)
+        self.assertEqual(result, b'unsigned char f(int x); unsigned char f(int x) { return ((x & 256) != 0); }')
+
     def test_wide_values_are_normalized_at_each_conversion(self):
         source = b'bool f(int x) { bool b = x; b = x & 256; return b; }'
         self.assertEqual(lower(source, 2),
