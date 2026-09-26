@@ -19,6 +19,15 @@ int main() {
         if (Shipyard::Fast3D::Round(value) != std::round(value)) return 2;
     }
     if (!std::isnan(Shipyard::Fast3D::Round(std::numeric_limits<float>::quiet_NaN()))) return 3;
+    const double wideCases[] = { -0.0, 0.0, -0.5, 0.5, -1.5, 1.5,
+        4503599627370495.0, 4503599627370496.0, 9007199254740991.0,
+        std::numeric_limits<double>::infinity(), -std::numeric_limits<double>::infinity() };
+    for (unsigned i = 0; i < sizeof(wideCases)/sizeof(wideCases[0]); ++i) {
+        double expected = std::round(wideCases[i]);
+        double result = Shipyard::Fast3D::Round(wideCases[i]);
+        if (memcmp(&expected, &result, sizeof(double))) return 4;
+    }
+    if (!std::isnan(Shipyard::Fast3D::Round(std::numeric_limits<double>::quiet_NaN()))) return 5;
     puts("PASS round boundary cases");
     return 0;
 }

@@ -10,5 +10,11 @@ inline float Round(float value) {
     const float result = magnitude - integral < 0.5f ? integral : integral + 1.0f;
     return value < 0.0f ? -result : (value == 0.0f ? value : result);
 }
+inline double Round(double value) {
+    const double magnitude = fabs(value);
+    const double integral = floor(magnitude);
+    const double result = magnitude - integral < 0.5 ? integral : integral + 1.0;
+    return value < 0.0 ? -result : (value == 0.0 ? value : result);
+}
 } // namespace Fast3D
 } // namespace Shipyard
