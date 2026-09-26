@@ -10,6 +10,7 @@
 #include <utility>
 #include <vector>
 #include "shader_provider.h"
+#include "depth_discard.h"
 
 namespace Fast {
 struct ShaderProgram;
@@ -20,9 +21,6 @@ struct ShaderCacheOps {
     void (*store)(const std::string&, const char*, const char*, ID3DXBuffer*);
 };
 void SetShaderCache(const ShaderCacheOps* operations);
-// Finish a live game target while discarding depth that the next render clears.
-// Other framebuffer transitions continue to retain depth.
-void DiscardFramebufferDepth(int id);
 struct NativeCounters {
     unsigned samplerAttempted, samplerWritten, samplerSuppressed;
     unsigned constantsAttempted, constantsWritten, constantsSuppressed;
