@@ -83,7 +83,7 @@
     "sources/fast3d/light_color_cache.h": "e5ad9dc364fefd45a4eeff9318c96d186001a2fa8d9abf57406d21eb71f6c122",
     "sources/fast3d/material_value_cache.h": "1ddfdb5fcd8876577c50a35b60139fe1600d168a3413e408c154f540b775d095",
     "sources/fast3d/math.h": "5fecd3ed82277d086a549d87fd2b851337ee687eabf362d6b0b1aa8250417fa1",
-    "sources/fast3d/normal_sources.h": "a432dcacb9670ef5be0255662b339064b1a05cea3c8b3c9da8ab7cd2faa15544",
+    "sources/fast3d/normal_sources.h": "b7eaff8b7d9369da27f9ca1a23b78147dce19e14ec0e13ca88c9709bcff29d34",
     "sources/fast3d/numeric.h": "124aecf3a26bb11380f3adc958829166961778cb77b60a99435ad7ceca564115",
     "sources/fast3d/projection_cache.h": "a238465360e5ec49036bc2b679316d7d3332c4177d684f78fe8bf99cc73450cd",
     "sources/fast3d/shade_cache.h": "b002338e533d1cb326f19caf7754c19a58af112ead344dd1659900f062b37b46",

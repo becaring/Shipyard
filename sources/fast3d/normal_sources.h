@@ -12,6 +12,11 @@ namespace Fast3D {
 inline bool BatchNormalSources(const void* records, size_t count, uint8_t* sources) {
     if (count > 256 || (count && (!records || !sources)))
         return false;
+    if (count <= 1) {
+        if (count)
+            sources[0] = 0;
+        return true;
+    }
 
     uint32_t slots[64];
     for (unsigned slot = 0; slot < 64; ++slot)
