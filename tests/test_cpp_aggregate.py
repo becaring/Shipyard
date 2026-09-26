@@ -1,7 +1,7 @@
 import unittest
 from tree_sitter import Language, Parser
 import tree_sitter_cpp
-from xbox360_platform.cpp_aggregate import lower_assignments
+from xbox360_platform.cpp_aggregate import lower_assignments, lower_macro_arguments
 from xbox360_platform.prism import walk
 
 
@@ -22,3 +22,18 @@ class AggregateTests(unittest.TestCase):
                                 ('void f(){g(a={});}', {'a': ('Key', 1)})]:
             with self.assertRaises(ValueError):
                 lower_assignments(source, self.parser, walk, targets)
+
+    def test_initializer_macro_argument_preserves_conditional_scope(self):
+        source = 'void f(){if(c) patch(1, MAKE(next())); else patch(2, saved);}'
+        result = lower_macro_arguments(source, self.parser, walk, function='patch', argument=1,
+                                       macros=('MAKE',), type_name='Pair', expected=1)
+        self.assertEqual(result.count('next()'), 1)
+        self.assertIn('if(c) { Pair _aggregateArgument = MAKE(next()); patch(1, _aggregateArgument); } else', result)
+        self.assertFalse(self.parser.parse(result.encode()).root_node.has_error)
+
+    def test_initializer_macro_argument_rejects_unknown_forms(self):
+        for source in ('void f(){return patch(1, MAKE(2));}', 'void f(){patch(1, OTHER(2));}',
+                       'void f(){patch(1);}', 'void f(){patch(1, saved);}'):
+            with self.assertRaises(ValueError):
+                lower_macro_arguments(source, self.parser, walk, function='patch', argument=1,
+                                      macros=('MAKE',), type_name='Pair', expected=1)

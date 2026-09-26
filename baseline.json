@@ -12,7 +12,7 @@
     "python/xbox360_platform/c_bool_scalars.py": "c67c1762dc2252770abebadb81f99b9530e0df5fc6338729de41563d0c0339b7",
     "python/xbox360_platform/combiner_lookup.py": "bdb7c2158a8bfeeccf5f6e9e10a9a0d4c31c1ed89cdddd2258f02e7a8aa77b48",
     "python/xbox360_platform/contract.py": "588fef79b831e0496021ee1341f20ca156ebf5fdb9f24f2eba8f68c3df87c165",
-    "python/xbox360_platform/cpp_aggregate.py": "7679bffe829968c9b241ab71d9471141b689e06dfb8328e357643afb149c921a",
+    "python/xbox360_platform/cpp_aggregate.py": "987b16b489caa45a043c297a579e2875ce7d13caa87f113e7b2c209c096d3523",
     "python/xbox360_platform/cpp_literals.py": "eb7342f7e84e14df25d250e77f3fbaef45237dc510e22e4a3ca64564d069aef0",
     "python/xbox360_platform/cpp_maps.py": "179bb31dcc743757c123232f78f145300fcf3e7b8cc1fbbee4b02095ab66b185",
     "python/xbox360_platform/cpp_syntax.py": "af4f4b751630b2be1735a135a4177eeb18735f7230d69ca19d88c38e6ea9d0fd",

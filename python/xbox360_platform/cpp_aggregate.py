@@ -1,6 +1,37 @@
 """Lower reviewed aggregate assignments while retaining aggregate initialization."""
 
 
+def lower_macro_arguments(text, parser, walk, *, function, argument, macros, type_name, expected):
+    """Materialize selected initializer macros passed to standalone calls."""
+    data = text.encode()
+    if b'_aggregateArgument' in data:
+        raise ValueError('Aggregate argument temporary collision')
+    edits = []
+    for node in walk(parser.parse(data).root_node):
+        if node.type != 'call_expression' or node.child_by_field_name('function').text.decode() != function:
+            continue
+        args = node.child_by_field_name('arguments').named_children
+        if len(args) <= argument:
+            raise ValueError('Selected call arity changed')
+        value = args[argument]
+        if value.type != 'call_expression':
+            continue
+        macro = value.child_by_field_name('function').text.decode()
+        if macro not in macros:
+            raise ValueError('Unreviewed initializer macro: '+macro)
+        statement = node.parent
+        if statement.type != 'expression_statement':
+            raise ValueError('Initializer argument requires standalone call')
+        body = data[statement.start_byte:value.start_byte] + b'_aggregateArgument' + data[value.end_byte:statement.end_byte]
+        replacement = b'{ '+type_name.encode()+b' _aggregateArgument = '+value.text+b'; '+body+b' }'
+        edits.append((statement.start_byte, statement.end_byte, replacement))
+    if len(edits) != expected:
+        raise ValueError('Initializer argument inventory changed: '+str(len(edits)))
+    for first, last, replacement in sorted(edits, reverse=True):
+        data = data[:first]+replacement+data[last:]
+    return data.decode()
+
+
 def lower_assignments(text, parser, walk, targets):
     data = text.encode()
     edits = []
