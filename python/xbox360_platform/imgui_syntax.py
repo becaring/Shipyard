@@ -141,3 +141,17 @@ def lower_focus_scope_pushes(text):
             raise ValueError("Pinned ImGui focus-scope push changed")
         text = text.replace(before, after, 1)
     return text
+
+
+def lower_selection_storage_callback(text):
+    callback = "[](ImGuiSelectionBasicStorage*, int idx) { return (ImGuiID)idx; }"
+    if text.count(callback) != 1:
+        raise ValueError("Pinned ImGui selection callback changed")
+    anchor = '\n#include "imgui_internal.h"\n'
+    if text.count(anchor) != 1:
+        raise ValueError("Pinned ImGui internal include changed")
+    definition = ("\nstatic ImGuiID ShipyardImGuiSelectionStorageId("
+                  "ImGuiSelectionBasicStorage*, int index)\n"
+                  "{ return (ImGuiID)index; }\n")
+    return text.replace(anchor, anchor + definition, 1).replace(
+        callback, "ShipyardImGuiSelectionStorageId", 1)
