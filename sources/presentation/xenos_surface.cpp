@@ -2,7 +2,7 @@
 #include "xenos_pacing.h"
 
 namespace Shipyard {
-XenosPresentationSurface::XenosPresentationSurface() : device(NULL) {}
+XenosPresentationSurface::XenosPresentationSurface() : device(NULL), uncapped(false) {}
 
 HRESULT XenosPresentationSurface::Attach(IDirect3DDevice9* value) {
     if (!value) return E_INVALIDARG;
@@ -16,9 +16,14 @@ HRESULT XenosPresentationSurface::Attach(IDirect3DDevice9* value) {
 
 uint32_t XenosPresentationSurface::Refresh() const { return pacing.Refresh(); }
 void XenosPresentationSurface::SetRate(uint32_t rate) { pacing.SetRate(rate); }
+void XenosPresentationSurface::SetUncapped(bool enabled) { uncapped = enabled; }
 
 HRESULT XenosPresentationSurface::Prepare(double (*now)(), bool* ready) {
     if (!device || !ready) return E_INVALIDARG;
+    if (uncapped) {
+        *ready = true;
+        return device->SetRenderState(D3DRS_PRESENTINTERVAL, D3DPRESENT_INTERVAL_IMMEDIATE);
+    }
     const uint32_t intervals = pacing.Next();
     *ready = intervals != 0;
     if (!intervals) return S_OK;

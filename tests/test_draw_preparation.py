@@ -36,7 +36,7 @@ class DrawPreparationTests(unittest.TestCase):
                           'void Sampler(int tile, bool linear, uint32_t s, uint32_t t) {',
                           'void Filter(FilteringMode mode) {', 'void BindFramebuffer(int id, float scale) {',
                           'void RebindSampledTextures() {', 'void SelectFramebuffer(int id) {',
-                          'void DeleteTexture(uint32_t id) {', 'void LoadShader(ShaderProgram* shader) {']:
+                          'void DeleteTexture(uint32_t id) {', 'void LoadShader(ShaderProgram* shader) {', 'void SetCurrentPrimDepth(float depth) {']:
             methods += '\n' + function(source, signature) + '\n'
         vswhere = Path(os.environ['ProgramFiles(x86)'])/'Microsoft Visual Studio/Installer/vswhere.exe'
         installation = subprocess.check_output([str(vswhere), '-latest', '-products', '*', '-requires',
@@ -60,7 +60,7 @@ class DrawPreparationTests(unittest.TestCase):
                           'uint32_t NewTexture()', 'void SelectTexture(int tile,',
                           'void RebindSampledTextures()', 'void DeleteTexture(uint32_t id)',
                           'void LoadShader(ShaderProgram* shader)', 'void Filter(FilteringMode mode)',
-                          'void BindFramebuffer(int id, float scale)']:
+                          'void BindFramebuffer(int id, float scale)', 'void SetCurrentPrimDepth(float depth)']:
             self.assertIn('draw_state_prepared = false;', function(source, signature), signature)
         for signature in ['void UpdateFramebuffer(', 'void DestroyFramebufferNative(',
                           'void Start()', 'void Init()', 'void Shipyard_ShutdownGraphics()',

@@ -27,6 +27,9 @@ uint32_t selected[6]={}; int selected_fb[6]={-1,-1,-1,-1,-1,-1};
 int upload_tile,active_fb;
 float shader_frame_number=1,noise_scale=1;
 bool draw_state_prepared=false;
+bool primitive_depth_enabled=false, primitive_depth_valid=false;
+float primitive_depth=0, uploaded_depth=0;
+unsigned depthCalls=0;
 unsigned draw_sampler_mask=0;
 struct NativeState { unsigned sampler[6][5];float constants[12],binding_constants[24];
     bool sampler_valid[6],constants_valid,alpha_valid,binding_constants_valid;void *vertex,*pixel,*declaration;
@@ -39,7 +42,7 @@ void Shipyard_Fatal(const char*,int) { throw std::runtime_error("fatal"); }
 void Shipyard_Check(int,const char*) {}
 enum { E_INVALIDARG=1, UPLOAD_SNAPSHOT_SLOTS=32 };
 struct UploadSnapshot { uint32_t id;void* native; } upload_snapshots[UPLOAD_SNAPSHOT_SLOTS]={};
-struct Device { int SetVertexDeclaration(void*){return 0;} int SetVertexShader(void*){return 0;}int SetPixelShader(void*){return 0;} } device;
+struct Device { int SetPixelShaderConstantF(unsigned slot,const float* value,unsigned count) { require(slot==3 && count==1,"primitive depth register"); uploaded_depth=value[0]; ++depthCalls; return 0; } int SetVertexDeclaration(void*){return 0;} int SetVertexShader(void*){return 0;}int SetPixelShader(void*){return 0;} } device;
 Device* xenos_device=&device;
 int SetNativeTexture(int,void*) { return 0; }
 void ReleaseTexture(void*) {}
@@ -124,5 +127,10 @@ int main() {
             }
         }
     }
+    SetCurrentPrimDepth(0.25f); compare();
+    require(depthCalls==1 && uploaded_depth==0.25f,"first primitive depth upload");
+    SetCurrentPrimDepth(0.25f); compare(); require(depthCalls==1,"stable depth reuse");
+    SetCurrentPrimDepth(0.75f); compare(); require(depthCalls==2 && uploaded_depth==0.75f,"changed depth upload");
+    InvalidateNativeState(); compare(); require(depthCalls==3,"external depth invalidation");
     std::puts("PASS original draw preparation differential: stable reuse and 8748 texture/framebuffer/unbound, shader-mask and filter combinations; exact sampler/constant order");
 }

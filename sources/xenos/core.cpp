@@ -1693,7 +1693,10 @@ void LoadShader(ShaderProgram* shader) {
     ::Fast::LoadShader(shader);
 }
 void SetCurrentPrimDepth(float depth) {
-    if (!primitive_depth_enabled || primitive_depth != depth) primitive_depth_valid = false;
+    if (!primitive_depth_enabled || primitive_depth != depth) {
+        primitive_depth_valid = false;
+        draw_state_prepared = false;
+    }
     primitive_depth = depth;
     primitive_depth_enabled = true;
 }
