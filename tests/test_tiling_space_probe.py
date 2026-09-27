@@ -40,6 +40,12 @@ int main() {
     assert(p.summary.brackets == 2 && p.summary.normalFinishes == 1);
     assert(p.summary.minRemaining[0] == 900 && p.summary.maxUsed[3] == 850);
     assert(p.summary.capacityChanges == 1 && p.summary.maxFinishBytes == 150);
+    p.Begin(800, 200);
+    p.Setup(700, 300); // Stable capacity with backward cursor.
+    p.BeforeResolve(750, 250, false);
+    p.BeforeEnd(760, 240);
+    assert(p.summary.capacityChanges == 1 && p.summary.usedRegressions == 1);
+    assert(p.summary.maxSetupBytes == 100);
     p.ResetSummary();
     assert(p.summary.brackets == 0 && p.summary.querySamples == 0);
     p.Begin(5, 995);

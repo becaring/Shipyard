@@ -11,6 +11,7 @@ namespace ShipyardXenos {
 // never changes the conservative restart guard or issues GPU synchronization.
 struct TilingSpaceSummary {
     unsigned brackets, guardFinishes, normalFinishes, querySamples, capacityChanges;
+    unsigned usedRegressions;
     unsigned maxUsed[4], minRemaining[4], phaseSamples[4];
     unsigned maxSetupBytes, maxFinishBytes;
 };
@@ -41,9 +42,11 @@ struct TilingSpaceProbe {
     void Setup(unsigned used, unsigned remaining) {
         if (!active) return;
         Record(1, used, remaining);
-        if (uint64_t(used) + remaining != capacity || used < priorUsed)
-            ++summary.capacityChanges;
-        else if (used - priorUsed > summary.maxSetupBytes)
+        const bool capacityChanged = uint64_t(used) + remaining != capacity;
+        const bool regressed = used < priorUsed;
+        if (capacityChanged) ++summary.capacityChanges;
+        if (regressed) ++summary.usedRegressions;
+        if (!capacityChanged && !regressed && used - priorUsed > summary.maxSetupBytes)
             summary.maxSetupBytes = used - priorUsed;
         priorUsed = used;
         capacity = uint64_t(used) + remaining;
@@ -53,17 +56,19 @@ struct TilingSpaceProbe {
         Record(2, used, remaining);
         if (guard) ++summary.guardFinishes;
         else ++summary.normalFinishes;
-        if (uint64_t(used) + remaining != capacity || used < priorUsed)
-            ++summary.capacityChanges;
+        if (uint64_t(used) + remaining != capacity) ++summary.capacityChanges;
+        if (used < priorUsed) ++summary.usedRegressions;
         priorUsed = used;
         capacity = uint64_t(used) + remaining;
     }
     void BeforeEnd(unsigned used, unsigned remaining) {
         if (!active) return;
         Record(3, used, remaining);
-        if (uint64_t(used) + remaining != capacity || used < priorUsed)
-            ++summary.capacityChanges;
-        else if (used - priorUsed > summary.maxFinishBytes)
+        const bool capacityChanged = uint64_t(used) + remaining != capacity;
+        const bool regressed = used < priorUsed;
+        if (capacityChanged) ++summary.capacityChanges;
+        if (regressed) ++summary.usedRegressions;
+        if (!capacityChanged && !regressed && used - priorUsed > summary.maxFinishBytes)
             summary.maxFinishBytes = used - priorUsed;
         active = false;
     }
