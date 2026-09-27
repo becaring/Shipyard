@@ -32,7 +32,12 @@ inline bool VertexSourceDisjoint(const void* source,size_t bytes,const void* sta
 // Input records begin with signed x/y/z halfwords at a 16-byte stride.
 // Output rows must be 16-byte aligned, with stride a multiple of 16.
 // An unsupported matrix returns false without writing output.
+struct TransformPhaseHook {
+    void (*enterVertices)(void* context);
+    void* context;
+};
 bool TransformPositions(const void* vertices,size_t count,const float matrix[4][4],
-                        void* output,bool normalAspect=false,size_t outputStride=16);
+                        void* output,bool normalAspect=false,size_t outputStride=16,
+                        const TransformPhaseHook* phaseHook=NULL);
 
 } }

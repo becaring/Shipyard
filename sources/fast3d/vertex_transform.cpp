@@ -16,7 +16,7 @@ static __forceinline __vector4 TransformInvalid(__vector4 bits, __vector4 sign, 
 // Explicit VMX multiply/add pairs retain the scalar operation order.
 #pragma fp_contract(off)
 bool TransformPositions(const void* vertices, size_t count, const float matrix[4][4], void* output,
-                        bool normalAspect, size_t outputStride) {
+                        bool normalAspect, size_t outputStride, const TransformPhaseHook* phaseHook) {
     // VMX flushes subnormals. Integer inputs and bounded coefficients keep
     // nonzero products normal and four-term sums finite; all other matrices
     // retain the scalar path. normalAspect tightens the lower bound.
@@ -37,6 +37,7 @@ bool TransformPositions(const void* vertices, size_t count, const float matrix[4
     __vcmpequwR(invalid, zero, &condition);
     if (!(condition & 0x80))
         return false;
+    if (phaseHook) phaseHook->enterVertices(phaseHook->context);
     for (size_t i = 0; i < count; ++i) {
         const __vector4 position =
             __vcfsx(__vupkhsh(Detail::LoadUnaligned((const unsigned char*)vertices + i * 16)), 0);
