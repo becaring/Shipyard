@@ -202,49 +202,39 @@ def lookup_generation_source(source):
 
 
 def texture_hash_phase_profile(source):
-    """Sample fast-cache, authoritative map and loader without changing routing."""
+    """Time the authoritative hash route without changing its lookup decisions."""
     begin = source.index('bool gfx_set_timg_otr_hash_handler_custom(')
     end = source.index('\nbool ', begin + 5)
     body = source[begin:end]
     if 'MODERN TEXTURE HASH PHASE PROFILE' in body:
         raise ValueError('texture hash phase profile already projected')
     body = _once(body,
-        '    const bool hashHit = gfx->mXboxTextureHashCache.LookupArchiveHash(',
+        '    const char* fileName = resourceManager->GetArchiveManager()->HashToCString(hash);',
         '    // MODERN TEXTURE HASH PHASE PROFILE\n'
         '    ModernFrameProfile::TextureHashSample xboxTextureHashSample;\n'
-        '    ModernFrameProfile::BeginTextureHash(\n'
-        '        xboxTextureHashSample, ModernFrameProfile::TextureHashOwningCache);\n'
-        '    const bool hashHit = gfx->mXboxTextureHashCache.LookupArchiveHash(')
+        '    ModernFrameProfile::BeginTextureHash(xboxTextureHashSample);\n'
+        '    const char* fileName = resourceManager->GetArchiveManager()->HashToCString(hash);\n'
+        '    ModernFrameProfile::AdvanceTextureHash(\n'
+        '        xboxTextureHashSample, ModernFrameProfile::TextureHashFinal);')
     body = _once(body,
-        '        fileName = ownedHashPath->c_str();\n    } else {\n'
-        '        fileName = archiveManager->HashToCString(hash);',
-        '        fileName = ownedHashPath->c_str();\n'
-        '        ModernFrameProfile::AdvanceTextureHash(\n'
-        '            xboxTextureHashSample, ModernFrameProfile::TextureHashFinal);\n'
-        '    } else {\n'
-        '        ModernFrameProfile::AdvanceTextureHash(\n'
-        '            xboxTextureHashSample, ModernFrameProfile::TextureHashMapLookup);\n'
-        '        fileName = archiveManager->HashToCString(hash);\n'
-        '        ModernFrameProfile::AdvanceTextureHash(\n'
-        '            xboxTextureHashSample, ModernFrameProfile::TextureHashFinal);')
+        '    if (fileName == nullptr) {\n        (*cmd0)++;\n        return false;\n    }',
+        '    if (fileName == nullptr) {\n'
+        '        ModernFrameProfile::EndTextureHash(xboxTextureHashSample);\n'
+        '        (*cmd0)++;\n        return false;\n    }\n'
+        '    ModernFrameProfile::AdvanceTextureHash(\n'
+        '        xboxTextureHashSample, ModernFrameProfile::TextureHashOwningCache);')
     body = _once(body,
-        '        if (fileName == nullptr) {\n            (*cmd0)++;\n            return false;\n        }',
-        '        if (fileName == nullptr) {\n'
-        '            ModernFrameProfile::EndTextureHash(xboxTextureHashSample);\n'
-        '            (*cmd0)++;\n            return false;\n        }')
-    body = _once(body,
-        '        texture = std::static_pointer_cast<Fast::Texture>(\n'
-        '            resourceManager->LoadResourceProcess(fileName));',
+        '    if (!texture) {\n        texture = std::static_pointer_cast<Fast::Texture>(',
+        '    if (!texture) {\n'
         '        ModernFrameProfile::AdvanceTextureHash(\n'
         '            xboxTextureHashSample, ModernFrameProfile::TextureHashLoader);\n'
-        '        texture = std::static_pointer_cast<Fast::Texture>(\n'
-        '            resourceManager->LoadResourceProcess(fileName));')
+        '        texture = std::static_pointer_cast<Fast::Texture>(')
     body = _once(body,
-        '                resourceManager, archiveManager);\n    }',
-        '                resourceManager, archiveManager);\n'
-        '        ModernFrameProfile::AdvanceTextureHash(\n'
-        '            xboxTextureHashSample, ModernFrameProfile::TextureHashFinal);\n'
-        '    }')
+        '            gfx->mXboxTextureHashCache.Store(hash, fileName, lookupGeneration, texture);\n    }',
+        '            gfx->mXboxTextureHashCache.Store(hash, fileName, lookupGeneration, texture);\n'
+        '    }\n'
+        '    ModernFrameProfile::AdvanceTextureHash(\n'
+        '        xboxTextureHashSample, ModernFrameProfile::TextureHashFinal);')
     body = _once(body,
         '    (*cmd0)++;\n    return false;\n}',
         '    (*cmd0)++;\n'
@@ -257,49 +247,20 @@ def texture_hash_cache_handler(source):
     begin = source.index('bool gfx_set_timg_otr_hash_handler_custom(')
     end = source.index('\nbool ', begin + 5)
     body = source[begin:end]
-    old = '''    const char* fileName = resourceManager->GetArchiveManager()->HashToCString(hash);
-    uint32_t texFlags = 0;
-    RawTexMetadata rawTexMetadata;
-
-    if (fileName == nullptr) {
-        (*cmd0)++;
-        return false;
-    }
-
-    std::shared_ptr<Fast::Texture> texture =
+    old = '''    std::shared_ptr<Fast::Texture> texture =
         std::static_pointer_cast<Fast::Texture>(resourceManager->LoadResourceProcess(
             fileName));'''
-    new = '''    const auto archiveManager = resourceManager->GetArchiveManager();
-    Interpreter* gfx = XboxDispatchInterpreter();
+    new = '''    Interpreter* gfx = XboxDispatchInterpreter();
     const unsigned lookupGeneration = resourceManager->GetXboxLookupGeneration();
-    const unsigned archiveEpoch = archiveManager->GetXboxHashEpoch();
-    std::shared_ptr<Fast::Texture> texture;
-    std::shared_ptr<const std::string> ownedHashPath;
-    const char* fileName = nullptr;
-    const bool hashHit = gfx->mXboxTextureHashCache.LookupArchiveHash(
-        hash, lookupGeneration, archiveEpoch, resourceManager, archiveManager,
-        texture, ownedHashPath);
-    if (hashHit &&
-        resourceManager->GetXboxLookupGeneration() == lookupGeneration &&
-        archiveManager->GetXboxHashEpoch() == archiveEpoch) {
-        fileName = ownedHashPath->c_str();
-    } else {
-        fileName = archiveManager->HashToCString(hash);
-        if (fileName == nullptr) {
-            (*cmd0)++;
-            return false;
-        }
+    std::shared_ptr<Fast::Texture> texture =
+        gfx->mXboxTextureHashCache.Lookup(hash, fileName, lookupGeneration);
+    if (!texture) {
         texture = std::static_pointer_cast<Fast::Texture>(
             resourceManager->LoadResourceProcess(fileName));
         if (texture && !texture->IsDirty() &&
-            resourceManager->GetXboxLookupGeneration() == lookupGeneration &&
-            archiveManager->GetXboxHashEpoch() == archiveEpoch)
-            gfx->mXboxTextureHashCache.StoreArchiveHash(
-                hash, fileName, lookupGeneration, archiveEpoch, texture,
-                resourceManager, archiveManager);
-    }
-    uint32_t texFlags = 0;
-    RawTexMetadata rawTexMetadata;'''
+            resourceManager->GetXboxLookupGeneration() == lookupGeneration)
+            gfx->mXboxTextureHashCache.Store(hash, fileName, lookupGeneration, texture);
+    }'''
     body = _once(body, old, new)
     body = _once(body, '            Interpreter* gfx = XboxDispatchInterpreter();\n'
         '            gfx->GfxDpSetTextureImage', '            gfx->GfxDpSetTextureImage')
