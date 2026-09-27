@@ -18,6 +18,7 @@
     "python/xbox360_platform/cpp_bindings.py": "35ffa32753c20c6c2bc6dea9eb80c3cb5fae46cee0acd4117d8407d0a223e30c",
     "python/xbox360_platform/cpp_call_initializers.py": "9fe3231e57078ac57f5718a09f3151259aeb09ff5919cb77d421c89fb8354d4c",
     "python/xbox360_platform/cpp_containers.py": "90cbc3b6a0d5a336d2280056f2c2c921f35c69d57337a489f5ae0ef168f7fd41",
+    "python/xbox360_platform/cpp_cursor.py": "ba3efac297eb3dca76f812bdaa356b6276849e6b7cb5686684b3c0340bdace58",
     "python/xbox360_platform/cpp_designated_expressions.py": "5b3b0026a3827a3bc616bae880bdcf21552a0b5413bb46a3031b32a082ea76d6",
     "python/xbox360_platform/cpp_initializers.py": "3db85346c8202adc1b8d482f309732428862e15d40b47cc37439801d29660366",
     "python/xbox360_platform/cpp_literals.py": "eb7342f7e84e14df25d250e77f3fbaef45237dc510e22e4a3ca64564d069aef0",
