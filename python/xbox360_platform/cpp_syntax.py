@@ -119,7 +119,7 @@ def lift_captureless_callbacks(text, parser, walk, *, parameters, return_type, p
             owner = owner.parent
         return None
     edits = []
-    definitions = ['static '+return_type+' '+name+parameters+';' for _,_,name in selected]
+    definitions = []
     for node, body, name in selected:
         value = body.text
         nested = [(child.start_byte-body.start_byte, child.end_byte-body.start_byte, child_name.encode())
@@ -131,4 +131,7 @@ def lift_captureless_callbacks(text, parser, walk, *, parameters, return_type, p
             edits.append((node.start_byte, node.end_byte, name.encode()))
     for first, last, replacement in sorted(edits, reverse=True):
         data = data[:first]+replacement+data[last:]
-    return data.decode(), '\n\n'.join(definitions)
+    # Traversal visits parents before their nested callbacks. Emit children
+    # first so callers need no extra declarations. Consumers may qualify
+    # these definitions as members already declared in a class header.
+    return data.decode(), '\n\n'.join(reversed(definitions))

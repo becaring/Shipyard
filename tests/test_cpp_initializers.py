@@ -29,6 +29,8 @@ Json jsonResult(){return Json{{"first",3},{"second",4}};}
 int callbackTotal=0;
 void invoke(void (*callback)(int),int value){callback(value);}
 void launch(){invoke([](int value){invoke([](int value){callbackTotal+=value;},value+1);},2);}
+struct Member { static void MemberCallback0(int memberValue); static void launchMember(); };
+void Member::launchMember(){invoke([](int memberValue){callbackTotal+=memberValue;},4);}
 int calls=0;
 int next(){return ++calls;}
 struct Pod { int first; int second; };
@@ -57,6 +59,7 @@ int inspect(int input) {
 int main(){takePod(Pod{.first=7}); takeDefaults({.second=45});
 assert(jsonResult()["first"]==3 && jsonResult()["second"]==4);
 launch(); assert(callbackTotal==3);
+Member::launchMember(); assert(callbackTotal==7);
 assert(globalDerived.first==11 && globalDerived.second==13 && globalDerived.Base::second==17);
 assert(inspectDerived({{.first=step()},.second=step()}) && sequence==2);
 int local=19; Derived held = Derived({.second=local}); assert(held.first==5 && held.second==19);
@@ -86,6 +89,11 @@ assert(inspect(7)==5); assert(inspect(8)==6); assert(calls==6);}
         generated, callbacks = lift_captureless_callbacks(generated, self.parser, walk,
             parameters='(int value)', return_type='void', prefix='TestNestedCallback', expected=2)
         generated = generated.replace('void launch()', callbacks+'\nvoid launch()')
+        generated, callbacks = lift_captureless_callbacks(generated, self.parser, walk,
+            parameters='(int memberValue)', return_type='void', prefix='LiftedMember', expected=1)
+        generated = generated.replace('LiftedMember0', 'MemberCallback0')
+        callbacks = callbacks.replace('static void LiftedMember0', 'void Member::MemberCallback0')
+        generated = generated.replace('void Member::launchMember()', callbacks+'\nvoid Member::launchMember()')
         vswhere = Path(os.environ['ProgramFiles(x86)'])/'Microsoft Visual Studio/Installer/vswhere.exe'
         installation = subprocess.check_output([str(vswhere), '-latest', '-products', '*', '-requires',
             'Microsoft.VisualStudio.Component.VC.Tools.x86.x64', '-property', 'installationPath'], text=True).strip()
