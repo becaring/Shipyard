@@ -6,6 +6,24 @@ from xbox360_platform import logging_core
 
 
 class LoggingProvider(unittest.TestCase):
+    def test_native_file_operations_normalize_xbox_separators(self):
+        source = '\n'.join([
+            '::_fsopen((filename.c_str()), mode.c_str(), _SH_DENYNO)',
+            'std::remove(filename.c_str())',
+            'std::rename(filename1.c_str(), filename2.c_str())',
+            '::_stat(filename.c_str(), &buffer)',
+            '::_mkdir(path.c_str())',
+        ])
+        output = logging_core.native_file_paths(source)
+        self.assertNotIn('filename.c_str()', output)
+        self.assertNotIn('filename1.c_str()', output)
+        self.assertNotIn('filename2.c_str()', output)
+        self.assertNotIn('path.c_str()', output)
+        self.assertEqual(output.count('.make_preferred().string().c_str()'), 6)
+        self.assertIn('mode.c_str()', output)
+        with self.assertRaisesRegex(ValueError, 'core match failed'):
+            logging_core.native_file_paths(source.replace('::_fsopen', '::changed_open'))
+
     def test_exact_anchor_rejects_missing_or_duplicate_source(self):
         with self.assertRaisesRegex(ValueError, "core match failed"):
             logging_core.exact("old old", "old", "new")

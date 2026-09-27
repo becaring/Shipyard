@@ -38,7 +38,7 @@
     "python/xbox360_platform/json/generate_streams.py": "612eacc34bbe40851b758ce8d4d9fbd3a43c9728cc1048b99ea8651d7f0db31c",
     "python/xbox360_platform/json_initializers.py": "56ef0948342764c632768842795d5530219944fc3d695ad32244d38627d49e2d",
     "python/xbox360_platform/libzip.py": "1d1181a118757e87a4aaeddd859d96b33397bc3e500576f2cb161fb48e6a5905",
-    "python/xbox360_platform/logging_core.py": "f61092741074e439beaedd67f44f21846d5b25fff86e67875bf5f6d132c64e91",
+    "python/xbox360_platform/logging_core.py": "1900a00ee9da66f4c1a97874522e364bd33e3a8ca3554f518e30c86d45c19e06",
     "python/xbox360_platform/logging_queue.py": "e8a300dc6b0b9baea18d8f8fc3ae132f123c6257fdf8f4bde3b5cb0d36b00da3",
     "python/xbox360_platform/logging_syntax.py": "2d3824f24e12d654b85e9bb56fd6dff2612667c5c6644ba7287ed34b8ed82f5c",
     "python/xbox360_platform/parallel_build.py": "9cff07d7a460e4e06d0e65b025c2a9560f4514cbcdf1ced050dd959f027d5563",

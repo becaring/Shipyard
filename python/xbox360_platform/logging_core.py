@@ -227,11 +227,31 @@ def _project_common_support(texts):
     )
 
 
+def native_file_paths(t):
+    # Xenia accepts generic separators at the CRT boundary; native Xbox does not.
+    # Keep spdlog's logical filenames and normalize only native file operations.
+    def native(name):
+        return 'xbox_compat::filesystem::path(' + name + ').make_preferred().string().c_str()'
+    for old, new in (
+        ('::_fsopen((filename.c_str()), mode.c_str(), _SH_DENYNO)',
+         '::_fsopen((' + native('filename') + '), mode.c_str(), _SH_DENYNO)'),
+        ('std::remove(filename.c_str())', 'std::remove(' + native('filename') + ')'),
+        ('std::rename(filename1.c_str(), filename2.c_str())',
+         'std::rename(' + native('filename1') + ', ' + native('filename2') + ')'),
+        ('::_stat(filename.c_str(), &buffer)', '::_stat(' + native('filename') + ', &buffer)'),
+        ('::_mkdir(path.c_str())', '::_mkdir(' + native('path') + ')'),
+    ):
+        t = exact(t, old, new)
+    return t
+
+
 def _project_operating_system(texts):
     t = read('details/os.h')
     t = t.replace('int pid() SPDLOG_NOEXCEPT', 'int pid()')
     texts['details/os.h'] = generic(t)
     t = read('details/os-inl.h')
+    t = native_file_paths(t)
+    t = '#include "' + (Path(__file__).resolve().parents[2] / 'sources/filesystem/filesystem.h').as_posix() + '"\n' + t
     t = t.replace(
         '#include <spdlog/details/windows_include.h>',
         '#include "' + (BASE / 'native.h').as_posix() + '"\n#include <share.h>',
