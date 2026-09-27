@@ -29,6 +29,9 @@ struct NativeCounters {
     unsigned clears, restoresAvoided, depthRestoresAvoided;
     unsigned depthResolves, depthResolvesSkipped, earlyDepthFences;
     unsigned tilingDrawRestarts, tilingPeakBytes;
+    unsigned tiling1080Batches, tiling1080Tile1Batches;
+    unsigned tiling1080Vertices, tiling1080Tile1Vertices;
+    unsigned tiling1080OversizeBatches;
     unsigned presentationColorResolvesSkipped, presentationColorDiscardBlocked;
     unsigned pendingTextures, pendingBytes, width, height, samples, tiles;
 };

@@ -2,6 +2,7 @@
 #include "services.h"
 #include "pixels.h"
 #include "shader_provider.h"
+#include "tile_coverage.h"
 
 #include "xenos_backend.h"
 #include "metrics.h"
@@ -120,6 +121,9 @@ unsigned framebuffer_clear_count, framebuffer_restore_avoided, framebuffer_depth
 unsigned framebuffer_depth_resolves, framebuffer_depth_resolves_skipped;
 unsigned framebuffer_early_depth_fences;
 unsigned tiling_draw_restarts, tiling_peak_bytes;
+unsigned tiling_1080_batches, tiling_1080_tile1_batches;
+unsigned tiling_1080_vertices, tiling_1080_tile1_vertices;
+unsigned tiling_1080_oversize_batches;
 bool discard_presentation_depth_on_end;
 bool discard_presentation_color_on_end;
 unsigned presentation_color_resolves_skipped, presentation_color_discard_blocked;
@@ -801,6 +805,25 @@ void Draw(float* vertices, size_t count, size_t triangles) {
         FinishFramebuffer();
     }
     BeginFramebuffer();
+    if (timing_enabled) {
+        const Framebuffer& b = buffers[active_fb];
+        if (b.width == 1920 && b.height == 1080 && b.tiles.size() == 2) {
+            D3DVIEWPORT9 viewport;
+            xenos_device->GetViewport(&viewport);
+            const size_t vertexCount = count / current_shader->floats;
+            ++tiling_1080_batches;
+            tiling_1080_vertices += (unsigned)vertexCount;
+            if (vertexCount > ShipyardXenos::TileCoverageMaximumVertices)
+                ++tiling_1080_oversize_batches;
+            if (viewport.Y <= b.height && viewport.Height <= b.height - viewport.Y &&
+                ShipyardXenos::BatchInsideSecondTile(
+                    vertices, vertexCount, current_shader->floats, viewport.Y,
+                    viewport.Height, (unsigned)b.tiles[0].y2)) {
+                ++tiling_1080_tile1_batches;
+                tiling_1080_tile1_vertices += (unsigned)vertexCount;
+            }
+        }
+    }
     PrepareDrawState();
     ApplyAlpha(); // Also handles shader-only changes and external state restoration.
     Shipyard_Check(xenos_device->DrawPrimitiveUP(D3DPT_TRIANGLELIST, (UINT)triangles, vertices,
@@ -1821,6 +1844,11 @@ void CaptureAndResetCounters(NativeCounters* counters) {
     counters->earlyDepthFences = framebuffer_early_depth_fences;
     counters->tilingDrawRestarts = tiling_draw_restarts;
     counters->tilingPeakBytes = tiling_peak_bytes;
+    counters->tiling1080Batches = tiling_1080_batches;
+    counters->tiling1080Tile1Batches = tiling_1080_tile1_batches;
+    counters->tiling1080Vertices = tiling_1080_vertices;
+    counters->tiling1080Tile1Vertices = tiling_1080_tile1_vertices;
+    counters->tiling1080OversizeBatches = tiling_1080_oversize_batches;
     counters->presentationColorResolvesSkipped = presentation_color_resolves_skipped;
     counters->presentationColorDiscardBlocked = presentation_color_discard_blocked;
     counters->pendingTextures = (unsigned)pending_texture_releases.size();
@@ -1840,6 +1868,9 @@ void CaptureAndResetCounters(NativeCounters* counters) {
     framebuffer_depth_resolves = framebuffer_depth_resolves_skipped = 0;
     framebuffer_early_depth_fences = 0;
     tiling_draw_restarts = tiling_peak_bytes = 0;
+    tiling_1080_batches = tiling_1080_tile1_batches = 0;
+    tiling_1080_vertices = tiling_1080_tile1_vertices = 0;
+    tiling_1080_oversize_batches = 0;
     presentation_color_resolves_skipped = presentation_color_discard_blocked = 0;
 }
 GfxClipParameters ClipParameters() {
