@@ -89,7 +89,7 @@ int main() {
         draw = function(source, 'void Draw(float* vertices, size_t count, size_t triangles) {')
         self.assertIn('tiling_draw_bytes + count * sizeof(float) + 8192 > 2 * 1024 * 1024', draw)
         self.assertLess(draw.index('GuardTrialBeforeDraw('), draw.index('PrepareDrawState();'))
-        self.assertLess(draw.index('DrawPrimitiveUP('), draw.index('GuardTrialAfterDraw('))
+        self.assertLess(draw.index('SubmitTile1PredicatedDraw('), draw.index('GuardTrialAfterDraw('))
         self.assertIn('FinishFramebuffer();', draw)
         finish = function(source, 'void FinishFramebuffer(bool preserveDepth, bool preserveColor) {')
         self.assertIn('Shipyard_Check(xenos_device->EndTiling(', finish)

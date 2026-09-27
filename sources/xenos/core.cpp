@@ -132,6 +132,8 @@ ShipyardXenos::TilingSpaceProbe tiling_space_probe;
 bool tiling_guard_restart_pending;
 ShipyardXenos::TilingGuardTrialWindow tiling_guard_trial_window;
 bool tiling_guard_trial_enabled;
+bool tile1_predication_trial_enabled;
+ShipyardXenos::Tile1PredicationTrialCounters tile1_predication_trial_counts;
 bool discard_presentation_depth_on_end;
 bool discard_presentation_color_on_end;
 unsigned presentation_color_resolves_skipped, presentation_color_discard_blocked;
@@ -826,20 +828,33 @@ void Draw(float* vertices, size_t count, size_t triangles) {
         }
     }
     BeginFramebuffer();
-    if (timing_enabled) {
+    bool tile1Only = false;
+    if (timing_enabled || tile1_predication_trial_enabled) {
         const Framebuffer& b = buffers[active_fb];
-        if (b.width == 1920 && b.height == 1080 && b.tiles.size() == 2) {
-            D3DVIEWPORT9 viewport;
+        const bool profileTarget = timing_enabled && b.width == 1920 &&
+                                   b.height == 1080 && b.tiles.size() == 2;
+        const bool trialTarget = tile1_predication_trial_enabled && b.width == 1920 &&
+                                 b.height == 1080 && b.tiles.size() == 2 && b.samples == 1;
+        D3DVIEWPORT9 viewport = {0};
+        if (profileTarget || trialTarget)
             xenos_device->GetViewport(&viewport);
-            const size_t vertexCount = count / current_shader->floats;
+        const size_t vertexCount = count / current_shader->floats;
+        if (tile1_predication_trial_enabled)
+            tile1Only = ShipyardXenos::ClassifyTile1Predication(
+                trialTarget, vertices, vertexCount, current_shader->floats, b.height,
+                viewport.Y, viewport.Height, trialTarget ? (unsigned)b.tiles[0].y2 : 0,
+                &tile1_predication_trial_counts);
+        if (profileTarget) {
             ++tiling_1080_batches;
             tiling_1080_vertices += (unsigned)vertexCount;
             if (vertexCount > ShipyardXenos::TileCoverageMaximumVertices)
                 ++tiling_1080_oversize_batches;
-            if (viewport.Y <= b.height && viewport.Height <= b.height - viewport.Y &&
-                ShipyardXenos::BatchInsideSecondTile(
-                    vertices, vertexCount, current_shader->floats, viewport.Y,
-                    viewport.Height, (unsigned)b.tiles[0].y2)) {
+            const bool profileTile1Only = trialTarget ? tile1Only :
+                (viewport.Y <= b.height && viewport.Height <= b.height - viewport.Y &&
+                 ShipyardXenos::BatchInsideSecondTile(
+                     vertices, vertexCount, current_shader->floats, viewport.Y,
+                     viewport.Height, (unsigned)b.tiles[0].y2));
+            if (profileTile1Only) {
                 ++tiling_1080_tile1_batches;
                 tiling_1080_tile1_vertices += (unsigned)vertexCount;
             }
@@ -853,9 +868,13 @@ void Draw(float* vertices, size_t count, size_t triangles) {
         probeRing ? (uintptr_t)xenos_device->m_pRingLimit : 0);
     PrepareDrawState();
     ApplyAlpha(); // Also handles shader-only changes and external state restoration.
-    Shipyard_Check(xenos_device->DrawPrimitiveUP(D3DPT_TRIANGLELIST, (UINT)triangles, vertices,
-                                                 (UINT)(current_shader->floats * 4)),
-                   "Shipyard DrawPrimitiveUP");
+    const HRESULT drawResult = tile1Only
+        ? ShipyardXenos::SubmitTile1PredicatedDraw(
+              xenos_device, true, (UINT)triangles, vertices,
+              (UINT)(current_shader->floats * 4), &tile1_predication_trial_counts)
+        : xenos_device->DrawPrimitiveUP(D3DPT_TRIANGLELIST, (UINT)triangles, vertices,
+                                       (UINT)(current_shader->floats * 4));
+    Shipyard_Check(drawResult, "Shipyard DrawPrimitiveUP");
     const bool trialNeedsFinish = trialContinued && !GuardTrialAfterDraw();
     if (probeRing) {
         const ShipyardXenos::RingCursor ringAfter(
@@ -1900,6 +1919,9 @@ void SetTilingGuardTrialEnabled(bool enabled) {
     tiling_guard_trial_enabled = enabled;
     if (!enabled) tiling_guard_trial_window.Close();
 }
+void SetTile1PredicationTrialEnabled(bool enabled) {
+    tile1_predication_trial_enabled = enabled;
+}
 void CaptureAndResetTimingCounters(NativeTimingCounters* counters) {
     if (!counters)
         return;
@@ -1966,6 +1988,7 @@ void CaptureAndResetCounters(NativeCounters* counters) {
     counters->ringSameSegmentEstimatedBytes = ring_same_segment_estimated_bytes;
     counters->tilingSpace = tiling_space_probe.summary;
     counters->tilingGuardTrial = tiling_guard_trial_window.stats;
+    counters->tile1PredicationTrial = tile1_predication_trial_counts;
     counters->presentationColorResolvesSkipped = presentation_color_resolves_skipped;
     counters->presentationColorDiscardBlocked = presentation_color_discard_blocked;
     counters->pendingTextures = (unsigned)pending_texture_releases.size();
@@ -1993,6 +2016,7 @@ void CaptureAndResetCounters(NativeCounters* counters) {
     ring_same_segment_bytes = ring_same_segment_estimated_bytes = 0;
     tiling_space_probe.ResetSummary();
     tiling_guard_trial_window.ResetStats();
+    memset(&tile1_predication_trial_counts, 0, sizeof(tile1_predication_trial_counts));
     presentation_color_resolves_skipped = presentation_color_discard_blocked = 0;
 }
 GfxClipParameters ClipParameters() {

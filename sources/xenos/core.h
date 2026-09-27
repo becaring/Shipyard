@@ -13,6 +13,7 @@
 #include "depth_discard.h"
 #include "tiling_space_probe.h"
 #include "tiling_guard_trial.h"
+#include "tile1_predication_trial.h"
 
 namespace Fast {
 struct ShaderProgram;
@@ -39,6 +40,7 @@ struct NativeCounters {
     uint64_t ringSameSegmentBytes, ringSameSegmentEstimatedBytes;
     TilingSpaceSummary tilingSpace;
     TilingGuardTrialStats tilingGuardTrial;
+    Tile1PredicationTrialCounters tile1PredicationTrial;
     unsigned presentationColorResolvesSkipped, presentationColorDiscardBlocked;
     unsigned pendingTextures, pendingBytes, width, height, samples, tiles;
 };

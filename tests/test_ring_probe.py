@@ -60,8 +60,8 @@ int main() {
         draw = function(source, 'void Draw(float* vertices, size_t count, size_t triangles) {')
         self.assertLess(draw.index('probeRing = timing_enabled'), draw.index('RingCursor ringBefore'))
         self.assertLess(draw.index('RingCursor ringBefore'), draw.index('PrepareDrawState();'))
-        self.assertLess(draw.index('ApplyAlpha();'), draw.index('DrawPrimitiveUP('))
-        self.assertLess(draw.index('DrawPrimitiveUP('), draw.index('RingCursor ringAfter'))
+        self.assertLess(draw.index('ApplyAlpha();'), draw.index('SubmitTile1PredicatedDraw('))
+        self.assertLess(draw.index('SubmitTile1PredicatedDraw('), draw.index('RingCursor ringAfter'))
         self.assertLess(draw.index('if (probeRing) {'), draw.index('RingCursor ringAfter'))
 
 
