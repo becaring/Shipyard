@@ -87,15 +87,17 @@ def exact_tile_updates(text, *, enabled_expr, capture_expr, observe_expr):
             raise ValueError('Tile setter projection boundary changed: ' + name)
         guard = '''    const bool xboxTileTrial = %(enabled)s;
     const bool xboxTileCapture = %(capture)s;
-    const bool xboxCouldAvoidDirty =
-        !mRdp->textures_changed[0] || !mRdp->textures_changed[1];
     bool xboxSameTileState = false;
-    if ((xboxTileTrial && xboxCouldAvoidDirty) || xboxTileCapture) {
-        const auto& previous = mRdp->texture_tile[tile];
-        xboxSameTileState =%(fields)s;
-        if (xboxTileCapture)
-            %(observe)s(%(kind)d, xboxSameTileState,
-                        xboxSameTileState && xboxCouldAvoidDirty);
+    if (xboxTileTrial || xboxTileCapture) {
+        const bool xboxCouldAvoidDirty =
+            !mRdp->textures_changed[0] || !mRdp->textures_changed[1];
+        if (xboxCouldAvoidDirty || xboxTileCapture) {
+            const auto& previous = mRdp->texture_tile[tile];
+            xboxSameTileState =%(fields)s;
+            if (xboxTileCapture)
+                %(observe)s(%(kind)d, xboxSameTileState,
+                            xboxSameTileState && xboxCouldAvoidDirty);
+        }
     }
 ''' % dict(enabled=enabled_expr, capture=capture_expr, fields=fields,
            observe=observe_expr, kind=kind)
