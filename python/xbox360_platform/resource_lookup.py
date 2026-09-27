@@ -201,6 +201,48 @@ def lookup_generation_source(source):
     return source
 
 
+def texture_hash_phase_profile(source):
+    """Time the authoritative hash route without changing its lookup decisions."""
+    begin = source.index('bool gfx_set_timg_otr_hash_handler_custom(')
+    end = source.index('\nbool ', begin + 5)
+    body = source[begin:end]
+    if 'MODERN TEXTURE HASH PHASE PROFILE' in body:
+        raise ValueError('texture hash phase profile already projected')
+    body = _once(body,
+        '    const char* fileName = resourceManager->GetArchiveManager()->HashToCString(hash);',
+        '    // MODERN TEXTURE HASH PHASE PROFILE\n'
+        '    ModernFrameProfile::TextureHashSample xboxTextureHashSample;\n'
+        '    ModernFrameProfile::BeginTextureHash(xboxTextureHashSample);\n'
+        '    const char* fileName = resourceManager->GetArchiveManager()->HashToCString(hash);\n'
+        '    ModernFrameProfile::AdvanceTextureHash(\n'
+        '        xboxTextureHashSample, ModernFrameProfile::TextureHashFinal);')
+    body = _once(body,
+        '    if (fileName == nullptr) {\n        (*cmd0)++;\n        return false;\n    }',
+        '    if (fileName == nullptr) {\n'
+        '        ModernFrameProfile::EndTextureHash(xboxTextureHashSample);\n'
+        '        (*cmd0)++;\n        return false;\n    }\n'
+        '    ModernFrameProfile::AdvanceTextureHash(\n'
+        '        xboxTextureHashSample, ModernFrameProfile::TextureHashOwningCache);')
+    body = _once(body,
+        '    if (!texture) {\n        texture = std::static_pointer_cast<Fast::Texture>(',
+        '    if (!texture) {\n'
+        '        ModernFrameProfile::AdvanceTextureHash(\n'
+        '            xboxTextureHashSample, ModernFrameProfile::TextureHashLoader);\n'
+        '        texture = std::static_pointer_cast<Fast::Texture>(')
+    body = _once(body,
+        '            gfx->mXboxTextureHashCache.Store(hash, fileName, lookupGeneration, texture);\n    }',
+        '            gfx->mXboxTextureHashCache.Store(hash, fileName, lookupGeneration, texture);\n'
+        '    }\n'
+        '    ModernFrameProfile::AdvanceTextureHash(\n'
+        '        xboxTextureHashSample, ModernFrameProfile::TextureHashFinal);')
+    body = _once(body,
+        '    (*cmd0)++;\n    return false;\n}',
+        '    (*cmd0)++;\n'
+        '    ModernFrameProfile::EndTextureHash(xboxTextureHashSample);\n'
+        '    return false;\n}')
+    return source[:begin] + body + source[end:]
+
+
 def texture_hash_cache_handler(source):
     begin = source.index('bool gfx_set_timg_otr_hash_handler_custom(')
     end = source.index('\nbool ', begin + 5)
@@ -227,7 +269,7 @@ def texture_hash_cache_handler(source):
         // need to do proper profiling to see whether or not it is worth it to keep the caching system.
 
 ''', '')
-    source = source[:begin] + body + source[end:]
+    source = texture_hash_phase_profile(source[:begin] + body + source[end:])
     begin = source.index('bool gfx_set_timg_handler_rdp(')
     end = source.index('\nbool ', begin + 5)
     body = source[begin:end]
