@@ -1,6 +1,7 @@
 # Shared optimization evidence
 
-Consumers remain pinned to `58d4344`; this branch is a separate adoption candidate.
+Consumer locks select the adopted mechanisms. The JSON and normal-batch changes
+below are integrated into canonical history; target FPS claims require runtime evidence.
 
 ## JSON vector conversion
 
@@ -22,4 +23,19 @@ Consumers remain pinned to `58d4344`; this branch is a separate adoption candida
 
 - Per-draw binding-block reconstruction, diagnostic formatting frequency, audio queue behavior, and residual interpolation allocations need representative runtime counts before broader changes.
 - `index_string` retains its stream formatting because inspected sources did not establish that changing global-locale observation was permitted.
-- Consumer interpolation and bounds changes remain consumer-owned; no competing shared implementation was introduced. Main and both consumer locks stay at `58d4344`; adoption of this branch requires deliberate regeneration.
+- Consumer interpolation calculations and bounds policies remain consumer-owned.
+  Shared source projections require explicit selection and regeneration.
+
+## Synchronous resources and recording ownership
+
+- `resource_lookup.synchronous_cache_hits` reuses the pinned cache policy before
+  constructing an async result for a synchronous hit. Prefixed paths and misses
+  retain the original loader. It extracts the mechanism already used by Modern.
+- `interpolation_recording.ownership` transfers recording containers explicitly
+  on XDK, which does not synthesize aggregate moves. Frame rotation, child
+  relocation and replacement-map return avoid recursive copies; interpolation
+  calculations are untouched. Consumers select their exact source contract.
+- Majora selects both after hardware stack samples exposed resource promise
+  allocations and recording-tree copies. Its behavioral contracts cover cache
+  policy and retained node addresses, and the generated PPC units compile.
+  Post-change hardware performance has not yet been measured.
