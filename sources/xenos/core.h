@@ -29,6 +29,7 @@ struct NativeCounters {
     unsigned clears, restoresAvoided, depthRestoresAvoided;
     unsigned depthResolves, depthResolvesSkipped, earlyDepthFences;
     unsigned tilingDrawRestarts, tilingPeakBytes;
+    unsigned presentationColorResolvesSkipped, presentationColorDiscardBlocked;
     unsigned pendingTextures, pendingBytes, width, height, samples, tiles;
 };
 void CaptureAndResetCounters(NativeCounters* counters);

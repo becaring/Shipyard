@@ -121,12 +121,15 @@ unsigned framebuffer_depth_resolves, framebuffer_depth_resolves_skipped;
 unsigned framebuffer_early_depth_fences;
 unsigned tiling_draw_restarts, tiling_peak_bytes;
 bool discard_presentation_depth_on_end;
+bool discard_presentation_color_on_end;
+unsigned presentation_color_resolves_skipped, presentation_color_discard_blocked;
 ShaderProgram* current_shader;
 uint32_t selected[6];
 int selected_fb[6] = {-1, -1, -1, -1, -1, -1};
 int upload_tile, active_fb;
 // Published image holds a separate reference until replacement or shutdown.
 IDirect3DTexture9* published_framebuffer_image = NULL;
+bool presentation_image_ever_published;
 IDirect3DSurface9* presentation_color;
 IDirect3DSurface9* presentation_depth;
 IDirect3DVertexShader9* restore_vertex;
@@ -137,7 +140,7 @@ IDirect3DStateBlock9* restore_state;
 bool live_framebuffer, tile_constants_owned;
 size_t tiling_draw_bytes;
 void BeginFramebuffer();
-void FinishFramebuffer(bool preserveDepth = true);
+void FinishFramebuffer(bool preserveDepth = true, bool preserveColor = true);
 void RebindSampledTextures();
 void Resolve(int id);
 unsigned frame_number;
@@ -999,11 +1002,14 @@ void RebindSampledTextures() {
             ApplySampler(i, *sampler);
     }
 }
-void FinishFramebuffer(bool preserveDepth) {
+void FinishFramebuffer(bool preserveDepth, bool preserveColor) {
     if (!live_framebuffer)
         return;
     NativeTimingScope timing(timing_counts.framebufferResolveTicks, timing_counts.framebufferResolveCalls);
     Framebuffer& b = buffers[active_fb];
+    if (!preserveColor && (preserveDepth || active_fb != 0 || b.color != presentation_color ||
+                           b.tiles.size() != 1))
+        Shipyard_Fatal("presentation color discard contract", E_INVALIDARG);
     StopTileConstants();
     for (int binding = 0; binding < 6; ++binding)
         SetNativeTexture(binding, NULL);
@@ -1036,9 +1042,12 @@ void FinishFramebuffer(bool preserveDepth) {
         DWORD flags = D3DRESOLVE_RENDERTARGET0 | D3DRESOLVE_ALLFRAGMENTS;
         if (b.tiles.size() > 1)
             flags |= D3DRESOLVE_CLEARRENDERTARGET | (b.depth ? D3DRESOLVE_CLEARDEPTHSTENCIL : 0);
-        Shipyard_Check(xenos_device->Resolve(flags, &rectangle, b.image, &destination, 0, 0, &clear,
-                                             1, 0, NULL),
-                       "resolve framebuffer color");
+        if (preserveColor)
+            Shipyard_Check(xenos_device->Resolve(flags, &rectangle, b.image, &destination, 0, 0,
+                                                 &clear, 1, 0, NULL),
+                           "resolve framebuffer color");
+        else
+            ++presentation_color_resolves_skipped;
     }
     if (b.tiles.size() > 1) {
         xenos_device->SetPredication(0);
@@ -1055,7 +1064,7 @@ void FinishFramebuffer(bool preserveDepth) {
         xenos_device->InsertFence();
         ++framebuffer_early_depth_fences;
     }
-    b.stored = true;
+    b.stored = preserveColor;
     b.depth_stored = preserveDepth && b.depth != NULL;
     live_framebuffer = false;
     InvalidateNativeState();
@@ -1358,6 +1367,8 @@ PixelDepth(int id, const std::set<std::pair<float, float> >& coords) {
 }
 void* FramebufferImage(int id) {
     Resolve(id);
+    if (id == 0)
+        presentation_image_ever_published = true;
     IDirect3DTexture9* image = buffers[id].image;
     if (image != published_framebuffer_image) {
         if (image)
@@ -1467,15 +1478,27 @@ void ReadFramebufferPixels(IDirect3DTexture9* image, uint32_t width, uint32_t he
 void End() {
     const bool discardPresentationDepth = discard_presentation_depth_on_end;
     discard_presentation_depth_on_end = false;
+    const bool discardPresentationColor = discard_presentation_color_on_end;
+    discard_presentation_color_on_end = false;
+    bool canDiscardPresentationColor = false;
+    if (discardPresentationColor && discardPresentationDepth && buffers[0].color == presentation_color &&
+        buffers[0].tiles.size() == 1 && !presentation_image_ever_published) {
+        canDiscardPresentationColor = true;
+        for (int binding = 0; binding < 6; ++binding)
+            if (selected_fb[binding] == 0)
+                canDiscardPresentationColor = false;
+    }
+    if (discardPresentationColor && !canDiscardPresentationColor)
+        ++presentation_color_discard_blocked;
     BeginFramebuffer();
     if (active_fb == 0)
-        FinishFramebuffer(!discardPresentationDepth);
+        FinishFramebuffer(!discardPresentationDepth, !canDiscardPresentationColor);
     else
         FinishFramebuffer();
     if (active_fb != 0) {
         active_fb = 0;
         BeginFramebuffer();
-        FinishFramebuffer(!discardPresentationDepth);
+        FinishFramebuffer(!discardPresentationDepth, !canDiscardPresentationColor);
     }
     if (buffers[0].color != presentation_color) {
         Shipyard_Check(xenos_device->SetRenderTarget(0, presentation_color), "presentation target");
@@ -1704,6 +1727,9 @@ namespace ShipyardXenos {
 void DiscardPresentationDepthOnEnd() {
     discard_presentation_depth_on_end = true;
 }
+void DiscardPresentationColorOnEnd() {
+    discard_presentation_color_on_end = true;
+}
 void DiscardFramebufferDepth(int id) {
     if (live_framebuffer && active_fb == id && buffers[id].depth)
         FinishFramebuffer(false);
@@ -1780,6 +1806,8 @@ void CaptureAndResetCounters(NativeCounters* counters) {
     counters->earlyDepthFences = framebuffer_early_depth_fences;
     counters->tilingDrawRestarts = tiling_draw_restarts;
     counters->tilingPeakBytes = tiling_peak_bytes;
+    counters->presentationColorResolvesSkipped = presentation_color_resolves_skipped;
+    counters->presentationColorDiscardBlocked = presentation_color_discard_blocked;
     counters->pendingTextures = (unsigned)pending_texture_releases.size();
     counters->pendingBytes = (unsigned)pending_texture_bytes;
     for (size_t i = 0; i < buffers.size(); ++i)
@@ -1797,6 +1825,7 @@ void CaptureAndResetCounters(NativeCounters* counters) {
     framebuffer_depth_resolves = framebuffer_depth_resolves_skipped = 0;
     framebuffer_early_depth_fences = 0;
     tiling_draw_restarts = tiling_peak_bytes = 0;
+    presentation_color_resolves_skipped = presentation_color_discard_blocked = 0;
 }
 GfxClipParameters ClipParameters() {
     return ::Fast::ClipParameters();
