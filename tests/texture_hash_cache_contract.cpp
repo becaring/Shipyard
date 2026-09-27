@@ -9,6 +9,8 @@ struct Texture {
     bool IsDirty() const { return dirty; }
 };
 
+struct DoNotDeleteManager { void operator()(struct FakeManager*) const {} };
+
 struct FakeArchive {
     unsigned epoch;
     unsigned probes;
@@ -60,11 +62,13 @@ static RouteResult FastRoute(uint64_t hash, const std::shared_ptr<FakeManager>& 
     const std::shared_ptr<FakeArchive> archive = manager->archive;
     const unsigned generation = manager->generation;
     const unsigned epoch = archive->epoch;
-    const Shipyard::Resources::TextureHashCache<Texture, 4>::ArchiveHashHit hit =
-        cache.LookupArchiveHash(hash, generation, epoch, manager, archive);
-    if (hit.texture && manager->generation == generation && archive->epoch == epoch) {
-        result.texture = hit.texture;
-        result.path = *hit.path;
+    std::shared_ptr<Texture> hitTexture;
+    std::shared_ptr<const std::string> hitPath;
+    const bool hit = cache.LookupArchiveHash(hash, generation, epoch, manager, archive,
+                                              hitTexture, hitPath);
+    if (hit && manager->generation == generation && archive->epoch == epoch) {
+        result.texture = hitTexture;
+        result.path = *hitPath;
         return result;
     }
     const char* path = archive->Resolve(hash);
@@ -203,17 +207,24 @@ int main() {
         routed.StoreArchiveHash(colliding[i], "other", replacement->generation,
                                 otherArchive->epoch, replacement->resources["other"],
                                 replacement, otherArchive);
+    std::shared_ptr<Texture> hitTexture;
+    std::shared_ptr<const std::string> hitPath;
     for (unsigned i = 0; i < 4; ++i)
         assert(routed.LookupArchiveHash(colliding[i], replacement->generation,
-                                       otherArchive->epoch, replacement, otherArchive).texture);
-    const Shipyard::Resources::TextureHashCache<Texture, 4>::ArchiveHashHit retained =
-        routed.LookupArchiveHash(1, replacement->generation, otherArchive->epoch,
-                                 replacement, otherArchive);
-    const char* retainedName = retained.path->c_str();
+                                        otherArchive->epoch, replacement, otherArchive,
+                                        hitTexture, hitPath));
+    assert(routed.LookupArchiveHash(1, replacement->generation, otherArchive->epoch,
+                                    replacement, otherArchive, hitTexture, hitPath));
+    const char* retainedName = hitPath->c_str();
     routed.Clear();
-    assert(retained.texture == replacement->resources["other"]);
+    assert(hitTexture == replacement->resources["other"]);
     assert(std::string(retainedName) == "other");
     routed.StoreArchiveHash(1, "new path", replacement->generation, otherArchive->epoch,
                             replacement->resources["other"], replacement, otherArchive);
     assert(std::string(retainedName) == "other");
+    // An unrelated control block pointing at the same raw manager address
+    // must not impersonate the original shared owner.
+    std::shared_ptr<FakeManager> borrowed(replacement.get(), DoNotDeleteManager());
+    assert(!routed.LookupArchiveHash(1, replacement->generation, otherArchive->epoch,
+                                     borrowed, otherArchive, hitTexture, hitPath));
 }

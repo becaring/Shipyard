@@ -21,13 +21,12 @@ HANDLER = '''bool gfx_set_timg_otr_hash_handler_custom(F3DGfx** cmd0) {
     std::shared_ptr<Fast::Texture> texture;
     std::shared_ptr<const std::string> ownedHashPath;
     const char* fileName = nullptr;
-    const auto hashHit = gfx->mXboxTextureHashCache.LookupArchiveHash(
-        hash, lookupGeneration, archiveEpoch, resourceManager, archiveManager);
-    if (hashHit.texture &&
+    const bool hashHit = gfx->mXboxTextureHashCache.LookupArchiveHash(
+        hash, lookupGeneration, archiveEpoch, resourceManager, archiveManager,
+        texture, ownedHashPath);
+    if (hashHit &&
         resourceManager->GetXboxLookupGeneration() == lookupGeneration &&
         archiveManager->GetXboxHashEpoch() == archiveEpoch) {
-        texture = hashHit.texture;
-        ownedHashPath = hashHit.path;
         fileName = ownedHashPath->c_str();
     } else {
         fileName = archiveManager->HashToCString(hash);
@@ -124,13 +123,11 @@ namespace Ship { struct Context {
     std::shared_ptr<ResourceManager> GetResourceManager();
 }; }
 struct Cache {
-    struct Hit {
-        std::shared_ptr<Fast::Texture> texture;
-        std::shared_ptr<const std::string> path;
-    };
-    Hit LookupArchiveHash(uint64_t, unsigned, unsigned,
-                          const std::shared_ptr<ResourceManager>&,
-                          const std::shared_ptr<ArchiveManager>&);
+    bool LookupArchiveHash(uint64_t, unsigned, unsigned,
+                           const std::shared_ptr<ResourceManager>&,
+                           const std::shared_ptr<ArchiveManager>&,
+                           std::shared_ptr<Fast::Texture>&,
+                           std::shared_ptr<const std::string>&);
     void StoreArchiveHash(uint64_t, const char*, unsigned, unsigned,
                           const std::shared_ptr<Fast::Texture>&,
                           const std::shared_ptr<ResourceManager>&,
@@ -181,7 +178,7 @@ class TextureHashPhaseProfileTests(unittest.TestCase):
                         handler.index('HashToCString(hash)'))
         self.assertLess(handler.index('TextureHashLoader'),
                         handler.index('LoadResourceProcess(fileName)'))
-        cache_hit = handler.split('if (hashHit.texture &&', 1)[1].split('    } else {', 1)[0]
+        cache_hit = handler.split('if (hashHit &&', 1)[1].split('    } else {', 1)[0]
         miss = handler.split('    } else {', 1)[1].split('\n    }', 1)[0]
         missing_map = miss.split('if (fileName == nullptr) {', 1)[1].split('\n        }', 1)[0]
         loader = miss.split('if (fileName == nullptr) {', 1)[1].split('\n        }', 1)[1]

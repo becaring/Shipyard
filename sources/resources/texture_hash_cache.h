@@ -15,10 +15,6 @@ template <typename Texture, size_t Capacity = 256> class TextureHashCache {
   public:
     enum { Ways = 4 };
     enum Route { SignedPath, ArchiveHash };
-    struct ArchiveHashHit {
-        std::shared_ptr<Texture> texture;
-        std::shared_ptr<const std::string> path;
-    };
     struct Entry {
         uint64_t hash;
         unsigned generation;
@@ -52,12 +48,15 @@ template <typename Texture, size_t Capacity = 256> class TextureHashCache {
     }
 
     template <typename Manager, typename Archive>
-    ArchiveHashHit LookupArchiveHash(uint64_t hash, unsigned generation, unsigned archiveEpoch,
-                                     const std::shared_ptr<Manager>& manager,
-                                     const std::shared_ptr<Archive>& archive) {
-        ArchiveHashHit hit;
+    bool LookupArchiveHash(uint64_t hash, unsigned generation, unsigned archiveEpoch,
+                           const std::shared_ptr<Manager>& manager,
+                           const std::shared_ptr<Archive>& archive,
+                           std::shared_ptr<Texture>& textureOut,
+                           std::shared_ptr<const std::string>& pathOut) {
+        textureOut.reset();
+        pathOut.reset();
         if (!manager || !archive)
-            return hit;
+            return false;
         const size_t first = SetStart(hash);
         for (size_t way = 0; way < Ways; ++way) {
             Entry& entry = mEntries[first + way];
@@ -65,17 +64,20 @@ template <typename Texture, size_t Capacity = 256> class TextureHashCache {
                 entry.generation != generation || entry.archiveEpoch != archiveEpoch ||
                 !entry.archivePath || !entry.texture || entry.texture->IsDirty())
                 continue;
-            const std::shared_ptr<void> cachedManager = entry.managerOwner.lock();
-            const std::shared_ptr<void> cachedArchive = entry.archiveOwner.lock();
-            if (!cachedManager || !cachedArchive || cachedManager.get() != manager.get() ||
-                cachedArchive.get() != archive.get())
+            // Compare control blocks directly. The current shared owners keep
+            // matching weak owners alive, so taking two strong locks here only
+            // adds atomic reference traffic to every warm texture command.
+            if (entry.managerOwner.owner_before(manager) ||
+                manager.owner_before(entry.managerOwner) ||
+                entry.archiveOwner.owner_before(archive) ||
+                archive.owner_before(entry.archiveOwner))
                 continue;
             entry.lastUse = ++mClock;
-            hit.texture = entry.texture;
-            hit.path = entry.archivePath;
-            return hit;
+            textureOut = entry.texture;
+            pathOut = entry.archivePath;
+            return true;
         }
-        return hit;
+        return false;
     }
 
     void Store(uint64_t hash, const char* path, unsigned generation,

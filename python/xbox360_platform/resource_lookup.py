@@ -209,12 +209,12 @@ def texture_hash_phase_profile(source):
     if 'MODERN TEXTURE HASH PHASE PROFILE' in body:
         raise ValueError('texture hash phase profile already projected')
     body = _once(body,
-        '    const auto hashHit = gfx->mXboxTextureHashCache.LookupArchiveHash(',
+        '    const bool hashHit = gfx->mXboxTextureHashCache.LookupArchiveHash(',
         '    // MODERN TEXTURE HASH PHASE PROFILE\n'
         '    ModernFrameProfile::TextureHashSample xboxTextureHashSample;\n'
         '    ModernFrameProfile::BeginTextureHash(\n'
         '        xboxTextureHashSample, ModernFrameProfile::TextureHashOwningCache);\n'
-        '    const auto hashHit = gfx->mXboxTextureHashCache.LookupArchiveHash(')
+        '    const bool hashHit = gfx->mXboxTextureHashCache.LookupArchiveHash(')
     body = _once(body,
         '        fileName = ownedHashPath->c_str();\n    } else {\n'
         '        fileName = archiveManager->HashToCString(hash);',
@@ -276,13 +276,12 @@ def texture_hash_cache_handler(source):
     std::shared_ptr<Fast::Texture> texture;
     std::shared_ptr<const std::string> ownedHashPath;
     const char* fileName = nullptr;
-    const auto hashHit = gfx->mXboxTextureHashCache.LookupArchiveHash(
-        hash, lookupGeneration, archiveEpoch, resourceManager, archiveManager);
-    if (hashHit.texture &&
+    const bool hashHit = gfx->mXboxTextureHashCache.LookupArchiveHash(
+        hash, lookupGeneration, archiveEpoch, resourceManager, archiveManager,
+        texture, ownedHashPath);
+    if (hashHit &&
         resourceManager->GetXboxLookupGeneration() == lookupGeneration &&
         archiveManager->GetXboxHashEpoch() == archiveEpoch) {
-        texture = hashHit.texture;
-        ownedHashPath = hashHit.path;
         fileName = ownedHashPath->c_str();
     } else {
         fileName = archiveManager->HashToCString(hash);
