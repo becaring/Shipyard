@@ -23,7 +23,7 @@
     "python/xbox360_platform/json/generate_streams.py": "612eacc34bbe40851b758ce8d4d9fbd3a43c9728cc1048b99ea8651d7f0db31c",
     "python/xbox360_platform/libzip.py": "1d1181a118757e87a4aaeddd859d96b33397bc3e500576f2cb161fb48e6a5905",
     "python/xbox360_platform/logging_core.py": "f61092741074e439beaedd67f44f21846d5b25fff86e67875bf5f6d132c64e91",
-    "python/xbox360_platform/parallel_build.py": "9cff07d7a460e4e06d0e65b025c2a9560f4514cbcdf1ced050dd959f027d5563",
+    "python/xbox360_platform/parallel_build.py": "4803c8a14e7453f5e8623346f96d355692577ea02f83cfc2af0b21e633a62038",
     "python/xbox360_platform/prism.py": "21880e78863db76385835629e69f92269bab1378cd98b687bbefd34bc25149c5",
     "python/xbox360_platform/resource_lookup.py": "f6a157d723f83bfb9b470ee392ca4d38f8b1e5aac5d67ed5ba203ca08858bf9c",
     "python/xbox360_platform/shade_cache.py": "ec2f6c766d4069af2783dd402b700d61b1e229b4016779d22820401232b42002",
