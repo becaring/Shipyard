@@ -64,7 +64,7 @@ class DrawPreparationTests(unittest.TestCase):
             self.assertIn('draw_state_prepared = false;', function(source, signature), signature)
         for signature in ['void UpdateFramebuffer(', 'void DestroyFramebufferNative(',
                           'void Start()', 'void Init()', 'void Shipyard_ShutdownGraphics()',
-                          'void RestoreQuad(', 'void FinishFramebuffer()', 'void InvalidateGuiState()']:
+                          'void RestoreQuad(', 'void FinishFramebuffer(bool preserveDepth, bool preserveColor)', 'void InvalidateGuiState()']:
             self.assertIn('InvalidateNativeState();', function(source, signature), signature)
         upload = function(source, 'void Upload(const uint8_t* bytes,')
         self.assertEqual(upload.count('RebindSampledTextures();'), 2)

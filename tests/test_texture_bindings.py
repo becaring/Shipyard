@@ -19,7 +19,7 @@ class TextureBindingTests(unittest.TestCase):
 
     def test_rebind_restores_sampler_after_native_texture(self):
         source = (ROOT / 'sources/xenos/core.cpp').read_text()
-        rebind = source[source.index('void RebindSampledTextures() {'):source.index('\nvoid FinishFramebuffer()', source.index('void RebindSampledTextures() {'))]
+        rebind = source[source.index('void RebindSampledTextures() {'):source.index('\nvoid FinishFramebuffer(', source.index('void RebindSampledTextures() {'))]
         self.assertLess(rebind.index('SetNativeTexture(i, texture);'),
                         rebind.index('ApplySampler(i, *sampler);'))
         upload = source[source.index('void Upload(const uint8_t* bytes,'):source.index('\nvoid Sampler(', source.index('void Upload(const uint8_t* bytes,'))]

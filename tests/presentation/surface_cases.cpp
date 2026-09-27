@@ -63,6 +63,16 @@ int main() {
     assert(surface.Prepare(Now, &ready) == S_OK && ready);
     assert(sleeps > 0 && device.value == D3DPRESENT_INTERVAL_FOUR);
 
+    surface.SetUncapped(true);
+    sleeps = 0;
+    for (unsigned i=0; i<20; ++i) {
+        assert(surface.Prepare(Now, &ready) == S_OK && ready);
+        assert(device.value == D3DPRESENT_INTERVAL_IMMEDIATE && sleeps == 0);
+    }
+    surface.SetUncapped(false);
+    surface.SetRate(75);
+    assert(surface.Prepare(Now, &ready) == S_OK && ready);
+    assert(device.value == D3DPRESENT_INTERVAL_ONE);
     device.stateResult = E_FAIL;
     assert(surface.Prepare(Now, &ready) == E_FAIL && ready);
     device.stateResult = S_OK;

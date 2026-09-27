@@ -1,6 +1,9 @@
 #include "platform_frame.h"
 #include "input/physical.h"
 #include "imgui.h"
+#ifdef _XBOX
+#include "platform_keyboard.h"
+#endif
 #include <algorithm>
 #include <cstring>
 #include <float.h>
@@ -14,6 +17,31 @@ Shipyard::ImGuiPlatform::Services services;
 double lastFrame;
 WORD previousButtons;
 WORD blockedPointerButtons;
+#ifdef _XBOX
+Shipyard::ImGuiPlatform::Keyboard keyboard;
+XOVERLAPPED keyboardOverlapped;
+WORD blockedKeyboardButtons;
+bool StartKeyboard(unsigned slot, bool numeric, bool password, const wchar_t* initial,
+                   wchar_t* result, unsigned capacity) {
+    std::memset(&keyboardOverlapped, 0, sizeof(keyboardOverlapped));
+    const DWORD flags = password ? VKBD_LATIN_PASSWORD : numeric ? VKBD_LATIN_NUMERIC : VKBD_DEFAULT;
+    const DWORD status = XShowKeyboardUI(slot, flags, initial, NULL, NULL, result, capacity,
+                                        &keyboardOverlapped);
+    return status == ERROR_SUCCESS || status == ERROR_IO_PENDING;
+}
+int PollKeyboard() {
+    if (!XHasOverlappedIoCompleted(&keyboardOverlapped)) return 0;
+    return XGetOverlappedResult(&keyboardOverlapped, NULL, FALSE) == ERROR_SUCCESS ? 1 : -1;
+}
+void CancelKeyboard() {
+    XCancelOverlapped(&keyboardOverlapped);
+    // The result storage must outlive any asynchronous writer, including shutdown.
+    XGetOverlappedResult(&keyboardOverlapped, NULL, TRUE);
+}
+const Shipyard::ImGuiPlatform::KeyboardTransport keyboardTransport = {
+    StartKeyboard, PollKeyboard, CancelKeyboard
+};
+#endif
 unsigned previousSlot = 4;
 bool previousMenu;
 bool previousPointerActive;
@@ -26,6 +54,10 @@ namespace Shipyard {
 namespace ImGuiPlatform {
 
 void Init(const Services& configured) {
+#ifdef _XBOX
+    keyboard.Reset(keyboardTransport);
+    blockedKeyboardButtons = 0;
+#endif
     services = configured;
     ImGui::GetIO().BackendPlatformName = services.backendName;
     lastFrame = services.now();
@@ -39,6 +71,9 @@ void Init(const Services& configured) {
 }
 
 void Shutdown() {
+#ifdef _XBOX
+    keyboard.Reset(keyboardTransport);
+#endif
     ImGuiIO& io = ImGui::GetIO();
     io.ClearInputKeys();
     io.ClearInputMouse();
@@ -72,6 +107,14 @@ void NewFrame(unsigned width, unsigned height, bool menuVisible) {
         std::memset(&pad, 0, sizeof(pad));
     }
 
+    bool keyboardActive = false;
+#ifdef _XBOX
+    keyboardActive = keyboard.Update(keyboardTransport, selectedSlot, menuVisible);
+    if (keyboardActive) blockedKeyboardButtons |= pad.buttons;
+    blockedKeyboardButtons &= pad.buttons;
+    pad.buttons &= ~blockedKeyboardButtons;
+    if (keyboardActive) std::memset(&pad, 0, sizeof(pad));
+#endif
     const bool sourceChanged = selectedSlot != previousSlot;
     const bool opened = menuVisible && !previousMenu;
     if (opened)
@@ -82,7 +125,7 @@ void NewFrame(unsigned width, unsigned height, bool menuVisible) {
         !(previousButtons & XINPUT_GAMEPAD_RIGHT_THUMB))
         pointerMode = !pointerMode;
 
-    const bool pointerActive = connected && menuVisible && pointerMode &&
+    const bool pointerActive = connected && menuVisible && pointerMode && !keyboardActive &&
                                (io.ConfigFlags & ImGuiConfigFlags_NavEnableGamepad) != 0;
     if (pointerActive != previousPointerActive || sourceChanged)
         blockedPointerButtons = pad.buttons & (XINPUT_GAMEPAD_A | XINPUT_GAMEPAD_B);

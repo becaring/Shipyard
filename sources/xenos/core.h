@@ -10,6 +10,8 @@
 #include <utility>
 #include <vector>
 #include "shader_provider.h"
+#include "depth_discard.h"
+#include "tiling_space_probe.h"
 
 namespace Fast {
 struct ShaderProgram;
@@ -26,9 +28,41 @@ struct NativeCounters {
     unsigned bindingAttempted, bindingWritten, bindingSuppressed;
     unsigned uploadRequests, uploadReused, uploadSavedBytes;
     unsigned clears, restoresAvoided, depthRestoresAvoided;
+    unsigned depthResolves, depthResolvesSkipped, earlyDepthFences;
+    unsigned tilingDrawRestarts, tilingPeakBytes;
+    unsigned tiling1080Batches, tiling1080Tile1Batches;
+    unsigned tiling1080Vertices, tiling1080Tile1Vertices;
+    unsigned tiling1080OversizeBatches;
+    unsigned ringSameSegmentDraws, ringAmbiguousDraws, ringSegmentChangedDraws;
+    unsigned ringMaxSameSegmentBytes;
+    uint64_t ringSameSegmentBytes, ringSameSegmentEstimatedBytes;
+    TilingSpaceSummary tilingSpace;
+    unsigned presentationColorResolvesSkipped, presentationColorDiscardBlocked;
     unsigned pendingTextures, pendingBytes, width, height, samples, tiles;
 };
 void CaptureAndResetCounters(NativeCounters* counters);
+// Graphics-thread-only opt-in CPU wall-clock buckets. Nested buckets overlap;
+// draw includes preparation, framebuffer setup and native submission, not GPU time.
+struct NativeTimingCounters {
+    uint64_t drawTicks, uploadTicks, framebufferSetupTicks, framebufferResolveTicks;
+    uint64_t framebufferClearTicks, depthReadTicks, depthLockTicks, uploadBytes, frequency;
+    uint64_t tilingSpaceQueryTicks;
+    unsigned drawCalls, uploadCalls, framebufferSetupCalls, framebufferResolveCalls;
+    unsigned framebufferClearCalls, depthReadCalls, depthLockCalls, depthSamples;
+    unsigned tilingSpaceQueryCalls;
+    // Pre-LockRect resource state, sampled only with timing enabled.
+    unsigned depthBusyCalls, depthIdleCalls, depthBusy1080Calls, depthIdle1080Calls;
+    unsigned preparationRebuilt, preparationReused;
+    unsigned activeWidth, activeHeight, activeSamples, activeTiles;
+    unsigned presentationWidth, presentationHeight;
+    unsigned buffer2Frames, presentationInterval;
+    bool enabled;
+};
+// A false-to-true transition starts a fresh interval. Repeated values preserve it.
+void SetTimingEnabled(bool enabled);
+// Resets counts; reads no clock. Upload bytes include requests served by reuse.
+void CaptureAndResetTimingCounters(NativeTimingCounters* counters);
+
 GfxClipParameters ClipParameters();
 void UnloadShader(ShaderProgram* shader);
 void LoadShader(ShaderProgram* shader);

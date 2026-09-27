@@ -2,6 +2,8 @@
 #include "services.h"
 #include "pixels.h"
 #include "shader_provider.h"
+#include "tile_coverage.h"
+#include "ring_probe.h"
 
 #include "metrics.h"
 #include <xgraphics.h>
@@ -26,6 +28,29 @@ namespace {
 // Consumer callbacks may load/store shader bytecode. Shipyard owns the compiled
 // D3D objects and their lifetime regardless of the bytecode cache policy.
 ShipyardXenos::ShaderCacheOps shader_cache_ops = {NULL, NULL};
+ShipyardXenos::NativeTimingCounters timing_counts;
+bool timing_enabled;
+uint64_t timing_frequency;
+class NativeTimingScope {
+    uint64_t* ticks;
+    LARGE_INTEGER started;
+public:
+    NativeTimingScope(uint64_t& total, unsigned& calls) : ticks(NULL) {
+        if (timing_enabled) {
+            QueryPerformanceCounter(&started);
+            ticks = &total;
+            ++calls;
+        }
+    }
+    ~NativeTimingScope() {
+        if (ticks) {
+            LARGE_INTEGER ended;
+            QueryPerformanceCounter(&ended);
+            *ticks += (uint64_t)(ended.QuadPart - started.QuadPart);
+        }
+    }
+};
+
 struct TextureSampler {
     bool linear;
     uint32_t s, t, key;
@@ -93,6 +118,20 @@ size_t pending_texture_bytes;
 std::vector<Framebuffer> buffers;
 std::vector<int> free_framebuffers;
 unsigned framebuffer_clear_count, framebuffer_restore_avoided, framebuffer_depth_restore_avoided;
+unsigned framebuffer_depth_resolves, framebuffer_depth_resolves_skipped;
+unsigned framebuffer_early_depth_fences;
+unsigned tiling_draw_restarts, tiling_peak_bytes;
+unsigned tiling_1080_batches, tiling_1080_tile1_batches;
+unsigned tiling_1080_vertices, tiling_1080_tile1_vertices;
+unsigned tiling_1080_oversize_batches;
+unsigned ring_same_segment_draws, ring_ambiguous_draws, ring_segment_changed_draws;
+unsigned ring_max_same_segment_bytes;
+uint64_t ring_same_segment_bytes, ring_same_segment_estimated_bytes;
+ShipyardXenos::TilingSpaceProbe tiling_space_probe;
+bool tiling_guard_restart_pending;
+bool discard_presentation_depth_on_end;
+bool discard_presentation_color_on_end;
+unsigned presentation_color_resolves_skipped, presentation_color_discard_blocked;
 ShaderProgram* current_shader;
 float primitive_depth;
 bool primitive_depth_enabled, primitive_depth_valid;
@@ -101,6 +140,7 @@ int selected_fb[6] = {-1, -1, -1, -1, -1, -1};
 int upload_tile, active_fb;
 // Published image holds a separate reference until replacement or shutdown.
 IDirect3DTexture9* published_framebuffer_image = NULL;
+bool presentation_image_ever_published;
 IDirect3DSurface9* presentation_color;
 IDirect3DSurface9* presentation_depth;
 IDirect3DVertexShader9* restore_vertex;
@@ -111,7 +151,11 @@ IDirect3DStateBlock9* restore_state;
 bool live_framebuffer, tile_constants_owned;
 size_t tiling_draw_bytes;
 void BeginFramebuffer();
-void FinishFramebuffer();
+void FinishFramebuffer(bool preserveDepth = true, bool preserveColor = true);
+void TilingSpaceBegin();
+void TilingSpaceSetup();
+void TilingSpaceBeforeResolve();
+void TilingSpaceBeforeEnd();
 void RebindSampledTextures();
 void Resolve(int id);
 unsigned frame_number;
@@ -552,12 +596,15 @@ void VerifyTextureUpload(Texture& tex, const uint8_t* bytes) {
         BeginFramebuffer();
 }
 void Upload(const uint8_t* bytes, uint32_t width, uint32_t height) {
+    NativeTimingScope timing(timing_counts.uploadTicks, timing_counts.uploadCalls);
     const uint32_t id = selected[upload_tile];
     Texture& tex = textures[id];
     if (!width || !height || width > 4096 || height > 4096)
         Shipyard_Fatal("texture dimensions", E_INVALIDARG);
     ++upload_counts.requests;
     const size_t size = width * height * 4;
+    if (timing_enabled)
+        timing_counts.uploadBytes += size;
     UploadSnapshot& snapshot = upload_snapshots[id & (UPLOAD_SNAPSHOT_SLOTS - 1)];
     if (size <= UPLOAD_SNAPSHOT_BYTES && tex.native && snapshot.native == tex.native &&
         snapshot.id == id && snapshot.width == width && snapshot.height == height &&
@@ -693,6 +740,8 @@ void VerifyPreparedDrawState() {
             VerifyNativeSampler(slot, native_state.sampler[slot]);
 }
 __declspec(noinline) void RebuildDrawState() {
+    if (timing_enabled)
+        ++timing_counts.preparationRebuilt;
     draw_sampler_mask = 0;
     __declspec(align(16)) float constants[12] = {shader_frame_number, noise_scale, 0, 0};
     __declspec(align(16)) float binding_info[24] = {0};
@@ -752,26 +801,79 @@ __declspec(noinline) void RebuildDrawState() {
 __forceinline void PrepareDrawState() {
     if (!draw_state_prepared)
         RebuildDrawState();
-    else if (Shipyard_VerifyFast3DReuse())
-        VerifyPreparedDrawState();
+    else {
+        if (timing_enabled)
+            ++timing_counts.preparationReused;
+        if (Shipyard_VerifyFast3DReuse())
+            VerifyPreparedDrawState();
+    }
 }
 
 void Draw(float* vertices, size_t count, size_t triangles) {
+    NativeTimingScope timing(timing_counts.drawTicks, timing_counts.drawCalls);
     if (!current_shader || count != triangles * 3 * current_shader->floats)
         Shipyard_Fatal("Shipyard vertex buffer size", E_INVALIDARG);
     // EndTiling cannot submit a partially filled SDK ring. Retain the target and
     // restart the native bracket before it consumes its reserved command space.
     // The allowance includes state-command space for each Fast3D batch.
     if (live_framebuffer && buffers[active_fb].tiles.size() > 1 &&
-        tiling_draw_bytes + count * sizeof(float) + 8192 > 2 * 1024 * 1024)
+        tiling_draw_bytes + count * sizeof(float) + 8192 > 2 * 1024 * 1024) {
+        ++tiling_draw_restarts;
+        tiling_guard_restart_pending = timing_enabled;
         FinishFramebuffer();
+        tiling_guard_restart_pending = false;
+    }
     BeginFramebuffer();
+    if (timing_enabled) {
+        const Framebuffer& b = buffers[active_fb];
+        if (b.width == 1920 && b.height == 1080 && b.tiles.size() == 2) {
+            D3DVIEWPORT9 viewport;
+            xenos_device->GetViewport(&viewport);
+            const size_t vertexCount = count / current_shader->floats;
+            ++tiling_1080_batches;
+            tiling_1080_vertices += (unsigned)vertexCount;
+            if (vertexCount > ShipyardXenos::TileCoverageMaximumVertices)
+                ++tiling_1080_oversize_batches;
+            if (viewport.Y <= b.height && viewport.Height <= b.height - viewport.Y &&
+                ShipyardXenos::BatchInsideSecondTile(
+                    vertices, vertexCount, current_shader->floats, viewport.Y,
+                    viewport.Height, (unsigned)b.tiles[0].y2)) {
+                ++tiling_1080_tile1_batches;
+                tiling_1080_tile1_vertices += (unsigned)vertexCount;
+            }
+        }
+    }
+    const Framebuffer& ringFramebuffer = buffers[active_fb];
+    const bool probeRing = timing_enabled && ringFramebuffer.width == 1920 &&
+                           ringFramebuffer.height == 1080 && ringFramebuffer.tiles.size() == 2;
+    const ShipyardXenos::RingCursor ringBefore(
+        probeRing ? (uintptr_t)xenos_device->m_pRing : 0,
+        probeRing ? (uintptr_t)xenos_device->m_pRingLimit : 0);
     PrepareDrawState();
     ApplyAlpha(); // Also handles shader-only changes and external state restoration.
     Shipyard_Check(xenos_device->DrawPrimitiveUP(D3DPT_TRIANGLELIST, (UINT)triangles, vertices,
                                                  (UINT)(current_shader->floats * 4)),
                    "Shipyard DrawPrimitiveUP");
+    if (probeRing) {
+        const ShipyardXenos::RingCursor ringAfter(
+            (uintptr_t)xenos_device->m_pRing, (uintptr_t)xenos_device->m_pRingLimit);
+        size_t observedBytes;
+        if (ShipyardXenos::SameRingSegmentDelta(ringBefore, ringAfter,
+                                                8 * 1024 * 1024 / 32, &observedBytes)) {
+            ++ring_same_segment_draws;
+            ring_same_segment_bytes += observedBytes;
+            ring_same_segment_estimated_bytes += count * sizeof(float) + 8192;
+            ring_max_same_segment_bytes = std::max(ring_max_same_segment_bytes,
+                                                   (unsigned)observedBytes);
+        } else {
+            ++ring_ambiguous_draws;
+            if (ringBefore.segmentLimit != ringAfter.segmentLimit)
+                ++ring_segment_changed_draws;
+        }
+    }
     tiling_draw_bytes += count * sizeof(float) + 8192;
+    if (buffers[active_fb].tiles.size() > 1 && tiling_draw_bytes > tiling_peak_bytes)
+        tiling_peak_bytes = (unsigned)tiling_draw_bytes;
 }
 void ValidateFramebuffer(int id) {
     if (id < 0 || (size_t)id >= buffers.size() ||
@@ -898,6 +1000,7 @@ void RestoreQuad(IDirect3DTexture9* color, IDirect3DTexture9* depth, uint32_t wi
         SetTileConstants();
 }
 void ClearFramebufferTargets(DWORD flags) {
+    NativeTimingScope timing(timing_counts.framebufferClearTicks, timing_counts.framebufferClearCalls);
     const Framebuffer& b = buffers[active_fb];
     D3DVIEWPORT9 previous;
     DWORD scissor;
@@ -912,9 +1015,43 @@ void ClearFramebufferTargets(DWORD flags) {
     Shipyard_Check(xenos_device->SetViewport(&previous), "restore framebuffer clear viewport");
     xenos_device->SetRenderState(D3DRS_SCISSORTESTENABLE, scissor);
 }
+bool ProfileTilingSpace() {
+    const Framebuffer& b = buffers[active_fb];
+    return timing_enabled && b.width == 1920 && b.height == 1080 && b.tiles.size() == 2;
+}
+void QueryTilingSpace(DWORD* used, DWORD* remaining) {
+    NativeTimingScope timing(timing_counts.tilingSpaceQueryTicks,
+                             timing_counts.tilingSpaceQueryCalls);
+    xenos_device->QueryBufferSpace(used, remaining);
+}
+void TilingSpaceBegin() {
+    if (!ProfileTilingSpace()) return;
+    DWORD used, remaining;
+    QueryTilingSpace(&used, &remaining);
+    tiling_space_probe.Begin(used, remaining);
+}
+void TilingSpaceSetup() {
+    if (!timing_enabled || !tiling_space_probe.active) return;
+    DWORD used, remaining;
+    QueryTilingSpace(&used, &remaining);
+    tiling_space_probe.Setup(used, remaining);
+}
+void TilingSpaceBeforeResolve() {
+    if (!timing_enabled || !tiling_space_probe.active) return;
+    DWORD used, remaining;
+    QueryTilingSpace(&used, &remaining);
+    tiling_space_probe.BeforeResolve(used, remaining, tiling_guard_restart_pending);
+}
+void TilingSpaceBeforeEnd() {
+    if (!timing_enabled || !tiling_space_probe.active) return;
+    DWORD used, remaining;
+    QueryTilingSpace(&used, &remaining);
+    tiling_space_probe.BeforeEnd(used, remaining);
+}
 void BeginFramebuffer() {
     if (live_framebuffer)
         return;
+    NativeTimingScope timing(timing_counts.framebufferSetupTicks, timing_counts.framebufferSetupCalls);
     InvalidateNativeState();
     Framebuffer& b = buffers[active_fb];
     if (!b.color)
@@ -927,9 +1064,10 @@ void BeginFramebuffer() {
     xenos_device->SetRenderState(D3DRS_MULTISAMPLEANTIALIAS, TRUE);
     xenos_device->SetRenderState(D3DRS_MULTISAMPLEMASK, ~0u);
     D3DVECTOR4 clear = {0, 0, 0, 1};
-    if (b.tiles.size() > 1)
+    if (b.tiles.size() > 1) {
         xenos_device->BeginTiling(0, (DWORD)b.tiles.size(), &b.tiles[0], &clear, 1, 0);
-    else if (!b.stored || (b.depth && !b.depth_stored)) {
+        TilingSpaceBegin();
+    } else if (!b.stored || (b.depth && !b.depth_stored)) {
         DWORD flags =
             (!b.stored ? D3DCLEAR_TARGET : 0) | (b.depth ? D3DCLEAR_ZBUFFER | D3DCLEAR_STENCIL : 0);
         ClearFramebufferTargets(flags);
@@ -945,6 +1083,7 @@ void BeginFramebuffer() {
     live_framebuffer = true;
     tiling_draw_bytes = 0;
     SetTileConstants();
+    TilingSpaceSetup();
 }
 void RebindSampledTextures() {
     draw_state_prepared = false;
@@ -963,10 +1102,15 @@ void RebindSampledTextures() {
             ApplySampler(i, *sampler);
     }
 }
-void FinishFramebuffer() {
+void FinishFramebuffer(bool preserveDepth, bool preserveColor) {
     if (!live_framebuffer)
         return;
+    NativeTimingScope timing(timing_counts.framebufferResolveTicks, timing_counts.framebufferResolveCalls);
     Framebuffer& b = buffers[active_fb];
+    if (!preserveColor && (preserveDepth || active_fb != 0 || b.color != presentation_color ||
+                           b.tiles.size() != 1))
+        Shipyard_Fatal("presentation color discard contract", E_INVALIDARG);
+    TilingSpaceBeforeResolve();
     StopTileConstants();
     for (int binding = 0; binding < 6; ++binding)
         SetNativeTexture(binding, NULL);
@@ -981,11 +1125,15 @@ void FinishFramebuffer() {
         rectangle.y2 = std::min(rectangle.y2, (LONG)b.height);
         D3DPOINT destination = {rectangle.x1, rectangle.y1};
         for (uint32_t sample = 0; sample < b.samples; ++sample) {
-            if (b.depth)
+            if (b.depth && preserveDepth) {
                 Shipyard_Check(xenos_device->Resolve(D3DRESOLVE_DEPTHSTENCIL | fragments[sample],
                                                      &rectangle, b.depth_samples[sample],
                                                      &destination, 0, 0, NULL, 1, 0, NULL),
                                "retain depth fragment");
+                ++framebuffer_depth_resolves;
+            } else if (b.depth) {
+                ++framebuffer_depth_resolves_skipped;
+            }
             if (b.samples > 1)
                 Shipyard_Check(xenos_device->Resolve(D3DRESOLVE_RENDERTARGET0 | fragments[sample],
                                                      &rectangle, b.color_samples[sample],
@@ -995,19 +1143,31 @@ void FinishFramebuffer() {
         DWORD flags = D3DRESOLVE_RENDERTARGET0 | D3DRESOLVE_ALLFRAGMENTS;
         if (b.tiles.size() > 1)
             flags |= D3DRESOLVE_CLEARRENDERTARGET | (b.depth ? D3DRESOLVE_CLEARDEPTHSTENCIL : 0);
-        Shipyard_Check(xenos_device->Resolve(flags, &rectangle, b.image, &destination, 0, 0, &clear,
-                                             1, 0, NULL),
-                       "resolve framebuffer color");
+        if (preserveColor)
+            Shipyard_Check(xenos_device->Resolve(flags, &rectangle, b.image, &destination, 0, 0,
+                                                 &clear, 1, 0, NULL),
+                           "resolve framebuffer color");
+        else
+            ++presentation_color_resolves_skipped;
     }
     if (b.tiles.size() > 1) {
         xenos_device->SetPredication(0);
+        TilingSpaceBeforeEnd();
         // Resolves above are explicitly predicated per tile, including all depth
         // fragments. Disable EndTiling's automatic single-target resolve.
         Shipyard_Check(xenos_device->EndTiling(0, NULL, NULL, &clear, 1, 0, NULL),
                        "finish framebuffer tiling");
     }
-    b.stored = true;
-    b.depth_stored = b.depth != NULL;
+    // Seal the resolved depth resource's SDK fence before later presentation
+    // commands enter the same interval. PixelDepth may lock this texture during
+    // the next game update; this fence submits work but does not wait for it.
+    // EndTiling must be complete before inserting a fence.
+    if (b.tiles.size() > 1 && b.depth && preserveDepth) {
+        xenos_device->InsertFence();
+        ++framebuffer_early_depth_fences;
+    }
+    b.stored = preserveColor;
+    b.depth_stored = preserveDepth && b.depth != NULL;
     live_framebuffer = false;
     InvalidateNativeState();
     RebindSampledTextures();
@@ -1254,6 +1414,9 @@ PixelDepth(int id, const std::set<std::pair<float, float> >& coords) {
     std::unordered_map<std::pair<float, float>, uint16_t, hash_pair_ff> result;
     if (coords.empty())
         return result;
+    NativeTimingScope depthReading(timing_counts.depthReadTicks, timing_counts.depthReadCalls);
+    if (timing_enabled)
+        timing_counts.depthSamples += (unsigned)coords.size();
     bool resume = live_framebuffer;
     FinishFramebuffer();
     Framebuffer& b = buffers[id];
@@ -1274,8 +1437,26 @@ PixelDepth(int id, const std::set<std::pair<float, float> >& coords) {
         Shipyard_Log("initialized depth before first draw: framebuffer=%d samples=%u", id,
                      b.samples);
     }
+    if (timing_enabled) {
+        // IsBusy is a nonblocking state sample. Do not pre-wait here: that
+        // would change the LockRect schedule being measured.
+        const bool busy = depth_texture->IsBusy() != FALSE;
+        const bool is1080 = b.width == 1920 && b.height == 1080;
+        if (busy) {
+            ++timing_counts.depthBusyCalls;
+            if (is1080)
+                ++timing_counts.depthBusy1080Calls;
+        } else {
+            ++timing_counts.depthIdleCalls;
+            if (is1080)
+                ++timing_counts.depthIdle1080Calls;
+        }
+    }
     D3DLOCKED_RECT lock;
-    Shipyard_Check(depth_texture->LockRect(0, &lock, NULL, D3DLOCK_READONLY), "depth LockRect");
+    {
+        NativeTimingScope depthLock(timing_counts.depthLockTicks, timing_counts.depthLockCalls);
+        Shipyard_Check(depth_texture->LockRect(0, &lock, NULL, D3DLOCK_READONLY), "depth LockRect");
+    }
     XGTEXTURE_DESC desc;
     XGGetTextureDesc(depth_texture, 0, &desc);
     // The caller asks for individual occlusion samples. Let the SDK address
@@ -1303,6 +1484,8 @@ PixelDepth(int id, const std::set<std::pair<float, float> >& coords) {
 }
 void* FramebufferImage(int id) {
     Resolve(id);
+    if (id == 0)
+        presentation_image_ever_published = true;
     IDirect3DTexture9* image = buffers[id].image;
     if (image != published_framebuffer_image) {
         if (image)
@@ -1410,12 +1593,29 @@ void ReadFramebufferPixels(IDirect3DTexture9* image, uint32_t width, uint32_t he
     image->UnlockRect(0);
 }
 void End() {
+    const bool discardPresentationDepth = discard_presentation_depth_on_end;
+    discard_presentation_depth_on_end = false;
+    const bool discardPresentationColor = discard_presentation_color_on_end;
+    discard_presentation_color_on_end = false;
+    bool canDiscardPresentationColor = false;
+    if (discardPresentationColor && discardPresentationDepth && buffers[0].color == presentation_color &&
+        buffers[0].tiles.size() == 1 && !presentation_image_ever_published) {
+        canDiscardPresentationColor = true;
+        for (int binding = 0; binding < 6; ++binding)
+            if (selected_fb[binding] == 0)
+                canDiscardPresentationColor = false;
+    }
+    if (discardPresentationColor && !canDiscardPresentationColor)
+        ++presentation_color_discard_blocked;
     BeginFramebuffer();
-    FinishFramebuffer();
+    if (active_fb == 0)
+        FinishFramebuffer(!discardPresentationDepth, !canDiscardPresentationColor);
+    else
+        FinishFramebuffer();
     if (active_fb != 0) {
         active_fb = 0;
         BeginFramebuffer();
-        FinishFramebuffer();
+        FinishFramebuffer(!discardPresentationDepth, !canDiscardPresentationColor);
     }
     if (buffers[0].color != presentation_color) {
         Shipyard_Check(xenos_device->SetRenderTarget(0, presentation_color), "presentation target");
@@ -1641,6 +1841,16 @@ void ClearRegion(float x0, float y0, float x1, float y1) {
 } // namespace
 
 namespace ShipyardXenos {
+void DiscardPresentationDepthOnEnd() {
+    discard_presentation_depth_on_end = true;
+}
+void DiscardPresentationColorOnEnd() {
+    discard_presentation_color_on_end = true;
+}
+void DiscardFramebufferDepth(int id) {
+    if (live_framebuffer && active_fb == id && buffers[id].depth)
+        FinishFramebuffer(false);
+}
 void SetShaderCache(const ShaderCacheOps* operations) {
     if (operations)
         shader_cache_ops = *operations;
@@ -1648,6 +1858,47 @@ void SetShaderCache(const ShaderCacheOps* operations) {
         shader_cache_ops.load = NULL;
         shader_cache_ops.store = NULL;
     }
+}
+void SetTimingEnabled(bool enabled) {
+    if (enabled == timing_enabled)
+        return;
+    memset(&timing_counts, 0, sizeof(timing_counts));
+    if (!enabled) tiling_space_probe.active = false;
+    timing_enabled = enabled;
+    if (enabled && !timing_frequency) {
+        LARGE_INTEGER frequency;
+        QueryPerformanceFrequency(&frequency);
+        timing_frequency = (uint64_t)frequency.QuadPart;
+    }
+}
+void CaptureAndResetTimingCounters(NativeTimingCounters* counters) {
+    if (!counters)
+        return;
+    *counters = timing_counts;
+    counters->enabled = timing_enabled;
+    counters->frequency = timing_frequency;
+    if (active_fb >= 0 && (size_t)active_fb < buffers.size()) {
+        const Framebuffer& b = buffers[active_fb];
+        counters->activeWidth = b.width;
+        counters->activeHeight = b.height;
+        counters->activeSamples = b.samples;
+        counters->activeTiles = (unsigned)b.tiles.size();
+    }
+    if (xenos_device) {
+        DWORD value;
+        xenos_device->GetRenderState(D3DRS_BUFFER2FRAMES, &value);
+        counters->buffer2Frames = value;
+        xenos_device->GetRenderState(D3DRS_PRESENTINTERVAL, &value);
+        counters->presentationInterval = value;
+    }
+    if (presentation_color) {
+        D3DSURFACE_DESC description;
+        if (SUCCEEDED(presentation_color->GetDesc(&description))) {
+            counters->presentationWidth = description.Width;
+            counters->presentationHeight = description.Height;
+        }
+    }
+    memset(&timing_counts, 0, sizeof(timing_counts));
 }
 void CaptureAndResetCounters(NativeCounters* counters) {
     if (!counters)
@@ -1668,6 +1919,25 @@ void CaptureAndResetCounters(NativeCounters* counters) {
     counters->clears = framebuffer_clear_count;
     counters->restoresAvoided = framebuffer_restore_avoided;
     counters->depthRestoresAvoided = framebuffer_depth_restore_avoided;
+    counters->depthResolves = framebuffer_depth_resolves;
+    counters->depthResolvesSkipped = framebuffer_depth_resolves_skipped;
+    counters->earlyDepthFences = framebuffer_early_depth_fences;
+    counters->tilingDrawRestarts = tiling_draw_restarts;
+    counters->tilingPeakBytes = tiling_peak_bytes;
+    counters->tiling1080Batches = tiling_1080_batches;
+    counters->tiling1080Tile1Batches = tiling_1080_tile1_batches;
+    counters->tiling1080Vertices = tiling_1080_vertices;
+    counters->tiling1080Tile1Vertices = tiling_1080_tile1_vertices;
+    counters->tiling1080OversizeBatches = tiling_1080_oversize_batches;
+    counters->ringSameSegmentDraws = ring_same_segment_draws;
+    counters->ringAmbiguousDraws = ring_ambiguous_draws;
+    counters->ringSegmentChangedDraws = ring_segment_changed_draws;
+    counters->ringMaxSameSegmentBytes = ring_max_same_segment_bytes;
+    counters->ringSameSegmentBytes = ring_same_segment_bytes;
+    counters->ringSameSegmentEstimatedBytes = ring_same_segment_estimated_bytes;
+    counters->tilingSpace = tiling_space_probe.summary;
+    counters->presentationColorResolvesSkipped = presentation_color_resolves_skipped;
+    counters->presentationColorDiscardBlocked = presentation_color_discard_blocked;
     counters->pendingTextures = (unsigned)pending_texture_releases.size();
     counters->pendingBytes = (unsigned)pending_texture_bytes;
     for (size_t i = 0; i < buffers.size(); ++i)
@@ -1682,6 +1952,17 @@ void CaptureAndResetCounters(NativeCounters* counters) {
     memset(&upload_counts, 0, sizeof(upload_counts));
     binding_attempted = binding_written = binding_suppressed = 0;
     framebuffer_clear_count = framebuffer_restore_avoided = framebuffer_depth_restore_avoided = 0;
+    framebuffer_depth_resolves = framebuffer_depth_resolves_skipped = 0;
+    framebuffer_early_depth_fences = 0;
+    tiling_draw_restarts = tiling_peak_bytes = 0;
+    tiling_1080_batches = tiling_1080_tile1_batches = 0;
+    tiling_1080_vertices = tiling_1080_tile1_vertices = 0;
+    tiling_1080_oversize_batches = 0;
+    ring_same_segment_draws = ring_ambiguous_draws = ring_segment_changed_draws = 0;
+    ring_max_same_segment_bytes = 0;
+    ring_same_segment_bytes = ring_same_segment_estimated_bytes = 0;
+    tiling_space_probe.ResetSummary();
+    presentation_color_resolves_skipped = presentation_color_discard_blocked = 0;
 }
 GfxClipParameters ClipParameters() {
     return ::Fast::ClipParameters();

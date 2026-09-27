@@ -64,6 +64,8 @@ void SetNativeConstants(const float* values) { referenceOrder.push_back(10);std:
 void SetNativeBindingConstants(const float* values) { referenceOrder.push_back(11);std::memcpy(bindings,values,sizeof(bindings)); }
 #include "draw_preparation_reference.inc"
 }
+bool timing_enabled;
+struct { unsigned preparationRebuilt, preparationReused; } timing_counts;
 #include "production.inc"
 void compare() {
     bool rebuilt = !draw_state_prepared;
