@@ -93,7 +93,7 @@ def lower_if_initializers(text, parser, walk, expected=None, max_depth=16):
 def lift_captureless_callbacks(text, parser, walk, *, parameters, return_type, prefix, expected):
     """Return checked named callback definitions for a consumer-selected signature."""
     data = text.encode()
-    edits, definitions = [], []
+    selected = []
     for node in walk(parser.parse(data).root_node):
         if node.type != 'lambda_expression':
             continue
@@ -104,13 +104,31 @@ def lift_captureless_callbacks(text, parser, walk, *, parameters, return_type, p
         body = node.child_by_field_name('body')
         if capture.text != b'[]' or body is None:
             raise ValueError('Callback requires captured state')
-        name = prefix+str(len(definitions))
+        name = prefix+str(len(selected))
         if name.encode() in data:
             raise ValueError('Callback name collision: '+name)
-        definitions.append('static '+return_type+' '+name+parameters+' '+body.text.decode())
-        edits.append((node.start_byte, node.end_byte, name.encode()))
-    if len(definitions) != expected:
+        selected.append((node, body, name))
+    if len(selected) != expected:
         raise ValueError('Captureless callback inventory changed')
+    by_start = {node.start_byte: name for node, _, name in selected}
+    def selected_parent(node):
+        owner = node.parent
+        while owner is not None:
+            if owner.start_byte in by_start and owner.type == 'lambda_expression':
+                return owner.start_byte
+            owner = owner.parent
+        return None
+    edits = []
+    definitions = ['static '+return_type+' '+name+parameters+';' for _,_,name in selected]
+    for node, body, name in selected:
+        value = body.text
+        nested = [(child.start_byte-body.start_byte, child.end_byte-body.start_byte, child_name.encode())
+                  for child,_,child_name in selected if selected_parent(child) == node.start_byte]
+        for first,last,replacement in sorted(nested, reverse=True):
+            value = value[:first]+replacement+value[last:]
+        definitions.append('static '+return_type+' '+name+parameters+' '+value.decode())
+        if selected_parent(node) is None:
+            edits.append((node.start_byte, node.end_byte, name.encode()))
     for first, last, replacement in sorted(edits, reverse=True):
         data = data[:first]+replacement+data[last:]
     return data.decode(), '\n\n'.join(definitions)

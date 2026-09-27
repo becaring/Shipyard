@@ -533,6 +533,13 @@ bool create_directories(const path& input) {
     return result;
 }
 bool copy_file(const path& from, const path& to, std::error_code& error) {
+    return copy_file(from, to, copy_options::none, error);
+}
+bool copy_file(const path& from, const path& to, copy_options::type options, std::error_code& error) {
+    if (options != copy_options::none && options != copy_options::overwrite_existing) {
+        native_error(error, ERROR_INVALID_PARAMETER);
+        return false;
+    }
     std::string source = native_path(from, error);
     if (error)
         return false;
@@ -545,7 +552,7 @@ bool copy_file(const path& from, const path& to, std::error_code& error) {
             native_error(error, ERROR_ACCESS_DENIED);
         return false;
     }
-    if (CopyFileA(source.c_str(), target.c_str(), TRUE)) {
+    if (CopyFileA(source.c_str(), target.c_str(), options == copy_options::none ? TRUE : FALSE)) {
         error.clear();
         return true;
     }
@@ -553,8 +560,11 @@ bool copy_file(const path& from, const path& to, std::error_code& error) {
     return false;
 }
 bool copy_file(const path& from, const path& to) {
+    return copy_file(from, to, copy_options::none);
+}
+bool copy_file(const path& from, const path& to, copy_options::type options) {
     std::error_code error;
-    bool result = copy_file(from, to, error);
+    bool result = copy_file(from, to, options, error);
     if (error)
         throw filesystem_error("copy_file", from, to, error);
     return result;

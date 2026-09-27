@@ -154,6 +154,11 @@ bool create_directories(const path& input, std::error_code& error);
 // Copy fails if the destination exists.
 bool copy_file(const path& from, const path& to);
 bool copy_file(const path& from, const path& to, std::error_code& error);
+namespace copy_options {
+enum type { none = 0, overwrite_existing = 1 };
+}
+bool copy_file(const path& from, const path& to, copy_options::type options);
+bool copy_file(const path& from, const path& to, copy_options::type options, std::error_code& error);
 bool remove(const path& input);
 bool remove(const path& input, std::error_code& error);
 void rename(const path& from, const path& to);

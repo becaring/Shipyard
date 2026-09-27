@@ -60,3 +60,15 @@ class AggregateTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 lower_macro_arguments(source, self.parser, walk, function='patch', argument=1,
                                       macros=('MAKE',), type_name='Pair', expected=1)
+
+    def test_multiple_call_targets_preserve_unselected_calls(self):
+        source = 'void f(){if(c) a.push_back(MAKE(next())); else b.push_back(MAKE(2)); other(MAKE(3));}'
+        result = lower_macro_arguments(source,self.parser,walk,function=('a.push_back','b.push_back'),
+            argument=0,macros=('MAKE',),type_name='Pair',expected=2)
+        self.assertEqual(result.count('next()'),1)
+        self.assertIn('other(MAKE(3));',result)
+        self.assertEqual(result.count('Pair _aggregateArgument'),2)
+        self.assertFalse(self.parser.parse(result.encode()).root_node.has_error)
+        with self.assertRaises(ValueError):
+            lower_macro_arguments(source,self.parser,walk,function=('a.push_back','a.push_back'),
+                argument=0,macros=('MAKE',),type_name='Pair',expected=2)

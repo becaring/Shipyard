@@ -4,11 +4,14 @@
 def lower_macro_arguments(text, parser, walk, *, function, argument, macros, type_name, expected):
     """Materialize selected initializer macros passed to standalone calls."""
     data = text.encode()
+    functions = (function,) if isinstance(function, str) else tuple(function)
+    if not functions or len(set(functions)) != len(functions):
+        raise ValueError('Initializer call selection must be nonempty and unique')
     if b'_aggregateArgument' in data:
         raise ValueError('Aggregate argument temporary collision')
     edits = []
     for node in walk(parser.parse(data).root_node):
-        if node.type != 'call_expression' or node.child_by_field_name('function').text.decode() != function:
+        if node.type != 'call_expression' or node.child_by_field_name('function').text.decode() not in functions:
             continue
         args = node.child_by_field_name('arguments').named_children
         if len(args) <= argument:

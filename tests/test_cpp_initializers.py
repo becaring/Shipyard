@@ -8,6 +8,9 @@ from tree_sitter import Language, Parser
 import tree_sitter_cpp
 from xbox360_platform.cpp_initializers import lower, lower_returns
 from xbox360_platform.cpp_call_initializers import lower as lower_calls, lower_designated
+from xbox360_platform.cpp_designated_expressions import lower as lower_expressions
+from xbox360_platform.json_initializers import lower as lower_json
+from xbox360_platform.cpp_syntax import lift_captureless_callbacks
 from xbox360_platform.prism import walk
 
 
@@ -20,12 +23,24 @@ class InitializerTests(unittest.TestCase):
 #include <vector>
 #include <utility>
 #include <cassert>
+#include <string>
+struct Json:std::map<std::string,int> { static Json object(){return Json();} };
+Json jsonResult(){return Json{{"first",3},{"second",4}};}
+int callbackTotal=0;
+void invoke(void (*callback)(int),int value){callback(value);}
+void launch(){invoke([](int value){invoke([](int value){callbackTotal+=value;},value+1);},2);}
 int calls=0;
 int next(){return ++calls;}
 struct Pod { int first; int second; };
 void take(Pod x, Pod y) { assert(x.first==1 && x.second==0 && y.first==2 && y.second==3); }
 void takePod(Pod x) { assert(x.first==7 && x.second==0); }
 struct Defaults { int first, second; Defaults():first(12),second(23){} };
+struct Base { int first, second; Base():first(5),second(29){} };
+struct Derived:Base { int second; Derived():second(7){} };
+int sequence=0;
+int step(){return ++sequence;}
+bool inspectDerived(Derived value){return value.first==1 && value.second==2 && value.Base::second==29;}
+Derived globalDerived = Derived{{.first=11,.second=17},.second=13};
 void takeDefaults(Defaults x) { assert(x.first==12 && x.second==45); }
 void takeNamed(int tag, Defaults x) { assert(tag==3 && x.first==12 && x.second==45); }
 std::vector<int> values(int input) { return {input,input+1}; }
@@ -40,6 +55,11 @@ int inspect(int input) {
     return localValues[1];
 }
 int main(){takePod(Pod{.first=7}); takeDefaults({.second=45});
+assert(jsonResult()["first"]==3 && jsonResult()["second"]==4);
+launch(); assert(callbackTotal==3);
+assert(globalDerived.first==11 && globalDerived.second==13 && globalDerived.Base::second==17);
+assert(inspectDerived({{.first=step()},.second=step()}) && sequence==2);
+int local=19; Derived held = Derived({.second=local}); assert(held.first==5 && held.second==19);
 takeNamed(3, {.second=45});
 assert(values(8)[1]==9);
 take({1}, {2,3}); assert(calls==2 && globalValues[0]==1 && globalValues[1]==2);
@@ -59,6 +79,13 @@ assert(inspect(7)==5); assert(inspect(8)==6); assert(calls==6);}
         generated = lower_returns(generated, self.parser, walk, {'values': ('std::vector<int>', 1)})
         generated = lower_designated(generated, self.parser, walk, function='takeNamed',
             type_name='Defaults', fields=[('second',)], expected=1, argument=1, arity=2)
+        generated = lower_expressions(generated, self.parser, walk,
+            types={'Derived': {'members': ('first','second'), 'base': ('Base',('first','second'))}},
+            calls={'inspectDerived': (0,'Derived')}, expected=3)
+        generated = lower_json(generated, self.parser, walk, aliases=('Json',), expected=1)
+        generated, callbacks = lift_captureless_callbacks(generated, self.parser, walk,
+            parameters='(int value)', return_type='void', prefix='TestNestedCallback', expected=2)
+        generated = generated.replace('void launch()', callbacks+'\nvoid launch()')
         vswhere = Path(os.environ['ProgramFiles(x86)'])/'Microsoft Visual Studio/Installer/vswhere.exe'
         installation = subprocess.check_output([str(vswhere), '-latest', '-products', '*', '-requires',
             'Microsoft.VisualStudio.Component.VC.Tools.x86.x64', '-property', 'installationPath'], text=True).strip()
@@ -82,3 +109,7 @@ assert(inspect(7)==5); assert(inspect(8)==6); assert(calls==6);}
         with self.assertRaises(ValueError):
             lower_returns('std::vector<float> f(){return {1};}', self.parser, walk,
                 {'f': ('std::vector<int>', 1)})
+        for source in ('void f(){take({.unknown=3});}', 'void f(){take({1,2});}'):
+            with self.assertRaises(ValueError):
+                lower_expressions(source, self.parser, walk, types={'Pod': ('first','second')},
+                    calls={'take': (0,'Pod')}, expected=1)
