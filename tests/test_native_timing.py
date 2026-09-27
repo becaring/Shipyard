@@ -26,7 +26,8 @@ struct LARGE_INTEGER { long long QuadPart; };
 unsigned clocks, frequencies;
 void QueryPerformanceCounter(LARGE_INTEGER* p) { p->QuadPart = ++clocks * 10; }
 void QueryPerformanceFrequency(LARGE_INTEGER* p) { ++frequencies; p->QuadPart = 1000; }
-namespace ShipyardXenos { HEADER }
+namespace ShipyardXenos { struct TilingSpaceSummary {}; HEADER }
+struct { bool active; } tiling_space_probe;
 IMPLEMENTATION
 using ShipyardXenos::NativeTimingCounters;
 struct Framebuffer { unsigned width,height,samples; std::vector<int> tiles; };
@@ -69,7 +70,9 @@ int main() {
     assert(clocks==4 && !timing_counts.drawCalls && !timing_counts.depthBusyCalls);
     CaptureAndResetTimingCounters(&snapshot);
     assert(snapshot.drawCalls==0 && snapshot.frequency==1000 && clocks==4);
+    tiling_space_probe.active=true;
     SetTimingEnabled(false);
+    assert(!tiling_space_probe.active);
     { NativeTimingScope s(timing_counts.drawTicks, timing_counts.drawCalls); }
     assert(clocks == 4 && !timing_counts.drawCalls);
     SetTimingEnabled(true);

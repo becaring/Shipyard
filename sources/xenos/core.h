@@ -11,6 +11,7 @@
 #include <vector>
 #include "shader_provider.h"
 #include "depth_discard.h"
+#include "tiling_space_probe.h"
 
 namespace Fast {
 struct ShaderProgram;
@@ -35,6 +36,7 @@ struct NativeCounters {
     unsigned ringSameSegmentDraws, ringAmbiguousDraws, ringSegmentChangedDraws;
     unsigned ringMaxSameSegmentBytes;
     uint64_t ringSameSegmentBytes, ringSameSegmentEstimatedBytes;
+    TilingSpaceSummary tilingSpace;
     unsigned presentationColorResolvesSkipped, presentationColorDiscardBlocked;
     unsigned pendingTextures, pendingBytes, width, height, samples, tiles;
 };
@@ -44,8 +46,10 @@ void CaptureAndResetCounters(NativeCounters* counters);
 struct NativeTimingCounters {
     uint64_t drawTicks, uploadTicks, framebufferSetupTicks, framebufferResolveTicks;
     uint64_t framebufferClearTicks, depthReadTicks, depthLockTicks, uploadBytes, frequency;
+    uint64_t tilingSpaceQueryTicks;
     unsigned drawCalls, uploadCalls, framebufferSetupCalls, framebufferResolveCalls;
     unsigned framebufferClearCalls, depthReadCalls, depthLockCalls, depthSamples;
+    unsigned tilingSpaceQueryCalls;
     // Pre-LockRect resource state, sampled only with timing enabled.
     unsigned depthBusyCalls, depthIdleCalls, depthBusy1080Calls, depthIdle1080Calls;
     unsigned preparationRebuilt, preparationReused;

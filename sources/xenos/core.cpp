@@ -128,6 +128,8 @@ unsigned tiling_1080_oversize_batches;
 unsigned ring_same_segment_draws, ring_ambiguous_draws, ring_segment_changed_draws;
 unsigned ring_max_same_segment_bytes;
 uint64_t ring_same_segment_bytes, ring_same_segment_estimated_bytes;
+ShipyardXenos::TilingSpaceProbe tiling_space_probe;
+bool tiling_guard_restart_pending;
 bool discard_presentation_depth_on_end;
 bool discard_presentation_color_on_end;
 unsigned presentation_color_resolves_skipped, presentation_color_discard_blocked;
@@ -149,6 +151,10 @@ bool live_framebuffer, tile_constants_owned;
 size_t tiling_draw_bytes;
 void BeginFramebuffer();
 void FinishFramebuffer(bool preserveDepth = true, bool preserveColor = true);
+void TilingSpaceBegin();
+void TilingSpaceSetup();
+void TilingSpaceBeforeResolve();
+void TilingSpaceBeforeEnd();
 void RebindSampledTextures();
 void Resolve(int id);
 unsigned frame_number;
@@ -806,7 +812,9 @@ void Draw(float* vertices, size_t count, size_t triangles) {
     if (live_framebuffer && buffers[active_fb].tiles.size() > 1 &&
         tiling_draw_bytes + count * sizeof(float) + 8192 > 2 * 1024 * 1024) {
         ++tiling_draw_restarts;
+        tiling_guard_restart_pending = timing_enabled;
         FinishFramebuffer();
+        tiling_guard_restart_pending = false;
     }
     BeginFramebuffer();
     if (timing_enabled) {
@@ -1000,6 +1008,39 @@ void ClearFramebufferTargets(DWORD flags) {
     Shipyard_Check(xenos_device->SetViewport(&previous), "restore framebuffer clear viewport");
     xenos_device->SetRenderState(D3DRS_SCISSORTESTENABLE, scissor);
 }
+bool ProfileTilingSpace() {
+    const Framebuffer& b = buffers[active_fb];
+    return timing_enabled && b.width == 1920 && b.height == 1080 && b.tiles.size() == 2;
+}
+void QueryTilingSpace(DWORD* used, DWORD* remaining) {
+    NativeTimingScope timing(timing_counts.tilingSpaceQueryTicks,
+                             timing_counts.tilingSpaceQueryCalls);
+    xenos_device->QueryBufferSpace(used, remaining);
+}
+void TilingSpaceBegin() {
+    if (!ProfileTilingSpace()) return;
+    DWORD used, remaining;
+    QueryTilingSpace(&used, &remaining);
+    tiling_space_probe.Begin(used, remaining);
+}
+void TilingSpaceSetup() {
+    if (!timing_enabled || !tiling_space_probe.active) return;
+    DWORD used, remaining;
+    QueryTilingSpace(&used, &remaining);
+    tiling_space_probe.Setup(used, remaining);
+}
+void TilingSpaceBeforeResolve() {
+    if (!timing_enabled || !tiling_space_probe.active) return;
+    DWORD used, remaining;
+    QueryTilingSpace(&used, &remaining);
+    tiling_space_probe.BeforeResolve(used, remaining, tiling_guard_restart_pending);
+}
+void TilingSpaceBeforeEnd() {
+    if (!timing_enabled || !tiling_space_probe.active) return;
+    DWORD used, remaining;
+    QueryTilingSpace(&used, &remaining);
+    tiling_space_probe.BeforeEnd(used, remaining);
+}
 void BeginFramebuffer() {
     if (live_framebuffer)
         return;
@@ -1016,9 +1057,10 @@ void BeginFramebuffer() {
     xenos_device->SetRenderState(D3DRS_MULTISAMPLEANTIALIAS, TRUE);
     xenos_device->SetRenderState(D3DRS_MULTISAMPLEMASK, ~0u);
     D3DVECTOR4 clear = {0, 0, 0, 1};
-    if (b.tiles.size() > 1)
+    if (b.tiles.size() > 1) {
         xenos_device->BeginTiling(0, (DWORD)b.tiles.size(), &b.tiles[0], &clear, 1, 0);
-    else if (!b.stored || (b.depth && !b.depth_stored)) {
+        TilingSpaceBegin();
+    } else if (!b.stored || (b.depth && !b.depth_stored)) {
         DWORD flags =
             (!b.stored ? D3DCLEAR_TARGET : 0) | (b.depth ? D3DCLEAR_ZBUFFER | D3DCLEAR_STENCIL : 0);
         ClearFramebufferTargets(flags);
@@ -1034,6 +1076,7 @@ void BeginFramebuffer() {
     live_framebuffer = true;
     tiling_draw_bytes = 0;
     SetTileConstants();
+    TilingSpaceSetup();
 }
 void RebindSampledTextures() {
     draw_state_prepared = false;
@@ -1060,6 +1103,7 @@ void FinishFramebuffer(bool preserveDepth, bool preserveColor) {
     if (!preserveColor && (preserveDepth || active_fb != 0 || b.color != presentation_color ||
                            b.tiles.size() != 1))
         Shipyard_Fatal("presentation color discard contract", E_INVALIDARG);
+    TilingSpaceBeforeResolve();
     StopTileConstants();
     for (int binding = 0; binding < 6; ++binding)
         SetNativeTexture(binding, NULL);
@@ -1101,6 +1145,7 @@ void FinishFramebuffer(bool preserveDepth, bool preserveColor) {
     }
     if (b.tiles.size() > 1) {
         xenos_device->SetPredication(0);
+        TilingSpaceBeforeEnd();
         // Resolves above are explicitly predicated per tile, including all depth
         // fragments. Disable EndTiling's automatic single-target resolve.
         Shipyard_Check(xenos_device->EndTiling(0, NULL, NULL, &clear, 1, 0, NULL),
@@ -1811,6 +1856,7 @@ void SetTimingEnabled(bool enabled) {
     if (enabled == timing_enabled)
         return;
     memset(&timing_counts, 0, sizeof(timing_counts));
+    if (!enabled) tiling_space_probe.active = false;
     timing_enabled = enabled;
     if (enabled && !timing_frequency) {
         LARGE_INTEGER frequency;
@@ -1882,6 +1928,7 @@ void CaptureAndResetCounters(NativeCounters* counters) {
     counters->ringMaxSameSegmentBytes = ring_max_same_segment_bytes;
     counters->ringSameSegmentBytes = ring_same_segment_bytes;
     counters->ringSameSegmentEstimatedBytes = ring_same_segment_estimated_bytes;
+    counters->tilingSpace = tiling_space_probe.summary;
     counters->presentationColorResolvesSkipped = presentation_color_resolves_skipped;
     counters->presentationColorDiscardBlocked = presentation_color_discard_blocked;
     counters->pendingTextures = (unsigned)pending_texture_releases.size();
@@ -1907,6 +1954,7 @@ void CaptureAndResetCounters(NativeCounters* counters) {
     ring_same_segment_draws = ring_ambiguous_draws = ring_segment_changed_draws = 0;
     ring_max_same_segment_bytes = 0;
     ring_same_segment_bytes = ring_same_segment_estimated_bytes = 0;
+    tiling_space_probe.ResetSummary();
     presentation_color_resolves_skipped = presentation_color_discard_blocked = 0;
 }
 GfxClipParameters ClipParameters() {
