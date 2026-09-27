@@ -40,7 +40,9 @@ Device* xenos_device=&device;
 void Shipyard_Check(int result,const char*){assert(result==0);}
 void Shipyard_Fatal(const char*,int){assert(false);}
 #include "xenos/raster_bounds.h"
+#include "xenos/tiling_guard_trial.h"
 Shipyard::Xenos::RasterBounds raster_bounds;
+Fast::ShipyardXenos::TilingGuardTrialWindow tiling_guard_trial_window;
 struct Framebuffer {
     void *color,*depth,*image,*color_samples[4],*depth_samples[4];
     bool stored,depth_stored; unsigned width,height,samples; std::vector<D3DRECT> tiles;

@@ -17,30 +17,104 @@ template <typename Texture, size_t Capacity = 256> class TextureHashCache {
     struct Entry {
         uint64_t hash;
         unsigned generation;
+        const void* archiveManager;
+        unsigned archiveEpoch;
         uint64_t lastUse;
         std::string path;
         std::shared_ptr<Texture> texture;
         bool valid;
-        Entry() : hash(0), generation(0), lastUse(0), valid(false) {}
+        Entry() : hash(0), generation(0), archiveManager(NULL), archiveEpoch(0),
+                  lastUse(0), valid(false) {}
     };
 
     TextureHashCache() : mClock(0) {}
 
     std::shared_ptr<Texture> Lookup(uint64_t hash, const char* path, unsigned generation) {
+        const std::shared_ptr<Texture>* hit = LookupBorrowed(hash, path, generation);
+        return hit ? *hit : std::shared_ptr<Texture>();
+    }
+
+    // Borrow only within the synchronous command. Store or Clear can replace
+    // this slot; copy the shared_ptr before keeping the texture beyond it.
+    const std::shared_ptr<Texture>* LookupBorrowed(uint64_t hash, const char* path,
+                                                    unsigned generation) {
         const size_t first = SetStart(hash);
         for (size_t way = 0; way < Ways; ++way) {
             Entry& entry = mEntries[first + way];
             if (entry.valid && entry.hash == hash && entry.generation == generation &&
                 entry.path == path && entry.texture && !entry.texture->IsDirty()) {
                 entry.lastUse = ++mClock;
-                return entry.texture;
+                return &entry.texture;
             }
         }
-        return std::shared_ptr<Texture>();
+        return NULL;
+    }
+
+    // A verified archive epoch certifies the owned path saved with this
+    // texture, so a hit need not query the archive hash map again. The caller
+    // must acquire the epoch from the same live archive manager on each call.
+    const Entry* LookupArchive(uint64_t hash, const void* archiveManager,
+                               unsigned archiveEpoch, unsigned generation) {
+        const size_t first = SetStart(hash);
+        for (size_t way = 0; way < Ways; ++way) {
+            Entry& entry = mEntries[first + way];
+            if (entry.valid && entry.hash == hash && entry.generation == generation &&
+                entry.archiveManager == archiveManager && archiveManager != NULL &&
+                entry.archiveEpoch == archiveEpoch && entry.texture && !entry.texture->IsDirty()) {
+                entry.lastUse = ++mClock;
+                return &entry;
+            }
+        }
+        return NULL;
+    }
+
+    // After an authoritative HashToCString lookup, a previously cached path
+    // can acquire the new epoch certificate without loading the texture again.
+    const Entry* LookupAndCertifyArchive(uint64_t hash, const char* path,
+                                         unsigned generation, const void* archiveManager,
+                                         unsigned archiveEpoch) {
+        const size_t first = SetStart(hash);
+        for (size_t way = 0; way < Ways; ++way) {
+            Entry& entry = mEntries[first + way];
+            if (entry.valid && entry.hash == hash && entry.generation == generation &&
+                entry.path == path && entry.texture && !entry.texture->IsDirty()) {
+                ClearArchiveCertificates(hash, archiveManager);
+                entry.archiveManager = archiveManager;
+                entry.archiveEpoch = archiveEpoch;
+                entry.lastUse = ++mClock;
+                return &entry;
+            }
+        }
+        return NULL;
     }
 
     void Store(uint64_t hash, const char* path, unsigned generation,
                const std::shared_ptr<Texture>& texture) {
+        StoreEntry(hash, path, generation, NULL, 0, texture);
+    }
+
+    void StoreArchive(uint64_t hash, const char* path, unsigned generation,
+                      const void* archiveManager, unsigned archiveEpoch,
+                      const std::shared_ptr<Texture>& texture) {
+        ClearArchiveCertificates(hash, archiveManager);
+        StoreEntry(hash, path, generation, archiveManager, archiveEpoch, texture);
+    }
+
+  private:
+    void ClearArchiveCertificates(uint64_t hash, const void* archiveManager) {
+        if (!archiveManager)
+            return;
+        const size_t first = SetStart(hash);
+        for (size_t way = 0; way < Ways; ++way) {
+            Entry& entry = mEntries[first + way];
+            if (entry.valid && entry.hash == hash && entry.archiveManager == archiveManager)
+                entry.archiveManager = NULL;
+        }
+    }
+
+    void StoreEntry(uint64_t hash, const char* path, unsigned generation,
+                    const void* archiveManager, unsigned archiveEpoch,
+                    const std::shared_ptr<Texture>& texture) {
         const size_t first = SetStart(hash);
         Entry* target = NULL;
         for (size_t way = 0; way < Ways; ++way) {
@@ -66,9 +140,13 @@ template <typename Texture, size_t Capacity = 256> class TextureHashCache {
         entry.path = path;
         entry.hash = hash;
         entry.generation = generation;
+        entry.archiveManager = archiveManager;
+        entry.archiveEpoch = archiveEpoch;
         entry.lastUse = ++mClock;
         entry.valid = true;
     }
+
+  public:
 
     void Clear() {
         for (size_t i = 0; i < Capacity; ++i) {

@@ -6,8 +6,10 @@ input, storage and compiler compatibility mechanisms that ports can share while
 keeping game behavior and upstream version differences in their own adapters.
 
 Current consumers are [3Shipsty](https://github.com/becaring/3Shipsty), the modern
-Ship of Harkinian port, and [Warwing](https://github.com/becaring/Warwing), the
-BattleShip / Super Smash Bros. 64 port.
+Ship of Harkinian port, [Warwing](https://github.com/becaring/Warwing), the
+BattleShip / Super Smash Bros. 64 port, and
+[2Ship3Shipsty](https://github.com/becaring/2Ship3Shipsty), the pinned 2Ship 5.0.1
+Majora's Mask port. Majora has reached gameplay on real Xbox 360 hardware.
 
 ## Layout
 
