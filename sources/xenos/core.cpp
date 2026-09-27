@@ -1,6 +1,7 @@
 #include "core.h"
 #include "services.h"
 #include "raster_bounds.h"
+#include "depth_clip.h"
 #include "pixels.h"
 #include "shader_provider.h"
 #include "tile_coverage.h"
@@ -151,6 +152,7 @@ IDirect3DVertexDeclaration9* restore_declaration;
 IDirect3DStateBlock9* restore_state;
 bool live_framebuffer, tile_constants_owned;
 Shipyard::Xenos::RasterBounds raster_bounds;
+Shipyard::Xenos::DepthClipState depth_clip;
 size_t tiling_draw_bytes;
 void BeginFramebuffer();
 void FinishFramebuffer(bool preserveDepth = true, bool preserveColor = true);
@@ -195,6 +197,7 @@ const D3DSAMPLERSTATETYPE sampler_fields[5] = {
     D3DSAMP_MINFILTER, D3DSAMP_MAGFILTER, D3DSAMP_MIPFILTER, D3DSAMP_ADDRESSU, D3DSAMP_ADDRESSV};
 
 void InvalidateNativeState() {
+    depth_clip.Invalidate();
     primitive_depth_valid = false;
     draw_state_prepared = false;
     for (int i = 0; i < 6; ++i) {
@@ -670,6 +673,7 @@ void Sampler(int tile, bool linear, uint32_t s, uint32_t t) {
     ApplySampler(tile, sampler);
 }
 void Depth(bool test, bool write) {
+    depth_clip.SetDepth(test, write);
     xenos_device->SetRenderState(D3DRS_ZENABLE, test || write);
     xenos_device->SetRenderState(D3DRS_ZWRITEENABLE, write);
     xenos_device->SetRenderState(D3DRS_ZFUNC, test ? D3DCMP_LESSEQUAL : D3DCMP_ALWAYS);
@@ -850,6 +854,7 @@ void Draw(float* vertices, size_t count, size_t triangles) {
         probeRing ? (uintptr_t)xenos_device->m_pRing : 0,
         probeRing ? (uintptr_t)xenos_device->m_pRingLimit : 0);
     PrepareDrawState();
+    depth_clip.Apply(xenos_device);
     ApplyAlpha(); // Also handles shader-only changes and external state restoration.
     Shipyard_Check(xenos_device->DrawPrimitiveUP(D3DPT_TRIANGLELIST, (UINT)triangles, vertices,
                                                  (UINT)(current_shader->floats * 4)),

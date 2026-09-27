@@ -232,6 +232,18 @@ bool Shipyard_LowerShader(const std::string& hlsl, std::string& lowered, std::st
     if (text.find("float4 texInfo[2]") == std::string::npos) {
         text = "float4 texInfo[2] : register(c1);\n" + text;
     }
+    if (text.find("VSMain(") != std::string::npos) {
+        const std::string assignment = "result.position = position;";
+        const size_t position = text.find(assignment);
+        if (position == std::string::npos ||
+            text.find(assignment, position + assignment.size()) != std::string::npos) {
+            error = "Unsupported Fast3D vertex position contract";
+            return false;
+        }
+        text.replace(position, assignment.size(), assignment +
+                     "\n    result.position.z *= rasterDepthInfo.x;");
+        text = "float4 rasterDepthInfo : register(c14);\n" + text;
+    }
     LowerTextureSlots(text);
     LowerTextureInfo(text);
     LowerSemantics(text);
@@ -239,7 +251,7 @@ bool Shipyard_LowerShader(const std::string& hlsl, std::string& lowered, std::st
         return false;
     }
 
-    lowered = "// Shipyard Xenos lowering ABI 2\n"
+    lowered = "// Shipyard Xenos lowering ABI 3\n"
               "float4 framebufferTile : register(c4);\n"
               "float4 bindingInfo[6] : register(c8);\n" +
               text;
