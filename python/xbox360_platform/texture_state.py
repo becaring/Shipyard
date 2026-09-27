@@ -25,13 +25,13 @@ MASK_LOOKUP = '''    const std::string& texPath =
     }'''
 
 
-def empty_mask_lookup(text):
+def empty_mask_lookup(text, *, lookup=MASK_LOOKUP):
     # Test emptiness each time: dynamic mask registration/removal remains visible.
     replacement = '''    if (mMaskedTextures.empty()) {
         mRdp->loaded_texture[mRdp->texture_tile[tile].tmem_index].masked = false;
         mRdp->loaded_texture[mRdp->texture_tile[tile].tmem_index].blended = false;
     } else {
-''' + '\n'.join('    ' + line for line in MASK_LOOKUP.splitlines()) + '\n    }'
+''' + '\n'.join('    ' + line for line in lookup.splitlines()) + '\n    }'
     for name in ('GfxDpLoadBlock', 'GfxDpLoadTile'):
         signature = 'void Interpreter::' + name + '('
         if text.count(signature) != 1:
@@ -39,7 +39,7 @@ def empty_mask_lookup(text):
         start = text.index(signature)
         end = text.index('\n}', start) + 2
         method = text[start:end]
-        if method.count(MASK_LOOKUP) != 1:
+        if method.count(lookup) != 1:
             raise ValueError('Texture mask lookup boundary changed: ' + name)
-        text = text[:start] + method.replace(MASK_LOOKUP, replacement) + text[end:]
+        text = text[:start] + method.replace(lookup, replacement) + text[end:]
     return text
