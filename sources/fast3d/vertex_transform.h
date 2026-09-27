@@ -37,7 +37,11 @@ struct TransformPhaseHook {
     void* context;
 };
 bool TransformPositions(const void* vertices,size_t count,const float matrix[4][4],
-                        void* output,bool normalAspect=false,size_t outputStride=16,
-                        const TransformPhaseHook* phaseHook=NULL);
+                        void* output,bool normalAspect=false,size_t outputStride=16);
+// The sampled diagnostic uses a separate entrypoint so the ordinary VMX
+// function retains its original register allocation and call-free loop.
+bool TransformPositionsProfiled(const void* vertices,size_t count,const float matrix[4][4],
+                                void* output,bool normalAspect,size_t outputStride,
+                                const TransformPhaseHook* phaseHook);
 
 } }
