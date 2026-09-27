@@ -267,6 +267,53 @@ def texture_hash_borrowed_handler(source):
     return source[:begin] + body + source[end:]
 
 
+def texture_hash_epoch_handler(source):
+    """Use a verified archive epoch to avoid resolving a warm hash to a path.
+
+    The archive manager owns the hash table and its epoch covers every map
+    mutation in Modern's archive projector. A mismatch still calls the
+    authoritative HashToCString and path-aware texture cache route.
+    """
+    begin = source.index('bool gfx_set_timg_otr_hash_handler_custom(')
+    end = source.index('\nbool ', begin + 5)
+    body = source[begin:end]
+    body = _once(body,
+        '    const char* fileName = resourceManager->GetArchiveManager()->HashToCString(hash);',
+        '''    Interpreter* gfx = XboxDispatchInterpreter();
+    const auto archiveManager = resourceManager->GetArchiveManager();
+    const unsigned hashEpoch = archiveManager->GetXboxHashEpoch();
+    const unsigned lookupGeneration = resourceManager->GetXboxLookupGeneration();
+    const auto* archiveHit = gfx->mXboxTextureHashCache.LookupArchive(
+        hash, archiveManager.get(), hashEpoch, lookupGeneration);
+    if (archiveHit && archiveManager->GetXboxHashEpoch() != hashEpoch)
+        archiveHit = NULL;
+    const char* fileName = archiveHit ? archiveHit->path.c_str() : archiveManager->HashToCString(hash);''')
+    body = _once(body,
+        '''    Interpreter* gfx = XboxDispatchInterpreter();
+    const unsigned lookupGeneration = resourceManager->GetXboxLookupGeneration();
+    std::shared_ptr<Fast::Texture> loadedTexture;
+    const std::shared_ptr<Fast::Texture>* cachedTexture =
+        gfx->mXboxTextureHashCache.LookupBorrowed(hash, fileName, lookupGeneration);''',
+        '''    std::shared_ptr<Fast::Texture> loadedTexture;
+    const auto* pathHit = archiveHit;
+    if (!pathHit && archiveManager->GetXboxHashEpoch() == hashEpoch)
+        pathHit = gfx->mXboxTextureHashCache.LookupAndCertifyArchive(
+            hash, fileName, lookupGeneration, archiveManager.get(), hashEpoch);
+    const std::shared_ptr<Fast::Texture>* cachedTexture =
+        pathHit ? &pathHit->texture : NULL;''')
+    body = _once(body,
+        '''        if (texture && !texture->IsDirty() &&
+            resourceManager->GetXboxLookupGeneration() == lookupGeneration)
+            gfx->mXboxTextureHashCache.Store(hash, fileName, lookupGeneration, texture);''',
+        '''        if (texture && !texture->IsDirty() &&
+            resourceManager->GetXboxLookupGeneration() == lookupGeneration &&
+            archiveManager->GetXboxHashEpoch() == hashEpoch &&
+            resourceManager->GetArchiveManager().get() == archiveManager.get())
+            gfx->mXboxTextureHashCache.StoreArchive(
+                hash, fileName, lookupGeneration, archiveManager.get(), hashEpoch, texture);''')
+    return source[:begin] + body + source[end:]
+
+
 def texture_hash_cache_handler(source):
     begin = source.index('bool gfx_set_timg_otr_hash_handler_custom(')
     end = source.index('\nbool ', begin + 5)

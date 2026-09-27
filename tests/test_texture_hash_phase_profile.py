@@ -8,7 +8,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'python'))
-from xbox360_platform.resource_lookup import texture_hash_phase_profile, texture_hash_borrowed_handler
+from xbox360_platform.resource_lookup import (texture_hash_phase_profile, texture_hash_borrowed_handler,
+                                               texture_hash_epoch_handler)
 
 
 HANDLER = '''bool gfx_set_timg_otr_hash_handler_custom(F3DGfx** cmd0) {
@@ -45,6 +46,7 @@ bool next_handler() { return true; }
 
 PREFIX = '''#include <stdint.h>
 #include <memory>
+#include <string>
 struct F3DGfx { int value; };
 namespace Fast { struct Texture { unsigned Flags; bool IsDirty() const; }; }
 struct RawTexMetadata { std::shared_ptr<Fast::Texture> resource; };
@@ -56,9 +58,12 @@ void BeginTextureHash(TextureHashSample&);
 void AdvanceTextureHash(TextureHashSample&, TextureHashPhase);
 void EndTextureHash(TextureHashSample&);
 }
-struct ArchiveManager { const char* HashToCString(uint64_t) const; };
+struct ArchiveManager {
+    const char* HashToCString(uint64_t) const;
+    unsigned GetXboxHashEpoch() const;
+};
 struct ResourceManager {
-    ArchiveManager* GetArchiveManager();
+    std::shared_ptr<ArchiveManager> GetArchiveManager();
     unsigned GetXboxLookupGeneration() const;
     std::shared_ptr<Fast::Texture> LoadResourceProcess(const char*);
 };
@@ -67,9 +72,14 @@ namespace Ship { struct Context {
     ResourceManager* GetResourceManager();
 }; }
 struct Cache {
+    struct Entry { std::string path; std::shared_ptr<Fast::Texture> texture; };
     std::shared_ptr<Fast::Texture> Lookup(uint64_t, const char*, unsigned);
     const std::shared_ptr<Fast::Texture>* LookupBorrowed(uint64_t, const char*, unsigned);
+    const Entry* LookupArchive(uint64_t, const void*, unsigned, unsigned);
+    const Entry* LookupAndCertifyArchive(uint64_t, const char*, unsigned, const void*, unsigned);
     void Store(uint64_t, const char*, unsigned, std::shared_ptr<Fast::Texture>);
+    void StoreArchive(uint64_t, const char*, unsigned, const void*, unsigned,
+                      std::shared_ptr<Fast::Texture>);
 };
 struct Interpreter {
     Cache mXboxTextureHashCache;
@@ -81,6 +91,19 @@ uint64_t hash = 0;
 
 
 class TextureHashPhaseProfileTests(unittest.TestCase):
+    def test_archive_epoch_route_preserves_authoritative_fallback(self):
+        projected = texture_hash_epoch_handler(texture_hash_borrowed_handler(
+            texture_hash_phase_profile(HANDLER)))
+        self.assertLess(projected.index('mXboxTextureHashCache.LookupArchive('),
+                        projected.index('HashToCString(hash)'))
+        self.assertIn('archiveHit ? archiveHit->path.c_str() : archiveManager->HashToCString(hash)', projected)
+        self.assertIn('LookupAndCertifyArchive(\n            hash, fileName, lookupGeneration,', projected)
+        self.assertIn('if (fileName == nullptr)', projected)
+        self.assertIn('resourceManager->LoadResourceProcess(fileName)', projected)
+        self.assertIn('archiveManager->GetXboxHashEpoch() == hashEpoch', projected)
+        self.assertIn('mXboxTextureHashCache.StoreArchive(\n                hash, fileName, lookupGeneration,', projected)
+        self.assertIn('rawTexMetadata.resource = texture;', projected)
+
     def test_borrowed_hit_keeps_owner_until_metadata_copy(self):
         projected = texture_hash_borrowed_handler(texture_hash_phase_profile(HANDLER))
         self.assertIn('LookupBorrowed(hash, fileName, lookupGeneration)', projected)
@@ -154,6 +177,21 @@ class TextureHashPhaseProfileTests(unittest.TestCase):
             source = Path(folder) / 'texture_borrow.cpp'
             output = Path(folder) / 'texture_borrow.obj'
             source.write_text(PREFIX + texture_hash_borrowed_handler(texture_hash_phase_profile(HANDLER)))
+            result = subprocess.run([
+                str(xdk / 'bin/win32/cl.exe'), '/nologo', '/c', '/O2', '/EHsc',
+                '/D_XBOX', '/D_XBOX_VER=200', '/I' + str(xdk / 'include/xbox'),
+                '/Fo' + str(output), str(source),
+            ], capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertEqual(output.read_bytes()[:2], b'\xf2\x01')
+
+    def test_archive_epoch_handler_compiles_for_xenon(self):
+        xdk = Path('C:/Program Files (x86)/Microsoft Xbox 360 SDK')
+        with tempfile.TemporaryDirectory(prefix='shipyard-texture-epoch-') as folder:
+            source = Path(folder) / 'texture_epoch.cpp'
+            output = Path(folder) / 'texture_epoch.obj'
+            source.write_text(PREFIX + texture_hash_epoch_handler(texture_hash_borrowed_handler(
+                texture_hash_phase_profile(HANDLER))))
             result = subprocess.run([
                 str(xdk / 'bin/win32/cl.exe'), '/nologo', '/c', '/O2', '/EHsc',
                 '/D_XBOX', '/D_XBOX_VER=200', '/I' + str(xdk / 'include/xbox'),
