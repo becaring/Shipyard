@@ -23,5 +23,11 @@ then update their lock revision and manifest digest, regenerate and validate
 their selected build. Interface changes additionally require coordinated API
 version and adapter updates. Documentation edits do not change the package API.
 
+Consumers can compile `sources/xenos/core.cpp` with
+`SHIPYARD_XENOS_TILING_TRIALS=0` to exclude experimental tiling paths from the
+native draw routine. The default is `1`, preserving the runtime trial switches.
+An excluded build rejects attempts to enable those switches. Record this flag
+in the consumer's selected build recipe; it does not change the renderer ABI.
+
 See [BASELINE.md](../BASELINE.md) for package ownership and
 [development](DEVELOPMENT.md) for verification requirements.

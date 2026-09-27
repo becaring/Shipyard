@@ -2,6 +2,10 @@
 #include "services.h"
 #include "raster_bounds.h"
 #include "depth_clip.h"
+#ifndef SHIPYARD_XENOS_TILING_TRIALS
+#define SHIPYARD_XENOS_TILING_TRIALS 1
+#endif
+
 #include "pixels.h"
 #include "shader_provider.h"
 #include "tile_coverage.h"
@@ -828,6 +832,7 @@ void Draw(float* vertices, size_t count, size_t triangles) {
     // EndTiling cannot submit a partially filled SDK ring. Retain the target and
     // restart the native bracket before it consumes its reserved command space.
     // The allowance includes state-command space for each Fast3D batch.
+#if SHIPYARD_XENOS_TILING_TRIALS
     bool trialContinued = false;
     if (live_framebuffer && buffers[active_fb].tiles.size() > 1 &&
         tiling_draw_bytes + count * sizeof(float) + 8192 > 2 * 1024 * 1024) {
@@ -839,7 +844,17 @@ void Draw(float* vertices, size_t count, size_t triangles) {
             tiling_guard_restart_pending = false;
         }
     }
+#else
+    if (live_framebuffer && buffers[active_fb].tiles.size() > 1 &&
+        tiling_draw_bytes + count * sizeof(float) + 8192 > 2 * 1024 * 1024) {
+        ++tiling_draw_restarts;
+        tiling_guard_restart_pending = timing_enabled;
+        FinishFramebuffer();
+        tiling_guard_restart_pending = false;
+    }
+#endif
     BeginFramebuffer();
+#if SHIPYARD_XENOS_TILING_TRIALS
     bool tile1Only = false;
     if (timing_enabled || tile1_predication_trial_enabled) {
         const Framebuffer& b = buffers[active_fb];
@@ -872,6 +887,27 @@ void Draw(float* vertices, size_t count, size_t triangles) {
             }
         }
     }
+#else
+    if (timing_enabled) {
+        const Framebuffer& b = buffers[active_fb];
+        if (b.width == 1920 && b.height == 1080 && b.tiles.size() == 2) {
+            D3DVIEWPORT9 viewport;
+            xenos_device->GetViewport(&viewport);
+            const size_t vertexCount = count / current_shader->floats;
+            ++tiling_1080_batches;
+            tiling_1080_vertices += (unsigned)vertexCount;
+            if (vertexCount > ShipyardXenos::TileCoverageMaximumVertices)
+                ++tiling_1080_oversize_batches;
+            if (viewport.Y <= b.height && viewport.Height <= b.height - viewport.Y &&
+                ShipyardXenos::BatchInsideSecondTile(
+                    vertices, vertexCount, current_shader->floats, viewport.Y,
+                    viewport.Height, (unsigned)b.tiles[0].y2)) {
+                ++tiling_1080_tile1_batches;
+                tiling_1080_tile1_vertices += (unsigned)vertexCount;
+            }
+        }
+    }
+#endif
     const Framebuffer& ringFramebuffer = buffers[active_fb];
     const bool probeRing = timing_enabled && ringFramebuffer.width == 1920 &&
                            ringFramebuffer.height == 1080 && ringFramebuffer.tiles.size() == 2;
@@ -881,6 +917,7 @@ void Draw(float* vertices, size_t count, size_t triangles) {
     PrepareDrawState();
     depth_clip.Apply(xenos_device);
     ApplyAlpha(); // Also handles shader-only changes and external state restoration.
+#if SHIPYARD_XENOS_TILING_TRIALS
     const HRESULT drawResult = tile1Only
         ? ShipyardXenos::SubmitTile1PredicatedDraw(
               xenos_device, true, (UINT)triangles, vertices,
@@ -889,6 +926,11 @@ void Draw(float* vertices, size_t count, size_t triangles) {
                                        (UINT)(current_shader->floats * 4));
     Shipyard_Check(drawResult, "Shipyard DrawPrimitiveUP");
     const bool trialNeedsFinish = trialContinued && !GuardTrialAfterDraw();
+#else
+    Shipyard_Check(xenos_device->DrawPrimitiveUP(D3DPT_TRIANGLELIST, (UINT)triangles, vertices,
+                                                 (UINT)(current_shader->floats * 4)),
+                   "Shipyard DrawPrimitiveUP");
+#endif
     if (probeRing) {
         const ShipyardXenos::RingCursor ringAfter(
             (uintptr_t)xenos_device->m_pRing, (uintptr_t)xenos_device->m_pRingLimit);
@@ -909,8 +951,10 @@ void Draw(float* vertices, size_t count, size_t triangles) {
     tiling_draw_bytes += count * sizeof(float) + 8192;
     if (buffers[active_fb].tiles.size() > 1 && tiling_draw_bytes > tiling_peak_bytes)
         tiling_peak_bytes = (unsigned)tiling_draw_bytes;
+#if SHIPYARD_XENOS_TILING_TRIALS
     if (trialNeedsFinish)
         FinishFramebuffer();
+#endif
 }
 void ValidateFramebuffer(int id) {
     if (id < 0 || (size_t)id >= buffers.size() ||
@@ -1074,6 +1118,7 @@ bool GuardTrialAfterDraw() {
     QueryTilingSpace(&used, &remaining);
     return tiling_guard_trial_window.AfterDraw(used, remaining);
 }
+#if SHIPYARD_XENOS_TILING_TRIALS
 void TilingSpaceBegin() {
     const Framebuffer& b = buffers[active_fb];
     const bool profile = ProfileTilingSpace();
@@ -1085,6 +1130,14 @@ void TilingSpaceBegin() {
     if (profile) tiling_space_probe.Begin(used, remaining);
     if (trial) tiling_guard_trial_window.Begin(used, remaining);
 }
+#else
+void TilingSpaceBegin() {
+    if (!ProfileTilingSpace()) return;
+    DWORD used, remaining;
+    QueryTilingSpace(&used, &remaining);
+    tiling_space_probe.Begin(used, remaining);
+}
+#endif
 void TilingSpaceSetup() {
     if (!timing_enabled || !tiling_space_probe.active) return;
     DWORD used, remaining;
@@ -1210,7 +1263,9 @@ void FinishFramebuffer(bool preserveDepth, bool preserveColor) {
         // fragments. Disable EndTiling's automatic single-target resolve.
         Shipyard_Check(xenos_device->EndTiling(0, NULL, NULL, &clear, 1, 0, NULL),
                        "finish framebuffer tiling");
+#if SHIPYARD_XENOS_TILING_TRIALS
         tiling_guard_trial_window.Close();
+#endif
     }
     // Seal the resolved depth resource's SDK fence before later presentation
     // commands enter the same interval. PixelDepth may lock this texture during
@@ -1928,11 +1983,17 @@ void SetTimingEnabled(bool enabled) {
     }
 }
 void SetTilingGuardTrialEnabled(bool enabled) {
+#if !SHIPYARD_XENOS_TILING_TRIALS
+    if (enabled) Shipyard_Fatal("tiling trials excluded from this build", E_NOTIMPL);
+#endif
     if (tiling_guard_trial_enabled == enabled) return;
     tiling_guard_trial_enabled = enabled;
     if (!enabled) tiling_guard_trial_window.Close();
 }
 void SetTile1PredicationTrialEnabled(bool enabled) {
+#if !SHIPYARD_XENOS_TILING_TRIALS
+    if (enabled) Shipyard_Fatal("tiling trials excluded from this build", E_NOTIMPL);
+#endif
     tile1_predication_trial_enabled = enabled;
 }
 void CaptureAndResetTimingCounters(NativeTimingCounters* counters) {
