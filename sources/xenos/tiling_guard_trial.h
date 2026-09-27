@@ -6,6 +6,9 @@
 namespace Fast {
 namespace ShipyardXenos {
 
+// Render-thread-only opt-in; the normal tiling guard remains the default.
+void SetTilingGuardTrialEnabled(bool enabled);
+
 enum GuardTrialDecision {
     GuardTrialContinue,
     GuardTrialIneligible,
