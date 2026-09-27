@@ -40,6 +40,8 @@ struct NativeTimingCounters {
     uint64_t framebufferClearTicks, depthReadTicks, depthLockTicks, uploadBytes, frequency;
     unsigned drawCalls, uploadCalls, framebufferSetupCalls, framebufferResolveCalls;
     unsigned framebufferClearCalls, depthReadCalls, depthLockCalls, depthSamples;
+    // Pre-LockRect resource state, sampled only with timing enabled.
+    unsigned depthBusyCalls, depthIdleCalls, depthBusy1080Calls, depthIdle1080Calls;
     unsigned preparationRebuilt, preparationReused;
     unsigned activeWidth, activeHeight, activeSamples, activeTiles;
     unsigned presentationWidth, presentationHeight;

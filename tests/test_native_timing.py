@@ -50,6 +50,10 @@ int main() {
     { NativeTimingScope s(timing_counts.drawTicks, timing_counts.drawCalls); }
     assert(clocks == 4 && frequencies == 1);
     assert(timing_counts.drawTicks == 20 && timing_counts.drawCalls == 2);
+    timing_counts.depthBusyCalls = 3;
+    timing_counts.depthIdleCalls = 2;
+    timing_counts.depthBusy1080Calls = 2;
+    timing_counts.depthIdle1080Calls = 1;
     NativeTimingCounters snapshot;
     Surface surface; presentation_color=&surface;
     Device device; xenos_device=&device;
@@ -57,10 +61,12 @@ int main() {
     buffers.push_back(fb);active_fb=0;
     CaptureAndResetTimingCounters(&snapshot);
     assert(snapshot.drawCalls==2 && snapshot.drawTicks==20 && snapshot.enabled);
+    assert(snapshot.depthBusyCalls==3 && snapshot.depthIdleCalls==2);
+    assert(snapshot.depthBusy1080Calls==2 && snapshot.depthIdle1080Calls==1);
     assert(snapshot.frequency==1000 && snapshot.activeWidth==640 && snapshot.activeSamples==4);
     assert(snapshot.activeTiles==2 && snapshot.presentationWidth==1280 && snapshot.presentationHeight==720);
     assert(snapshot.buffer2Frames==0 && snapshot.presentationInterval==1);
-    assert(clocks==4 && !timing_counts.drawCalls);
+    assert(clocks==4 && !timing_counts.drawCalls && !timing_counts.depthBusyCalls);
     CaptureAndResetTimingCounters(&snapshot);
     assert(snapshot.drawCalls==0 && snapshot.frequency==1000 && clocks==4);
     SetTimingEnabled(false);
@@ -93,6 +99,18 @@ int main() {
         self.assertIn('++timing_counts.preparationReused;', source)
         self.assertEqual(source.count('QueryPerformanceCounter('), 2)
         self.assertEqual(source.count('QueryPerformanceFrequency('), 1)
+
+    def test_depth_busy_probe_is_profile_only_and_precedes_lock(self):
+        source = (ROOT/'sources/xenos/core.cpp').read_text()
+        body = function(source, 'PixelDepth(int id, const std::set<std::pair<float, float> >& coords) {')
+        probe = body.index('depth_texture->IsBusy()')
+        guard = body.rfind('if (timing_enabled)', 0, probe)
+        lock = body.index('depth_texture->LockRect(')
+        self.assertGreater(guard, body.index('if (!b.depth_stored)'))
+        self.assertLess(probe, lock)
+        self.assertEqual(body.count('depth_texture->IsBusy()'), 1)
+        self.assertIn('timing_counts.depthBusy1080Calls', body[guard:lock])
+        self.assertIn('timing_counts.depthIdle1080Calls', body[guard:lock])
 
 if __name__ == '__main__':
     unittest.main()

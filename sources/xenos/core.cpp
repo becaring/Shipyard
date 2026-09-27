@@ -1335,6 +1335,21 @@ PixelDepth(int id, const std::set<std::pair<float, float> >& coords) {
         Shipyard_Log("initialized depth before first draw: framebuffer=%d samples=%u", id,
                      b.samples);
     }
+    if (timing_enabled) {
+        // IsBusy is a nonblocking state sample. Do not pre-wait here: that
+        // would change the LockRect schedule being measured.
+        const bool busy = depth_texture->IsBusy() != FALSE;
+        const bool is1080 = b.width == 1920 && b.height == 1080;
+        if (busy) {
+            ++timing_counts.depthBusyCalls;
+            if (is1080)
+                ++timing_counts.depthBusy1080Calls;
+        } else {
+            ++timing_counts.depthIdleCalls;
+            if (is1080)
+                ++timing_counts.depthIdle1080Calls;
+        }
+    }
     D3DLOCKED_RECT lock;
     {
         NativeTimingScope depthLock(timing_counts.depthLockTicks, timing_counts.depthLockCalls);
