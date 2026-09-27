@@ -1,5 +1,6 @@
 #include "core.h"
 #include "services.h"
+#include "raster_bounds.h"
 #include "pixels.h"
 #include "shader_provider.h"
 #include "tile_coverage.h"
@@ -1051,16 +1052,14 @@ void TilingSpaceBeforeEnd() {
 void BeginFramebuffer() {
     if (live_framebuffer)
         return;
+    Shipyard::Xenos::ScopedRasterBounds rasterBounds(xenos_device);
     NativeTimingScope timing(timing_counts.framebufferSetupTicks, timing_counts.framebufferSetupCalls);
     InvalidateNativeState();
     Framebuffer& b = buffers[active_fb];
     if (!b.color)
         Shipyard_Fatal("framebuffer render surface unavailable", E_INVALIDARG);
-    D3DVIEWPORT9 viewport;
-    xenos_device->GetViewport(&viewport);
     Shipyard_Check(xenos_device->SetRenderTarget(0, b.color), "bind framebuffer color");
     Shipyard_Check(xenos_device->SetDepthStencilSurface(b.depth), "bind framebuffer depth");
-    xenos_device->SetViewport(&viewport);
     xenos_device->SetRenderState(D3DRS_MULTISAMPLEANTIALIAS, TRUE);
     xenos_device->SetRenderState(D3DRS_MULTISAMPLEMASK, ~0u);
     D3DVECTOR4 clear = {0, 0, 0, 1};
@@ -1105,6 +1104,7 @@ void RebindSampledTextures() {
 void FinishFramebuffer(bool preserveDepth, bool preserveColor) {
     if (!live_framebuffer)
         return;
+    Shipyard::Xenos::ScopedRasterBounds rasterBounds(xenos_device);
     NativeTimingScope timing(timing_counts.framebufferResolveTicks, timing_counts.framebufferResolveCalls);
     Framebuffer& b = buffers[active_fb];
     if (!preserveColor && (preserveDepth || active_fb != 0 || b.color != presentation_color ||
