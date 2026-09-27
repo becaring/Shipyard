@@ -8,7 +8,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'python'))
-from xbox360_platform.resource_lookup import texture_hash_phase_profile
+from xbox360_platform.resource_lookup import texture_hash_phase_profile, texture_hash_borrowed_handler
 
 
 HANDLER = '''bool gfx_set_timg_otr_hash_handler_custom(F3DGfx** cmd0) {
@@ -68,6 +68,7 @@ namespace Ship { struct Context {
 }; }
 struct Cache {
     std::shared_ptr<Fast::Texture> Lookup(uint64_t, const char*, unsigned);
+    const std::shared_ptr<Fast::Texture>* LookupBorrowed(uint64_t, const char*, unsigned);
     void Store(uint64_t, const char*, unsigned, std::shared_ptr<Fast::Texture>);
 };
 struct Interpreter {
@@ -80,6 +81,15 @@ uint64_t hash = 0;
 
 
 class TextureHashPhaseProfileTests(unittest.TestCase):
+    def test_borrowed_hit_keeps_owner_until_metadata_copy(self):
+        projected = texture_hash_borrowed_handler(texture_hash_phase_profile(HANDLER))
+        self.assertIn('LookupBorrowed(hash, fileName, lookupGeneration)', projected)
+        self.assertIn('const std::shared_ptr<Fast::Texture>& texture =', projected)
+        self.assertIn('cachedTexture ? *cachedTexture : loadedTexture', projected)
+        self.assertIn('loadedTexture = std::static_pointer_cast<Fast::Texture>', projected)
+        self.assertIn('rawTexMetadata.resource = texture;', projected)
+        self.assertNotIn('mXboxTextureHashCache.Lookup(hash,', projected)
+
     def test_missing_map_hit_and_fallback_have_one_end(self):
         projected = texture_hash_phase_profile(HANDLER)
         handler = projected.split('bool next_handler()', 1)[0]
@@ -130,6 +140,20 @@ class TextureHashPhaseProfileTests(unittest.TestCase):
             source = Path(folder) / 'texture_phase.cpp'
             output = Path(folder) / 'texture_phase.obj'
             source.write_text(PREFIX + texture_hash_phase_profile(HANDLER))
+            result = subprocess.run([
+                str(xdk / 'bin/win32/cl.exe'), '/nologo', '/c', '/O2', '/EHsc',
+                '/D_XBOX', '/D_XBOX_VER=200', '/I' + str(xdk / 'include/xbox'),
+                '/Fo' + str(output), str(source),
+            ], capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertEqual(output.read_bytes()[:2], b'\xf2\x01')
+
+    def test_borrowed_handler_compiles_for_xenon(self):
+        xdk = Path('C:/Program Files (x86)/Microsoft Xbox 360 SDK')
+        with tempfile.TemporaryDirectory(prefix='shipyard-texture-borrow-') as folder:
+            source = Path(folder) / 'texture_borrow.cpp'
+            output = Path(folder) / 'texture_borrow.obj'
+            source.write_text(PREFIX + texture_hash_borrowed_handler(texture_hash_phase_profile(HANDLER)))
             result = subprocess.run([
                 str(xdk / 'bin/win32/cl.exe'), '/nologo', '/c', '/O2', '/EHsc',
                 '/D_XBOX', '/D_XBOX_VER=200', '/I' + str(xdk / 'include/xbox'),

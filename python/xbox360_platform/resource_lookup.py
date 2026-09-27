@@ -243,6 +243,30 @@ def texture_hash_phase_profile(source):
     return source[:begin] + body + source[end:]
 
 
+def texture_hash_borrowed_handler(source):
+    """Borrow a cache hit only for this synchronous texture command.
+
+    The metadata assignment still takes its own shared ownership before the
+    handler returns. A miss keeps the loader's owning shared_ptr, including
+    its existing dirty and generation checks.
+    """
+    begin = source.index('bool gfx_set_timg_otr_hash_handler_custom(')
+    end = source.index('\nbool ', begin + 5)
+    body = source[begin:end]
+    body = _once(body,
+        '''    std::shared_ptr<Fast::Texture> texture =
+        gfx->mXboxTextureHashCache.Lookup(hash, fileName, lookupGeneration);''',
+        '''    std::shared_ptr<Fast::Texture> loadedTexture;
+    const std::shared_ptr<Fast::Texture>* cachedTexture =
+        gfx->mXboxTextureHashCache.LookupBorrowed(hash, fileName, lookupGeneration);
+    const std::shared_ptr<Fast::Texture>& texture =
+        cachedTexture ? *cachedTexture : loadedTexture;''')
+    body = _once(body,
+        '        texture = std::static_pointer_cast<Fast::Texture>(',
+        '        loadedTexture = std::static_pointer_cast<Fast::Texture>(')
+    return source[:begin] + body + source[end:]
+
+
 def texture_hash_cache_handler(source):
     begin = source.index('bool gfx_set_timg_otr_hash_handler_custom(')
     end = source.index('\nbool ', begin + 5)

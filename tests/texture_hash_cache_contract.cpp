@@ -15,11 +15,18 @@ int main() {
     cache.Store(1, "alt/a", 7, first);
     first.reset();
     assert(!owned.expired());
+    const std::shared_ptr<Texture>* borrowed = cache.LookupBorrowed(1, "alt/a", 7);
+    assert(borrowed && *borrowed == owned.lock());
+    const long ownerCount = borrowed->use_count();
+    assert(cache.LookupBorrowed(1, "alt/a", 7)->use_count() == ownerCount);
+    assert(!cache.LookupBorrowed(1, "a", 7));
+    assert(!cache.LookupBorrowed(1, "alt/a", 8));
     assert(cache.Lookup(1, "alt/a", 7) == owned.lock());
     assert(!cache.Lookup(1, "a", 7));
     assert(!cache.Lookup(1, "alt/a", 8));
     owned.lock()->dirty = true;
     assert(!cache.Lookup(1, "alt/a", 7));
+    assert(!cache.LookupBorrowed(1, "alt/a", 7));
     owned.lock()->dirty = false;
     cache.Store(5, "alt/b", 7, std::shared_ptr<Texture>(new Texture()));
     // Four different keys that collide in the old direct-mapped slot must

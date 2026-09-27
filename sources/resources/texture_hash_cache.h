@@ -27,16 +27,24 @@ template <typename Texture, size_t Capacity = 256> class TextureHashCache {
     TextureHashCache() : mClock(0) {}
 
     std::shared_ptr<Texture> Lookup(uint64_t hash, const char* path, unsigned generation) {
+        const std::shared_ptr<Texture>* hit = LookupBorrowed(hash, path, generation);
+        return hit ? *hit : std::shared_ptr<Texture>();
+    }
+
+    // Borrow only within the synchronous command. Store or Clear can replace
+    // this slot; copy the shared_ptr before keeping the texture beyond it.
+    const std::shared_ptr<Texture>* LookupBorrowed(uint64_t hash, const char* path,
+                                                    unsigned generation) {
         const size_t first = SetStart(hash);
         for (size_t way = 0; way < Ways; ++way) {
             Entry& entry = mEntries[first + way];
             if (entry.valid && entry.hash == hash && entry.generation == generation &&
                 entry.path == path && entry.texture && !entry.texture->IsDirty()) {
                 entry.lastUse = ++mClock;
-                return entry.texture;
+                return &entry.texture;
             }
         }
-        return std::shared_ptr<Texture>();
+        return NULL;
     }
 
     void Store(uint64_t hash, const char* path, unsigned generation,
