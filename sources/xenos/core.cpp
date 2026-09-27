@@ -150,6 +150,7 @@ IDirect3DPixelShader9* restore_depth;
 IDirect3DVertexDeclaration9* restore_declaration;
 IDirect3DStateBlock9* restore_state;
 bool live_framebuffer, tile_constants_owned;
+Shipyard::Xenos::RasterBounds raster_bounds;
 size_t tiling_draw_bytes;
 void BeginFramebuffer();
 void FinishFramebuffer(bool preserveDepth = true, bool preserveColor = true);
@@ -687,15 +688,13 @@ void Viewport(int x, int y, int w, int h) {
     // pending target switch (including BeginTiling) before applying Fast3D's
     // viewport, including after a switch from a smaller offscreen target.
     BeginFramebuffer();
-    D3DVIEWPORT9 v = {(DWORD)x, buffers[active_fb].height - y - h, (DWORD)w, (DWORD)h, 0, 1};
-    Shipyard_Check(xenos_device->SetViewport(&v), "viewport");
+    raster_bounds.SetViewport(x, y, w, h);
+    raster_bounds.Apply(xenos_device, buffers[active_fb].height);
 }
 void Scissor(int x, int y, int w, int h) {
     BeginFramebuffer();
-    LONG height = (LONG)buffers[active_fb].height;
-    RECT r = {x, height - y - h, x + w, height - y};
-    xenos_device->SetScissorRect(&r);
-    xenos_device->SetRenderState(D3DRS_SCISSORTESTENABLE, TRUE);
+    raster_bounds.SetScissor(x, y, w, h);
+    raster_bounds.ApplyScissor(xenos_device, buffers[active_fb].height);
 }
 bool requested_alpha;
 bool color_writes = true;
@@ -1052,7 +1051,6 @@ void TilingSpaceBeforeEnd() {
 void BeginFramebuffer() {
     if (live_framebuffer)
         return;
-    Shipyard::Xenos::ScopedRasterBounds rasterBounds(xenos_device);
     NativeTimingScope timing(timing_counts.framebufferSetupTicks, timing_counts.framebufferSetupCalls);
     InvalidateNativeState();
     Framebuffer& b = buffers[active_fb];
@@ -1083,6 +1081,7 @@ void BeginFramebuffer() {
     tiling_draw_bytes = 0;
     SetTileConstants();
     TilingSpaceSetup();
+    raster_bounds.Apply(xenos_device, b.height);
 }
 void RebindSampledTextures() {
     draw_state_prepared = false;
@@ -1104,7 +1103,6 @@ void RebindSampledTextures() {
 void FinishFramebuffer(bool preserveDepth, bool preserveColor) {
     if (!live_framebuffer)
         return;
-    Shipyard::Xenos::ScopedRasterBounds rasterBounds(xenos_device);
     NativeTimingScope timing(timing_counts.framebufferResolveTicks, timing_counts.framebufferResolveCalls);
     Framebuffer& b = buffers[active_fb];
     if (!preserveColor && (preserveDepth || active_fb != 0 || b.color != presentation_color ||
@@ -1528,6 +1526,7 @@ FilteringMode GetFilter() {
 void InitializeDisplay() {
     if (xenos_device)
         return;
+    raster_bounds.Reset();
     IDirect3D9* d3d = Direct3DCreate9(D3D_SDK_VERSION);
     if (!d3d)
         Shipyard_Fatal("Direct3DCreate9", E_FAIL);
@@ -1635,6 +1634,7 @@ void Finish() {
 }
 } // namespace
 void Shipyard_ShutdownGraphics() {
+    raster_bounds.Reset();
     InvalidateNativeState();
     if (!xenos_device)
         return;

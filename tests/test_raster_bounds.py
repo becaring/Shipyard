@@ -14,6 +14,8 @@ class RasterBoundsTests(unittest.TestCase):
         source = (ROOT/'sources/xenos/core.cpp').read_text()
         methods = function(source, 'void BeginFramebuffer() {') + '\n'
         methods += function(source, 'void FinishFramebuffer(bool preserveDepth, bool preserveColor) {')
+        methods += '\n' + function(source, 'void Viewport(int x, int y, int w, int h) {')
+        methods += '\n' + function(source, 'void Scissor(int x, int y, int w, int h) {')
         vswhere = Path(os.environ['ProgramFiles(x86)'])/'Microsoft Visual Studio/Installer/vswhere.exe'
         installation = subprocess.check_output([str(vswhere), '-latest', '-products', '*', '-requires',
             'Microsoft.VisualStudio.Component.VC.Tools.x86.x64', '-property', 'installationPath'], text=True).strip()

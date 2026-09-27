@@ -2,27 +2,37 @@
 
 namespace Shipyard {
 namespace Xenos {
-// Target binding and SDK tiling boundaries may replace viewport/scissor state.
-// Fast3D can resume the same batch without issuing either setter again.
-class ScopedRasterBounds {
-    IDirect3DDevice9* device;
-    D3DVIEWPORT9 viewport;
-    RECT scissor;
-    DWORD scissorEnabled;
-    ScopedRasterBounds(const ScopedRasterBounds&);
-    ScopedRasterBounds& operator=(const ScopedRasterBounds&);
+// Keep Fast3D requests independently of native readback: outside BeginTiling,
+// XDK SetViewport clamps to the smaller physical tile surface. Internal copies,
+// clears and presentation must not replace the logical application bounds.
+class RasterBounds {
+    bool viewportValid, scissorValid;
+    int vx, vy, vw, vh, sx, sy, sw, sh;
 public:
-    explicit ScopedRasterBounds(IDirect3DDevice9* value) : device(value) {
-        Shipyard_Check(device->GetViewport(&viewport), "capture framebuffer viewport");
-        Shipyard_Check(device->GetScissorRect(&scissor), "capture framebuffer scissor");
-        Shipyard_Check(device->GetRenderState(D3DRS_SCISSORTESTENABLE, &scissorEnabled),
-                       "capture framebuffer scissor enable");
+    RasterBounds() : viewportValid(false), scissorValid(false) {}
+    void Reset() { viewportValid = scissorValid = false; }
+    void SetViewport(int x, int y, int w, int h) {
+        vx = x; vy = y; vw = w; vh = h; viewportValid = true;
     }
-    ~ScopedRasterBounds() {
-        Shipyard_Check(device->SetViewport(&viewport), "restore framebuffer viewport");
-        Shipyard_Check(device->SetScissorRect(&scissor), "restore framebuffer scissor");
-        Shipyard_Check(device->SetRenderState(D3DRS_SCISSORTESTENABLE, scissorEnabled),
-                       "restore framebuffer scissor enable");
+    void SetScissor(int x, int y, int w, int h) {
+        sx = x; sy = y; sw = w; sh = h; scissorValid = true;
+    }
+    void ApplyViewport(IDirect3DDevice9* device, unsigned height) const {
+        if (!viewportValid) return;
+        D3DVIEWPORT9 viewport = {(DWORD)vx, height - vy - vh, (DWORD)vw, (DWORD)vh, 0, 1};
+        Shipyard_Check(device->SetViewport(&viewport), "apply requested viewport");
+    }
+    void ApplyScissor(IDirect3DDevice9* device, unsigned height) const {
+        if (!scissorValid) return;
+        RECT scissor = {sx, (LONG)height - sy - sh, sx + sw, (LONG)height - sy};
+        Shipyard_Check(device->SetScissorRect(&scissor), "apply requested scissor");
+        Shipyard_Check(device->SetRenderState(D3DRS_SCISSORTESTENABLE, TRUE),
+                       "enable requested scissor");
+    }
+    void Apply(IDirect3DDevice9* device, unsigned height) const {
+        // SetViewport also changes native scissor state.
+        ApplyViewport(device, height);
+        ApplyScissor(device, height);
     }
 };
 }

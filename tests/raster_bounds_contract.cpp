@@ -3,6 +3,7 @@
 #include <cstring>
 #include <vector>
 #include <cstdio>
+#include <cstdlib>
 typedef unsigned long DWORD;
 typedef long LONG;
 enum { TRUE=1, FALSE=0, E_INVALIDARG=-1, D3DRS_MULTISAMPLEANTIALIAS=1,
@@ -18,18 +19,18 @@ struct D3DRECT { LONG x1,y1,x2,y2; };
 struct D3DPOINT { LONG x,y; };
 struct D3DVECTOR4 { float x,y,z,w; };
 struct Device {
-    D3DVIEWPORT9 viewport; RECT scissor; DWORD enabled; unsigned captures=0;
+    D3DVIEWPORT9 viewport; RECT scissor; DWORD enabled; unsigned captures=0; bool tiled=false; DWORD surfaceHeight=640;
     void ResetBounds() { viewport={0,0,1920,1088,0,1};scissor={0,0,65535,65535};enabled=TRUE; }
     int GetViewport(D3DVIEWPORT9* p){++captures;*p=viewport;return 0;}
-    int SetViewport(const D3DVIEWPORT9* p){viewport=*p;return 0;}
+    int SetViewport(const D3DVIEWPORT9* p){viewport=*p; scissor={0,0,65535,65535}; if(!tiled) viewport.Height=std::min(viewport.Height,surfaceHeight-std::min(viewport.Y,surfaceHeight)); return 0;}
     int GetScissorRect(RECT* p){*p=scissor;return 0;}
     int SetScissorRect(const RECT* p){scissor=*p;return 0;}
     int GetRenderState(int,DWORD* p){*p=enabled;return 0;}
     int SetRenderState(int state,DWORD value){if(state==D3DRS_SCISSORTESTENABLE)enabled=value;return 0;}
     int SetRenderTarget(int,void*){ResetBounds();return 0;}
     int SetDepthStencilSurface(void*){return 0;}
-    void BeginTiling(DWORD,DWORD,const D3DRECT*,const D3DVECTOR4*,float,DWORD){ResetBounds();}
-    int EndTiling(DWORD,void*,void*,D3DVECTOR4*,float,DWORD,void*){ResetBounds();return 0;}
+    void BeginTiling(DWORD,DWORD,const D3DRECT*,const D3DVECTOR4*,float,DWORD){tiled=true;ResetBounds();}
+    int EndTiling(DWORD,void*,void*,D3DVECTOR4*,float,DWORD,void*){tiled=false;ResetBounds();return 0;}
     void SetPredication(size_t){}
     void InsertFence(){}
     int Resolve(DWORD,const D3DRECT*,void*,const D3DPOINT*,int,int,const D3DVECTOR4*,float,int,void*){return 0;}
@@ -38,10 +39,8 @@ typedef Device IDirect3DDevice9;
 Device* xenos_device=&device;
 void Shipyard_Check(int result,const char*){assert(result==0);}
 void Shipyard_Fatal(const char*,int){assert(false);}
-// The production transition uses this scoped helper once it is available.
-#if __has_include("xenos/raster_bounds.h")
 #include "xenos/raster_bounds.h"
-#endif
+Shipyard::Xenos::RasterBounds raster_bounds;
 struct Framebuffer {
     void *color,*depth,*image,*color_samples[4],*depth_samples[4];
     bool stored,depth_stored; unsigned width,height,samples; std::vector<D3DRECT> tiles;
@@ -59,23 +58,39 @@ void ClearFramebufferTargets(DWORD){} void SetTileConstants(){} void StopTileCon
 void RestoreQuad(void*,void*,unsigned,unsigned,DWORD){}
 void RebindSampledTextures(){} void SetNativeTexture(int,void*){}
 #include "transitions.inc"
+void CheckBounds(const D3DVIEWPORT9& vp,const RECT& clip){
+    if(memcmp(&device.viewport,&vp,sizeof(vp)) || memcmp(&device.scissor,&clip,sizeof(clip)) || device.enabled!=TRUE){
+        puts("logical bounds lost across tiled/smaller target transition"); std::exit(1);
+    }
+}
 int main(){
     for(unsigned tiles=1;tiles<=2;++tiles) for(unsigned stored=0;stored<2;++stored)
-    for(unsigned enabled=0;enabled<2;++enabled) for(unsigned hud=0;hud<2;++hud){
+    for(unsigned hud=0;hud<2;++hud){
         Framebuffer& b=buffers[0]; b.color=presentation_color;b.depth=(void*)2;
         b.width=1920;b.height=1080;b.samples=1;b.tiles.assign(tiles,D3DRECT{0,0,1920,1080});
         b.stored=stored!=0;b.depth_stored=stored!=0;live_framebuffer=false;
-        D3DVIEWPORT9 vp=hud?D3DVIEWPORT9{1344,113,204,202,0.25f,0.75f}:D3DVIEWPORT9{0,0,1920,1080,0,1};
+        device.tiled=false;device.surfaceHeight=tiles==1?1080:640;raster_bounds.Reset();
+        D3DVIEWPORT9 vp=hud?D3DVIEWPORT9{1344,113,204,202,0,1}:D3DVIEWPORT9{0,0,1920,1080,0,1};
         RECT clip=hud?RECT{1344,113,1548,315}:RECT{0,99,1920,981};
-        device.viewport=vp;device.scissor=clip;device.enabled=enabled;
+        Viewport(vp.X,1080-vp.Y-vp.Height,vp.Width,vp.Height);
+        Scissor(clip.left,1080-clip.bottom,clip.right-clip.left,clip.bottom-clip.top);
         for(unsigned restart=0;restart<4;++restart){
-            BeginFramebuffer();
-            if(memcmp(&device.viewport,&vp,sizeof(vp)) || memcmp(&device.scissor,&clip,sizeof(clip)) || device.enabled!=enabled){puts("BeginFramebuffer lost requested raster bounds");return 1;}
-            unsigned captured=device.captures;BeginFramebuffer();assert(device.captures==captured);
+            CheckBounds(vp,clip);
             FinishFramebuffer(true,true);
-            if(memcmp(&device.viewport,&vp,sizeof(vp)) || memcmp(&device.scissor,&clip,sizeof(clip)) || device.enabled!=enabled){puts("FinishFramebuffer lost requested raster bounds");return 2;}
-            captured=device.captures;FinishFramebuffer(true,true);assert(device.captures==captured);
+            // EndTiling exposes a small physical target; direct presentation/copy
+            // state must never replace the original Fast3D request.
+            D3DVIEWPORT9 temporary={0,0,320,240,0,1};device.SetViewport(&temporary);
+            BeginFramebuffer();CheckBounds(vp,clip);
+            unsigned captured=device.captures;BeginFramebuffer();assert(device.captures==captured);
         }
+        FinishFramebuffer(true,true);
+        // An internal smaller target round trip without new Fast3D setters.
+        b.width=320;b.height=240;b.tiles.assign(1,D3DRECT{0,0,320,240});device.surfaceHeight=240;
+        BeginFramebuffer();FinishFramebuffer(true,true);
+        b.width=1920;b.height=1080;b.tiles.assign(tiles,D3DRECT{0,0,1920,1080});device.surfaceHeight=tiles==1?1080:640;
+        BeginFramebuffer();CheckBounds(vp,clip);FinishFramebuffer(true,true);
     }
-    puts("raster bounds survive target binds and tiled restarts");
+    raster_bounds.Reset();device.captures=0;
+    raster_bounds.Apply(&device,1080);assert(device.captures==0);
+    puts("logical bounds survive physical viewport clamping and temporary targets");
 }
