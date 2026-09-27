@@ -196,6 +196,15 @@ for item in root.findall('.//'+ns+'ClCompile[@Include]'):
         finally:
             remove_shards(before)
 
+    def test_worker_count_changes_incremental_shard_layout(self):
+        two = plan(self.project, self.manifest, self.output, jobs=2)
+        four = plan(self.project, self.manifest, self.output, jobs=4)
+        self.assertNotEqual(two.layout_sha256, four.layout_sha256)
+        self.assertTrue({shard.intermediate for shard in two.shards}.isdisjoint(
+            {shard.intermediate for shard in four.shards}))
+        self.assertTrue({shard.project for shard in two.shards}.isdisjoint(
+            {shard.project for shard in four.shards}))
+
     def test_rejects_project_and_shard_drift(self):
         build = self.build()
         write_shards(build)
