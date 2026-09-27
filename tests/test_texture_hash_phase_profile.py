@@ -13,24 +13,38 @@ from xbox360_platform.resource_lookup import texture_hash_phase_profile
 
 HANDLER = '''bool gfx_set_timg_otr_hash_handler_custom(F3DGfx** cmd0) {
     const auto resourceManager = Ship::Context::GetInstance()->GetResourceManager();
-    const char* fileName = resourceManager->GetArchiveManager()->HashToCString(hash);
-    uint32_t texFlags = 0;
-    RawTexMetadata rawTexMetadata;
-    if (fileName == nullptr) {
-        (*cmd0)++;
-        return false;
-    }
+    const auto archiveManager = resourceManager->GetArchiveManager();
     Interpreter* gfx = XboxDispatchInterpreter();
     const unsigned lookupGeneration = resourceManager->GetXboxLookupGeneration();
-    std::shared_ptr<Fast::Texture> texture =
-        gfx->mXboxTextureHashCache.Lookup(hash, fileName, lookupGeneration);
-    if (!texture) {
+    const unsigned archiveEpoch = archiveManager->GetXboxHashEpoch();
+    std::shared_ptr<Fast::Texture> texture;
+    std::shared_ptr<const std::string> ownedHashPath;
+    const char* fileName = nullptr;
+    const auto hashHit = gfx->mXboxTextureHashCache.LookupArchiveHash(
+        hash, lookupGeneration, archiveEpoch, resourceManager, archiveManager);
+    if (hashHit.texture &&
+        resourceManager->GetXboxLookupGeneration() == lookupGeneration &&
+        archiveManager->GetXboxHashEpoch() == archiveEpoch) {
+        texture = hashHit.texture;
+        ownedHashPath = hashHit.path;
+        fileName = ownedHashPath->c_str();
+    } else {
+        fileName = archiveManager->HashToCString(hash);
+        if (fileName == nullptr) {
+            (*cmd0)++;
+            return false;
+        }
         texture = std::static_pointer_cast<Fast::Texture>(
             resourceManager->LoadResourceProcess(fileName));
         if (texture && !texture->IsDirty() &&
-            resourceManager->GetXboxLookupGeneration() == lookupGeneration)
-            gfx->mXboxTextureHashCache.Store(hash, fileName, lookupGeneration, texture);
+            resourceManager->GetXboxLookupGeneration() == lookupGeneration &&
+            archiveManager->GetXboxHashEpoch() == archiveEpoch)
+            gfx->mXboxTextureHashCache.StoreArchiveHash(
+                hash, fileName, lookupGeneration, archiveEpoch, texture,
+                resourceManager, archiveManager);
     }
+    uint32_t texFlags = 0;
+    RawTexMetadata rawTexMetadata;
     if (texture != nullptr) {
         texFlags = texture->Flags;
         rawTexMetadata.resource = texture;
@@ -45,6 +59,7 @@ bool next_handler() { return true; }
 
 PREFIX = '''#include <stdint.h>
 #include <memory>
+#include <string>
 struct F3DGfx { int value; };
 namespace Fast { struct Texture { unsigned Flags; bool IsDirty() const; }; }
 struct RawTexMetadata { std::shared_ptr<Fast::Texture> resource; };
@@ -52,23 +67,35 @@ namespace ModernFrameProfile {
 enum TextureHashPhase { TextureHashMapLookup, TextureHashOwningCache,
                         TextureHashLoader, TextureHashFinal };
 struct TextureHashSample { bool sampled; };
-void BeginTextureHash(TextureHashSample&);
+void BeginTextureHash(TextureHashSample&, TextureHashPhase);
 void AdvanceTextureHash(TextureHashSample&, TextureHashPhase);
 void EndTextureHash(TextureHashSample&);
 }
-struct ArchiveManager { const char* HashToCString(uint64_t) const; };
+struct ArchiveManager {
+    const char* HashToCString(uint64_t) const;
+    unsigned GetXboxHashEpoch() const;
+};
 struct ResourceManager {
-    ArchiveManager* GetArchiveManager();
+    std::shared_ptr<ArchiveManager> GetArchiveManager();
     unsigned GetXboxLookupGeneration() const;
     std::shared_ptr<Fast::Texture> LoadResourceProcess(const char*);
 };
 namespace Ship { struct Context {
     static Context* GetInstance();
-    ResourceManager* GetResourceManager();
+    std::shared_ptr<ResourceManager> GetResourceManager();
 }; }
 struct Cache {
-    std::shared_ptr<Fast::Texture> Lookup(uint64_t, const char*, unsigned);
-    void Store(uint64_t, const char*, unsigned, std::shared_ptr<Fast::Texture>);
+    struct Hit {
+        std::shared_ptr<Fast::Texture> texture;
+        std::shared_ptr<const std::string> path;
+    };
+    Hit LookupArchiveHash(uint64_t, unsigned, unsigned,
+                          const std::shared_ptr<ResourceManager>&,
+                          const std::shared_ptr<ArchiveManager>&);
+    void StoreArchiveHash(uint64_t, const char*, unsigned, unsigned,
+                          const std::shared_ptr<Fast::Texture>&,
+                          const std::shared_ptr<ResourceManager>&,
+                          const std::shared_ptr<ArchiveManager>&);
 };
 struct Interpreter {
     Cache mXboxTextureHashCache;
@@ -83,34 +110,35 @@ class TextureHashPhaseProfileTests(unittest.TestCase):
     def test_missing_map_hit_and_fallback_have_one_end(self):
         projected = texture_hash_phase_profile(HANDLER)
         handler = projected.split('bool next_handler()', 1)[0]
-        self.assertEqual(handler.count('BeginTextureHash(xboxTextureHashSample)'), 1)
+        self.assertEqual(handler.count('BeginTextureHash('), 1)
         self.assertEqual(handler.count('EndTextureHash(xboxTextureHashSample)'), 2)
         self.assertEqual(handler.count('TextureHashOwningCache'), 1)
         self.assertEqual(handler.count('TextureHashLoader'), 1)
-        self.assertEqual(handler.count('TextureHashFinal'), 2)
-        self.assertLess(handler.index('BeginTextureHash(xboxTextureHashSample)'),
-                        handler.index('HashToCString(hash)'))
+        self.assertEqual(handler.count('TextureHashFinal'), 3)
+        self.assertEqual(handler.count('TextureHashMapLookup'), 1)
+        self.assertLess(handler.index('BeginTextureHash('),
+                        handler.index('LookupArchiveHash('))
         self.assertLess(handler.index('HashToCString(hash)'),
-                        handler.index('TextureHashFinal'))
-        self.assertLess(handler.index('EndTextureHash(xboxTextureHashSample)'),
-                        handler.index('return false;'))
+                        handler.index('TextureHashFinal', handler.index('HashToCString(hash)')))
         self.assertLess(handler.index('TextureHashOwningCache'),
-                        handler.index('mXboxTextureHashCache.Lookup'))
+                        handler.index('LookupArchiveHash('))
+        self.assertNotIn('AdvanceTextureHash(', handler.split('LookupArchiveHash(', 1)[0])
+        self.assertLess(handler.index('TextureHashMapLookup'),
+                        handler.index('HashToCString(hash)'))
         self.assertLess(handler.index('TextureHashLoader'),
                         handler.index('LoadResourceProcess(fileName)'))
-        missing_map = handler.split('if (fileName == nullptr) {', 1)[1].split('\n    }', 1)[0]
-        cache_and_loader = handler.split('if (fileName == nullptr) {', 1)[1].split('\n    }', 1)[1]
-        loader = cache_and_loader.split('if (!texture) {', 1)[1].split('\n    }', 1)[0]
-        cache_hit = cache_and_loader.split('if (!texture) {', 1)[0]
-        final = cache_and_loader.split('if (!texture) {', 1)[1].split('\n    }', 1)[1]
+        cache_hit = handler.split('if (hashHit.texture &&', 1)[1].split('    } else {', 1)[0]
+        miss = handler.split('    } else {', 1)[1].split('\n    }', 1)[0]
+        missing_map = miss.split('if (fileName == nullptr) {', 1)[1].split('\n        }', 1)[0]
+        loader = miss.split('if (fileName == nullptr) {', 1)[1].split('\n        }', 1)[1]
+        loader = loader.split('LoadResourceProcess(fileName)', 1)[0]
+        final = handler.split('    } else {', 1)[1].split('\n    }', 1)[1]
         self.assertEqual(missing_map.count('EndTextureHash('), 1)
-        self.assertEqual(missing_map.count('AdvanceTextureHash('), 0)
         self.assertEqual(cache_hit.count('EndTextureHash('), 0)
-        self.assertEqual(cache_hit.count('TextureHashOwningCache'), 1)
+        self.assertEqual(cache_hit.count('TextureHashFinal'), 1)
         self.assertEqual(loader.count('EndTextureHash('), 0)
         self.assertEqual(loader.count('TextureHashLoader'), 1)
         self.assertEqual(final.count('EndTextureHash('), 1)
-        self.assertEqual(final.count('TextureHashFinal'), 1)
         self.assertEqual(projected.split('bool next_handler()', 1)[1],
                          HANDLER.split('bool next_handler()', 1)[1])
 
@@ -121,8 +149,8 @@ class TextureHashPhaseProfileTests(unittest.TestCase):
             texture_hash_phase_profile(HANDLER.replace('HashToCString(hash)',
                                                        'ChangedHashLookup(hash)'))
         with self.assertRaises(ValueError):
-            texture_hash_phase_profile(HANDLER.replace('mXboxTextureHashCache.Store(hash,',
-                                                       'mXboxTextureHashCache.Store(otherHash,'))
+            texture_hash_phase_profile(HANDLER.replace('resourceManager, archiveManager);',
+                                                       'resourceManager, otherArchive);'))
 
     def test_projected_handler_compiles_for_xenon(self):
         xdk = Path('C:/Program Files (x86)/Microsoft Xbox 360 SDK')

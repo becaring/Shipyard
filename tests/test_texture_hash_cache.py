@@ -27,6 +27,19 @@ class TextureHashCacheTests(unittest.TestCase):
             result = subprocess.run([str(output / 'contract.exe')], capture_output=True, text=True, timeout=15)
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
+    def test_archive_epoch_route_compiles_for_xenon(self):
+        xdk = Path('C:/Program Files (x86)/Microsoft Xbox 360 SDK')
+        with tempfile.TemporaryDirectory(prefix='shipyard-texture-hash-xenon-') as folder:
+            output = Path(folder) / 'contract.obj'
+            result = subprocess.run([
+                str(xdk / 'bin/win32/cl.exe'), '/nologo', '/c', '/O2', '/EHsc',
+                '/D_XBOX', '/D_XBOX_VER=200', '/I' + str(xdk / 'include/xbox'),
+                '/I' + str(ROOT / 'sources'), '/Fo' + str(output),
+                str(ROOT / 'tests/texture_hash_cache_contract.cpp'),
+            ], capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertEqual(output.read_bytes()[:2], b'\xf2\x01')
+
 
 if __name__ == '__main__':
     unittest.main()
