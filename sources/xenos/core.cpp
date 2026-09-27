@@ -3,6 +3,7 @@
 #include "pixels.h"
 #include "shader_provider.h"
 #include "tile_coverage.h"
+#include "tile1_predication_draw.h"
 #include "ring_probe.h"
 
 #include "xenos_backend.h"

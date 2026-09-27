@@ -47,6 +47,7 @@ typedef long HRESULT;
 #define D3DPT_TRIANGLELIST 4
 #define D3DPRED_TILE(i) (1u << (i))
 #include "tile1_predication_trial.h"
+#include "tile1_predication_draw.h"
 using namespace Fast::ShipyardXenos;
 struct Device {
     std::vector<unsigned> calls;
@@ -85,9 +86,6 @@ int main() {
     def test_certified_batches_never_touch_tile0_after_clipping(self):
         program = r'''
 #include <iostream>
-typedef long HRESULT;
-#define D3DPT_TRIANGLELIST 4
-#define D3DPRED_TILE(i) (1u << (i))
 #include "tile1_predication_trial.h"
 using namespace Fast::ShipyardXenos;
 int main() {
