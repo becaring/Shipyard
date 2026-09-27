@@ -3,6 +3,7 @@
 #include "pixels.h"
 #include "shader_provider.h"
 #include "tile_coverage.h"
+#include "ring_probe.h"
 
 #include "xenos_backend.h"
 #include "metrics.h"
@@ -124,6 +125,9 @@ unsigned tiling_draw_restarts, tiling_peak_bytes;
 unsigned tiling_1080_batches, tiling_1080_tile1_batches;
 unsigned tiling_1080_vertices, tiling_1080_tile1_vertices;
 unsigned tiling_1080_oversize_batches;
+unsigned ring_same_segment_draws, ring_ambiguous_draws, ring_segment_changed_draws;
+unsigned ring_max_same_segment_bytes;
+uint64_t ring_same_segment_bytes, ring_same_segment_estimated_bytes;
 bool discard_presentation_depth_on_end;
 bool discard_presentation_color_on_end;
 unsigned presentation_color_resolves_skipped, presentation_color_discard_blocked;
@@ -824,11 +828,34 @@ void Draw(float* vertices, size_t count, size_t triangles) {
             }
         }
     }
+    const Framebuffer& ringFramebuffer = buffers[active_fb];
+    const bool probeRing = timing_enabled && ringFramebuffer.width == 1920 &&
+                           ringFramebuffer.height == 1080 && ringFramebuffer.tiles.size() == 2;
+    const ShipyardXenos::RingCursor ringBefore(
+        probeRing ? (uintptr_t)xenos_device->m_pRing : 0,
+        probeRing ? (uintptr_t)xenos_device->m_pRingLimit : 0);
     PrepareDrawState();
     ApplyAlpha(); // Also handles shader-only changes and external state restoration.
     Shipyard_Check(xenos_device->DrawPrimitiveUP(D3DPT_TRIANGLELIST, (UINT)triangles, vertices,
                                                  (UINT)(current_shader->floats * 4)),
                    "Shipyard DrawPrimitiveUP");
+    if (probeRing) {
+        const ShipyardXenos::RingCursor ringAfter(
+            (uintptr_t)xenos_device->m_pRing, (uintptr_t)xenos_device->m_pRingLimit);
+        size_t observedBytes;
+        if (ShipyardXenos::SameRingSegmentDelta(ringBefore, ringAfter,
+                                                8 * 1024 * 1024 / 32, &observedBytes)) {
+            ++ring_same_segment_draws;
+            ring_same_segment_bytes += observedBytes;
+            ring_same_segment_estimated_bytes += count * sizeof(float) + 8192;
+            ring_max_same_segment_bytes = std::max(ring_max_same_segment_bytes,
+                                                   (unsigned)observedBytes);
+        } else {
+            ++ring_ambiguous_draws;
+            if (ringBefore.segmentLimit != ringAfter.segmentLimit)
+                ++ring_segment_changed_draws;
+        }
+    }
     tiling_draw_bytes += count * sizeof(float) + 8192;
     if (buffers[active_fb].tiles.size() > 1 && tiling_draw_bytes > tiling_peak_bytes)
         tiling_peak_bytes = (unsigned)tiling_draw_bytes;
@@ -1849,6 +1876,12 @@ void CaptureAndResetCounters(NativeCounters* counters) {
     counters->tiling1080Vertices = tiling_1080_vertices;
     counters->tiling1080Tile1Vertices = tiling_1080_tile1_vertices;
     counters->tiling1080OversizeBatches = tiling_1080_oversize_batches;
+    counters->ringSameSegmentDraws = ring_same_segment_draws;
+    counters->ringAmbiguousDraws = ring_ambiguous_draws;
+    counters->ringSegmentChangedDraws = ring_segment_changed_draws;
+    counters->ringMaxSameSegmentBytes = ring_max_same_segment_bytes;
+    counters->ringSameSegmentBytes = ring_same_segment_bytes;
+    counters->ringSameSegmentEstimatedBytes = ring_same_segment_estimated_bytes;
     counters->presentationColorResolvesSkipped = presentation_color_resolves_skipped;
     counters->presentationColorDiscardBlocked = presentation_color_discard_blocked;
     counters->pendingTextures = (unsigned)pending_texture_releases.size();
@@ -1871,6 +1904,9 @@ void CaptureAndResetCounters(NativeCounters* counters) {
     tiling_1080_batches = tiling_1080_tile1_batches = 0;
     tiling_1080_vertices = tiling_1080_tile1_vertices = 0;
     tiling_1080_oversize_batches = 0;
+    ring_same_segment_draws = ring_ambiguous_draws = ring_segment_changed_draws = 0;
+    ring_max_same_segment_bytes = 0;
+    ring_same_segment_bytes = ring_same_segment_estimated_bytes = 0;
     presentation_color_resolves_skipped = presentation_color_discard_blocked = 0;
 }
 GfxClipParameters ClipParameters() {

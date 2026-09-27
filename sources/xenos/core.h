@@ -32,6 +32,9 @@ struct NativeCounters {
     unsigned tiling1080Batches, tiling1080Tile1Batches;
     unsigned tiling1080Vertices, tiling1080Tile1Vertices;
     unsigned tiling1080OversizeBatches;
+    unsigned ringSameSegmentDraws, ringAmbiguousDraws, ringSegmentChangedDraws;
+    unsigned ringMaxSameSegmentBytes;
+    uint64_t ringSameSegmentBytes, ringSameSegmentEstimatedBytes;
     unsigned presentationColorResolvesSkipped, presentationColorDiscardBlocked;
     unsigned pendingTextures, pendingBytes, width, height, samples, tiles;
 };
