@@ -259,7 +259,7 @@ def texture_hash_cache_handler(source):
     body = source[begin:end]
     old = '''    const char* fileName = resourceManager->GetArchiveManager()->HashToCString(hash);
     uint32_t texFlags = 0;
-    RawTexMetadata rawTexMetadata = {};
+    RawTexMetadata rawTexMetadata;
 
     if (fileName == nullptr) {
         (*cmd0)++;
@@ -300,7 +300,7 @@ def texture_hash_cache_handler(source):
                 resourceManager, archiveManager);
     }
     uint32_t texFlags = 0;
-    RawTexMetadata rawTexMetadata = {};'''
+    RawTexMetadata rawTexMetadata;'''
     body = _once(body, old, new)
     body = _once(body, '            Interpreter* gfx = XboxDispatchInterpreter();\n'
         '            gfx->GfxDpSetTextureImage', '            gfx->GfxDpSetTextureImage')

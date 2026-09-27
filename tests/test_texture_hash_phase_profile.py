@@ -8,7 +8,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'python'))
-from xbox360_platform.resource_lookup import texture_hash_phase_profile
+from xbox360_platform.resource_lookup import (texture_hash_phase_profile,
+                                               texture_hash_cache_handler)
 
 
 HANDLER = '''bool gfx_set_timg_otr_hash_handler_custom(F3DGfx** cmd0) {
@@ -51,6 +52,44 @@ HANDLER = '''bool gfx_set_timg_otr_hash_handler_custom(F3DGfx** cmd0) {
         gfx->GfxDpSetTextureImage(texFlags, rawTexMetadata);
     }
     (*cmd0)++;
+    return false;
+}
+bool next_handler() { return true; }
+'''
+
+
+LOWERED_SOURCE = '''bool gfx_set_timg_otr_hash_handler_custom(F3DGfx** cmd0) {
+    const auto resourceManager = Ship::Context::GetInstance()->GetResourceManager();
+    const char* fileName = resourceManager->GetArchiveManager()->HashToCString(hash);
+    uint32_t texFlags = 0;
+    RawTexMetadata rawTexMetadata;
+
+    if (fileName == nullptr) {
+        (*cmd0)++;
+        return false;
+    }
+
+    std::shared_ptr<Fast::Texture> texture =
+        std::static_pointer_cast<Fast::Texture>(resourceManager->LoadResourceProcess(
+            fileName));
+    if (texture != nullptr) {
+        // OTRTODO: We have disabled caching for now to fix a texture corruption issue with HD texture
+        // support. In doing so, there is a potential performance hit since we are not caching lookups. We
+        // need to do proper profiling to see whether or not it is worth it to keep the caching system.
+
+        if (texture->ImageData) {
+            Interpreter* gfx = XboxDispatchInterpreter();
+            gfx->GfxDpSetTextureImage(texFlags, rawTexMetadata);
+        }
+    }
+    (*cmd0)++;
+    return false;
+}
+bool gfx_set_timg_handler_rdp(F3DGfx** cmd0) {
+    if (true) {
+            std::shared_ptr<Fast::Texture> tex = std::static_pointer_cast<Fast::Texture>(
+                Ship::Context::GetInstance()->GetResourceManager()->LoadResourceProcess(imgData));
+    }
     return false;
 }
 bool next_handler() { return true; }
@@ -107,6 +146,21 @@ uint64_t hash = 0;
 
 
 class TextureHashPhaseProfileTests(unittest.TestCase):
+    def test_complete_cache_projection_accepts_lowered_metadata_local(self):
+        projected = texture_hash_cache_handler(LOWERED_SOURCE)
+        handler = projected.split('bool gfx_set_timg_handler_rdp(', 1)[0]
+        self.assertLess(handler.index('LookupArchiveHash('),
+                        handler.index('HashToCString(hash)'))
+        self.assertLess(handler.index('HashToCString(hash)'),
+                        handler.index('RawTexMetadata rawTexMetadata;'))
+        self.assertEqual(handler.count('BeginTextureHash('), 1)
+        self.assertEqual(handler.count('EndTextureHash('), 2)
+        self.assertNotIn('RawTexMetadata rawTexMetadata = {};', handler)
+        self.assertIn('StoreArchiveHash(', handler)
+        with self.assertRaises(ValueError):
+            texture_hash_cache_handler(LOWERED_SOURCE.replace(
+                'RawTexMetadata rawTexMetadata;', 'RawTexMetadata rawTexMetadata = {};'))
+
     def test_missing_map_hit_and_fallback_have_one_end(self):
         projected = texture_hash_phase_profile(HANDLER)
         handler = projected.split('bool next_handler()', 1)[0]
