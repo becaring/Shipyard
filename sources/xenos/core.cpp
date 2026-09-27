@@ -130,6 +130,8 @@ unsigned ring_max_same_segment_bytes;
 uint64_t ring_same_segment_bytes, ring_same_segment_estimated_bytes;
 ShipyardXenos::TilingSpaceProbe tiling_space_probe;
 bool tiling_guard_restart_pending;
+ShipyardXenos::TilingGuardTrialWindow tiling_guard_trial_window;
+bool tiling_guard_trial_enabled;
 bool discard_presentation_depth_on_end;
 bool discard_presentation_color_on_end;
 unsigned presentation_color_resolves_skipped, presentation_color_discard_blocked;
@@ -155,6 +157,9 @@ void TilingSpaceBegin();
 void TilingSpaceSetup();
 void TilingSpaceBeforeResolve();
 void TilingSpaceBeforeEnd();
+void QueryTilingSpace(DWORD* used, DWORD* remaining);
+bool GuardTrialBeforeDraw(uint64_t inputBytes);
+bool GuardTrialAfterDraw();
 void RebindSampledTextures();
 void Resolve(int id);
 unsigned frame_number;
@@ -809,12 +814,16 @@ void Draw(float* vertices, size_t count, size_t triangles) {
     // EndTiling cannot submit a partially filled SDK ring. Retain the target and
     // restart the native bracket before it consumes its reserved command space.
     // The allowance includes state-command space for each Fast3D batch.
+    bool trialContinued = false;
     if (live_framebuffer && buffers[active_fb].tiles.size() > 1 &&
         tiling_draw_bytes + count * sizeof(float) + 8192 > 2 * 1024 * 1024) {
-        ++tiling_draw_restarts;
-        tiling_guard_restart_pending = timing_enabled;
-        FinishFramebuffer();
-        tiling_guard_restart_pending = false;
+        trialContinued = GuardTrialBeforeDraw(uint64_t(count) * sizeof(float));
+        if (!trialContinued) {
+            ++tiling_draw_restarts;
+            tiling_guard_restart_pending = timing_enabled;
+            FinishFramebuffer();
+            tiling_guard_restart_pending = false;
+        }
     }
     BeginFramebuffer();
     if (timing_enabled) {
@@ -847,6 +856,7 @@ void Draw(float* vertices, size_t count, size_t triangles) {
     Shipyard_Check(xenos_device->DrawPrimitiveUP(D3DPT_TRIANGLELIST, (UINT)triangles, vertices,
                                                  (UINT)(current_shader->floats * 4)),
                    "Shipyard DrawPrimitiveUP");
+    const bool trialNeedsFinish = trialContinued && !GuardTrialAfterDraw();
     if (probeRing) {
         const ShipyardXenos::RingCursor ringAfter(
             (uintptr_t)xenos_device->m_pRing, (uintptr_t)xenos_device->m_pRingLimit);
@@ -867,6 +877,8 @@ void Draw(float* vertices, size_t count, size_t triangles) {
     tiling_draw_bytes += count * sizeof(float) + 8192;
     if (buffers[active_fb].tiles.size() > 1 && tiling_draw_bytes > tiling_peak_bytes)
         tiling_peak_bytes = (unsigned)tiling_draw_bytes;
+    if (trialNeedsFinish)
+        FinishFramebuffer();
 }
 void ValidateFramebuffer(int id) {
     if (id < 0 || (size_t)id >= buffers.size() ||
@@ -1017,11 +1029,29 @@ void QueryTilingSpace(DWORD* used, DWORD* remaining) {
                              timing_counts.tilingSpaceQueryCalls);
     xenos_device->QueryBufferSpace(used, remaining);
 }
-void TilingSpaceBegin() {
-    if (!ProfileTilingSpace()) return;
+bool GuardTrialBeforeDraw(uint64_t inputBytes) {
+    if (!tiling_guard_trial_enabled) return false;
+    DWORD used = 0, remaining = 0;
+    if (tiling_guard_trial_window.active)
+        QueryTilingSpace(&used, &remaining);
+    return tiling_guard_trial_window.BeforeDraw(used, remaining, inputBytes) ==
+           ShipyardXenos::GuardTrialContinue;
+}
+bool GuardTrialAfterDraw() {
     DWORD used, remaining;
     QueryTilingSpace(&used, &remaining);
-    tiling_space_probe.Begin(used, remaining);
+    return tiling_guard_trial_window.AfterDraw(used, remaining);
+}
+void TilingSpaceBegin() {
+    const Framebuffer& b = buffers[active_fb];
+    const bool profile = ProfileTilingSpace();
+    const bool trial = tiling_guard_trial_enabled && b.width == 1920 && b.height == 1080 &&
+                       b.tiles.size() == 2 && b.samples == 1;
+    if (!profile && !trial) return;
+    DWORD used, remaining;
+    QueryTilingSpace(&used, &remaining);
+    if (profile) tiling_space_probe.Begin(used, remaining);
+    if (trial) tiling_guard_trial_window.Begin(used, remaining);
 }
 void TilingSpaceSetup() {
     if (!timing_enabled || !tiling_space_probe.active) return;
@@ -1150,6 +1180,7 @@ void FinishFramebuffer(bool preserveDepth, bool preserveColor) {
         // fragments. Disable EndTiling's automatic single-target resolve.
         Shipyard_Check(xenos_device->EndTiling(0, NULL, NULL, &clear, 1, 0, NULL),
                        "finish framebuffer tiling");
+        tiling_guard_trial_window.Close();
     }
     // Seal the resolved depth resource's SDK fence before later presentation
     // commands enter the same interval. PixelDepth may lock this texture during
@@ -1864,6 +1895,11 @@ void SetTimingEnabled(bool enabled) {
         timing_frequency = (uint64_t)frequency.QuadPart;
     }
 }
+void SetTilingGuardTrialEnabled(bool enabled) {
+    if (tiling_guard_trial_enabled == enabled) return;
+    tiling_guard_trial_enabled = enabled;
+    if (!enabled) tiling_guard_trial_window.Close();
+}
 void CaptureAndResetTimingCounters(NativeTimingCounters* counters) {
     if (!counters)
         return;
@@ -1929,6 +1965,7 @@ void CaptureAndResetCounters(NativeCounters* counters) {
     counters->ringSameSegmentBytes = ring_same_segment_bytes;
     counters->ringSameSegmentEstimatedBytes = ring_same_segment_estimated_bytes;
     counters->tilingSpace = tiling_space_probe.summary;
+    counters->tilingGuardTrial = tiling_guard_trial_window.stats;
     counters->presentationColorResolvesSkipped = presentation_color_resolves_skipped;
     counters->presentationColorDiscardBlocked = presentation_color_discard_blocked;
     counters->pendingTextures = (unsigned)pending_texture_releases.size();
@@ -1955,6 +1992,7 @@ void CaptureAndResetCounters(NativeCounters* counters) {
     ring_max_same_segment_bytes = 0;
     ring_same_segment_bytes = ring_same_segment_estimated_bytes = 0;
     tiling_space_probe.ResetSummary();
+    tiling_guard_trial_window.ResetStats();
     presentation_color_resolves_skipped = presentation_color_discard_blocked = 0;
 }
 GfxClipParameters ClipParameters() {

@@ -12,6 +12,7 @@
 #include "shader_provider.h"
 #include "depth_discard.h"
 #include "tiling_space_probe.h"
+#include "tiling_guard_trial.h"
 
 namespace Fast {
 struct ShaderProgram;
@@ -37,6 +38,7 @@ struct NativeCounters {
     unsigned ringMaxSameSegmentBytes;
     uint64_t ringSameSegmentBytes, ringSameSegmentEstimatedBytes;
     TilingSpaceSummary tilingSpace;
+    TilingGuardTrialStats tilingGuardTrial;
     unsigned presentationColorResolvesSkipped, presentationColorDiscardBlocked;
     unsigned pendingTextures, pendingBytes, width, height, samples, tiles;
 };
@@ -60,6 +62,9 @@ struct NativeTimingCounters {
 };
 // A false-to-true transition starts a fresh interval. Repeated values preserve it.
 void SetTimingEnabled(bool enabled);
+// Render-thread-only, off by default. Applies only to a 1920x1080,
+// two-tile, single-sample target.
+void SetTilingGuardTrialEnabled(bool enabled);
 // Resets counts; reads no clock. Upload bytes include requests served by reuse.
 void CaptureAndResetTimingCounters(NativeTimingCounters* counters);
 
