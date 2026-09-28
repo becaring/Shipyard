@@ -986,10 +986,9 @@ void SetTileConstants() {
         xenos_device->SetPixelShaderConstantF(4, zero, 1);
     }
 }
-void RestoreQuad(IDirect3DTexture9* color, IDirect3DTexture9* depth, uint32_t width,
-                 uint32_t height, DWORD sample_mask, const float* copy_quad = NULL) {
+bool BeginRestoreQuad(uint32_t width, uint32_t height, bool has_depth) {
     InvalidateNativeState();
-    bool restore_constants = tile_constants_owned;
+    const bool restore_constants = tile_constants_owned;
     StopTileConstants();
     Shipyard_Check(restore_state->Capture(), "capture framebuffer copy state");
     D3DVIEWPORT9 viewport = {0, 0, width, height, 0, 1};
@@ -997,10 +996,10 @@ void RestoreQuad(IDirect3DTexture9* color, IDirect3DTexture9* depth, uint32_t wi
     xenos_device->SetRenderState(D3DRS_VIEWPORTENABLE, TRUE);
     xenos_device->SetRenderState(D3DRS_HALFPIXELOFFSET, TRUE);
     xenos_device->SetVertexShader(restore_vertex);
-    xenos_device->SetPixelShader(depth ? restore_depth : restore_color);
+    xenos_device->SetPixelShader(has_depth ? restore_depth : restore_color);
     xenos_device->SetVertexDeclaration(restore_declaration);
-    xenos_device->SetRenderState(D3DRS_ZENABLE, depth != NULL);
-    xenos_device->SetRenderState(D3DRS_ZWRITEENABLE, depth != NULL);
+    xenos_device->SetRenderState(D3DRS_ZENABLE, has_depth);
+    xenos_device->SetRenderState(D3DRS_ZWRITEENABLE, has_depth);
     xenos_device->SetRenderState(D3DRS_ZFUNC, D3DCMP_ALWAYS);
     xenos_device->SetRenderState(D3DRS_HIZENABLE, FALSE);
     xenos_device->SetRenderState(D3DRS_HIZWRITEENABLE, FALSE);
@@ -1017,16 +1016,21 @@ void RestoreQuad(IDirect3DTexture9* color, IDirect3DTexture9* depth, uint32_t wi
     xenos_device->SetRenderState(D3DRS_DEPTHBIAS, 0);
     xenos_device->SetRenderState(D3DRS_SLOPESCALEDEPTHBIAS, 0);
     xenos_device->SetRenderState(D3DRS_MULTISAMPLEANTIALIAS, TRUE);
+    return restore_constants;
+}
+void DrawRestoreQuadSample(IDirect3DTexture9* color, IDirect3DTexture9* depth,
+                           DWORD sample_mask, const float* copy_quad, bool configure_sampler) {
     xenos_device->SetRenderState(D3DRS_MULTISAMPLEMASK, sample_mask);
     SetNativeTexture(0, color);
     SetNativeTexture(1, depth);
-    for (int sampler = 0; sampler < 2; ++sampler) {
-        xenos_device->SetSamplerState(sampler, D3DSAMP_MINFILTER, D3DTEXF_POINT);
-        xenos_device->SetSamplerState(sampler, D3DSAMP_MAGFILTER, D3DTEXF_POINT);
-        xenos_device->SetSamplerState(sampler, D3DSAMP_MIPFILTER, D3DTEXF_NONE);
-        xenos_device->SetSamplerState(sampler, D3DSAMP_ADDRESSU, D3DTADDRESS_CLAMP);
-        xenos_device->SetSamplerState(sampler, D3DSAMP_ADDRESSV, D3DTADDRESS_CLAMP);
-    }
+    if (configure_sampler)
+        for (int sampler = 0; sampler < 2; ++sampler) {
+            xenos_device->SetSamplerState(sampler, D3DSAMP_MINFILTER, D3DTEXF_POINT);
+            xenos_device->SetSamplerState(sampler, D3DSAMP_MAGFILTER, D3DTEXF_POINT);
+            xenos_device->SetSamplerState(sampler, D3DSAMP_MIPFILTER, D3DTEXF_NONE);
+            xenos_device->SetSamplerState(sampler, D3DSAMP_ADDRESSU, D3DTADDRESS_CLAMP);
+            xenos_device->SetSamplerState(sampler, D3DSAMP_ADDRESSV, D3DTADDRESS_CLAMP);
+        }
     // Xenos HALFPIXELOFFSET already aligns pixel and texel centers. Adding a
     // desktop D3D9 half-pixel translation again shifts retained color/depth on
     // every restore (notably when a newly drawn glyph replaces a cached texture).
@@ -1037,10 +1041,18 @@ void RestoreQuad(IDirect3DTexture9* color, IDirect3DTexture9* depth, uint32_t wi
     Shipyard_Check(xenos_device->DrawPrimitiveUP(D3DPT_TRIANGLELIST, 2,
                                                  copy_quad ? copy_quad : quad, 4 * sizeof(float)),
                    "restore framebuffer samples");
+}
+void EndRestoreQuad(bool restore_constants) {
     Shipyard_Check(restore_state->Apply(), "restore framebuffer copy state");
     InvalidateNativeState();
     if (restore_constants)
         SetTileConstants();
+}
+void RestoreQuad(IDirect3DTexture9* color, IDirect3DTexture9* depth, uint32_t width,
+                 uint32_t height, DWORD sample_mask, const float* copy_quad = NULL) {
+    const bool restore_constants = BeginRestoreQuad(width, height, depth != NULL);
+    DrawRestoreQuadSample(color, depth, sample_mask, copy_quad, true);
+    EndRestoreQuad(restore_constants);
 }
 void ClearFramebufferTargets(DWORD flags) {
     NativeTimingScope timing(timing_counts.framebufferClearTicks, timing_counts.framebufferClearCalls);
@@ -1132,12 +1144,15 @@ void BeginFramebuffer() {
     }
     // Each MSAA fragment is retained independently. Resolving only the averaged
     // image here would destroy edge coverage and subsequent depth tests.
-    if (b.stored)
+    if (b.stored) {
+        const bool restore_constants = BeginRestoreQuad(b.width, b.height, b.depth_stored);
         for (uint32_t sample = 0; sample < b.samples; ++sample) {
-            RestoreQuad(b.samples > 1 ? b.color_samples[sample] : b.image,
-                        b.depth_stored ? b.depth_samples[sample] : NULL, b.width, b.height,
-                        b.samples > 1 ? 1u << sample : ~0u);
+            DrawRestoreQuadSample(b.samples > 1 ? b.color_samples[sample] : b.image,
+                                  b.depth_stored ? b.depth_samples[sample] : NULL,
+                                  b.samples > 1 ? 1u << sample : ~0u, NULL, sample == 0);
         }
+        EndRestoreQuad(restore_constants);
+    }
     live_framebuffer = true;
     tiling_draw_bytes = 0;
     SetTileConstants();
