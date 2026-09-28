@@ -47,7 +47,7 @@
     "python/xbox360_platform/parallel_build.py": "9cff07d7a460e4e06d0e65b025c2a9560f4514cbcdf1ced050dd959f027d5563",
     "python/xbox360_platform/png.py": "fa3bf5e98292f16463a5ad517a0d81bb04262f5886698841e30f50ac64ff29f1",
     "python/xbox360_platform/prism.py": "dfb10f09f6528130edbef0eed9c36ee4ed8633c281daffc340b3d16b7c500aca",
-    "python/xbox360_platform/resource_lookup.py": "31eafefab134c4f264dae04bd09fe073f3fef31809b11d1327129faa66ed9c95",
+    "python/xbox360_platform/resource_lookup.py": "5d327bbea2d3f9e6c4165f90f68f1ec9cf56fa9ff042e716a15afcbc357fd035",
     "python/xbox360_platform/shade_cache.py": "ec2f6c766d4069af2783dd402b700d61b1e229b4016779d22820401232b42002",
     "python/xbox360_platform/texture_state.py": "f02fd890c5d875f4474ad6aa14f3979f6fb7e444900b4fdc7ddec2c48ce02437",
     "python/xbox360_platform/value_types.py": "3f76bc410a13a66db7523847b070d929d2f46571cb526980e677b9b8e0d8bd1a",
