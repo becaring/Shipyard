@@ -33,6 +33,7 @@
     "python/xbox360_platform/gfxd.py": "c93ee007ea09a6069afaba23ef6819b9e7cb97ed7f4654fc5061394932affde7",
     "python/xbox360_platform/gui_mouse_capture.py": "548d093680fd88b3cdf347c68e6e10ccc79d1aac8e526e18be544348f89bbcca",
     "python/xbox360_platform/imgui_syntax.py": "20ffeb80de873d363bd92e8e3907de3d608b6fa8b1f515a4a5c08eae15635a24",
+    "python/xbox360_platform/interpolation_pairing.py": "328ea22691c01d6e887d587de798633b21c4ebee901aeb8449e4ef5bc9d3a4bd",
     "python/xbox360_platform/interpolation_recording.py": "4396adde29208bf8bd7dc823fd6aea334e40bbe7d7e33f4fd1bac73594f2285a",
     "python/xbox360_platform/json/__init__.py": "00cbce8da54f719cb9b23b0f03eab323dc2ecf0a5bc1dfa122f515e6bd1bda5b",
     "python/xbox360_platform/json/backend.py": "8c02ec02149d94ce71d728fe9bcd200f9c1bd8612a874eab78d158393d6b1b4b",
