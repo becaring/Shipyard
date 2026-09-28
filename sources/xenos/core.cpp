@@ -195,6 +195,7 @@ typedef char NativeConstantsAligned[(__alignof(NativeStateCache) >= 16 &&
 bool draw_state_prepared;
 unsigned draw_sampler_mask;
 ShipyardNativeStateCounts native_state_counts;
+ShipyardXenos::NativeAlphaHistogram alpha_histogram;
 unsigned binding_attempted, binding_written, binding_suppressed;
 const D3DSAMPLERSTATETYPE sampler_fields[5] = {
     D3DSAMP_MINFILTER, D3DSAMP_MAGFILTER, D3DSAMP_MIPFILTER, D3DSAMP_ADDRESSU, D3DSAMP_ADDRESSV};
@@ -705,14 +706,12 @@ void Scissor(int x, int y, int w, int h) {
 bool requested_alpha;
 bool color_writes = true;
 unsigned NativeAlphaMode(bool enable, const CCFeatures* features) {
-    if (!enable)
-        return 0;
     // Keep alpha in the combiner for rejection; opaque survivors do not blend.
     // Other alpha modes retain the configured blending path.
-    return features && features->opt_alpha && features->opt_texture_edge && !features->opt_noise &&
-                   !features->opt_invisible
-               ? 2
-               : 1;
+    return ShipyardXenos::ClassifyNativeAlphaMode(
+        enable, features && features->opt_alpha,
+        features && features->opt_texture_edge,
+        features && features->opt_noise, features && features->opt_invisible);
 }
 void ApplyAlpha() {
     const unsigned mode =
@@ -876,6 +875,8 @@ void Draw(float* vertices, size_t count, size_t triangles) {
         : xenos_device->DrawPrimitiveUP(D3DPT_TRIANGLELIST, (UINT)triangles, vertices,
                                        (UINT)(current_shader->floats * 4));
     Shipyard_Check(drawResult, "Shipyard DrawPrimitiveUP");
+    if (timing_enabled)
+        alpha_histogram.Record(native_state.alpha_mode, (unsigned)triangles);
     const bool trialNeedsFinish = trialContinued && !GuardTrialAfterDraw();
     if (probeRing) {
         const ShipyardXenos::RingCursor ringAfter(
@@ -1956,6 +1957,8 @@ void CaptureAndResetCounters(NativeCounters* counters) {
     if (!counters)
         return;
     memset(counters, 0, sizeof(*counters));
+    alpha_histogram.CopyAndReset(counters->alphaDraws, counters->alphaTriangles,
+                                 counters->alphaVertices);
     counters->samplerAttempted = native_state_counts.sampler_attempted;
     counters->samplerWritten = native_state_counts.sampler_written;
     counters->samplerSuppressed = native_state_counts.sampler_suppressed;

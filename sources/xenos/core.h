@@ -14,6 +14,7 @@
 #include "tiling_space_probe.h"
 #include "tiling_guard_trial.h"
 #include "tile1_predication_trial.h"
+#include "alpha_mode_histogram.h"
 
 namespace Fast {
 struct ShaderProgram;
@@ -25,6 +26,9 @@ struct ShaderCacheOps {
 };
 void SetShaderCache(const ShaderCacheOps* operations);
 struct NativeCounters {
+    unsigned alphaDraws[NativeAlphaHistogram::ModeCount];
+    unsigned alphaTriangles[NativeAlphaHistogram::ModeCount];
+    unsigned alphaVertices[NativeAlphaHistogram::ModeCount];
     unsigned samplerAttempted, samplerWritten, samplerSuppressed;
     unsigned constantsAttempted, constantsWritten, constantsSuppressed;
     unsigned bindingAttempted, bindingWritten, bindingSuppressed;
