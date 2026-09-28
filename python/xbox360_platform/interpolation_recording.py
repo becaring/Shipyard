@@ -62,6 +62,30 @@ def pooled_containers(text):
     return '#include "interpolation/recording_memory.h"\n' + text
 
 
+def retain_root_operations(text, *, capacity_bytes):
+    """Retain bounded root-vector capacity across the two recording buffers.
+
+    Requires recording_op_index: swap already rebound stable map-node pointers.
+    Children and item order are cleared normally; retained vectors contain no
+    operations. The live-capacity budget is separate from the freed-block pool.
+    """
+    if not isinstance(capacity_bytes, int) or not 0 < capacity_bytes <= 16 * 1024 * 1024:
+        raise ValueError('Invalid root recording capacity budget')
+    return _once(text, '''    current_recording.root_path.ops.clear();
+    current_recording.root_path.items.clear();
+    current_recording.root_path.ClearIndex();''', '''    size_t remainingRootCapacity = ''' + str(capacity_bytes) + ''';
+    for (auto it = current_recording.root_path.ops.begin(); it != current_recording.root_path.ops.end(); ++it) {
+        if (it->second.capacity() <= remainingRootCapacity / sizeof(Data)) {
+            remainingRootCapacity -= it->second.capacity() * sizeof(Data);
+            it->second.clear();
+        } else {
+            Path::Operations empty;
+            it->second.swap(empty);
+        }
+    }
+    current_recording.root_path.items.clear();''')
+
+
 def recording_op_index(text, *, value_expression):
     # Map nodes remain stable. Cache their operation-vector addresses within
     # each Path and rebind after every ownership transfer or copy.
