@@ -15,7 +15,10 @@ class NativeTimingTests(unittest.TestCase):
         start = source.index('ShipyardXenos::NativeTimingCounters timing_counts;')
         end = source.index('struct TextureSampler', start)
         implementation = source[start:end] + function(source, 'void SetTimingEnabled(bool enabled) {')
+        self.assertIn('void SetDetailedTimingEnabled(bool enabled) {', source)
+        implementation += function(source, 'void SetDetailedTimingEnabled(bool enabled) {')
         capture = function(source, 'void CaptureAndResetTimingCounters(NativeTimingCounters* counters) {')
+        capture += function(source, 'bool ProfileTilingSpace() {')
         program = r"""
 #include <stdint.h>
 #include <string.h>
@@ -46,6 +49,12 @@ int main() {
     { NativeTimingScope s(timing_counts.drawTicks, timing_counts.drawCalls); }
     assert(!clocks && !frequencies && !timing_counts.drawCalls);
     SetTimingEnabled(true);
+    assert(!detailed_timing_enabled);
+    SetDetailedTimingEnabled(true);
+    assert(detailed_timing_enabled);
+    tiling_space_probe.active=true;
+    SetDetailedTimingEnabled(false);
+    assert(!detailed_timing_enabled && !tiling_space_probe.active && timing_enabled);
     { NativeTimingScope s(timing_counts.drawTicks, timing_counts.drawCalls); }
     SetTimingEnabled(true);
     { NativeTimingScope s(timing_counts.drawTicks, timing_counts.drawCalls); }
@@ -60,6 +69,14 @@ int main() {
     Device device; xenos_device=&device;
     Framebuffer fb={};fb.width=640;fb.height=480;fb.samples=4;fb.tiles.resize(2);
     buffers.push_back(fb);active_fb=0;
+    assert(!ProfileTilingSpace());
+    SetDetailedTimingEnabled(true);
+    assert(!ProfileTilingSpace());
+    buffers[0].width=1920;buffers[0].height=1080;
+    assert(ProfileTilingSpace());
+    SetDetailedTimingEnabled(false);
+    assert(!ProfileTilingSpace());
+    buffers[0].width=640;buffers[0].height=480;
     CaptureAndResetTimingCounters(&snapshot);
     assert(snapshot.drawCalls==2 && snapshot.drawTicks==20 && snapshot.enabled);
     assert(snapshot.depthBusyCalls==3 && snapshot.depthIdleCalls==2);
@@ -107,7 +124,7 @@ int main() {
         source = (ROOT/'sources/xenos/core.cpp').read_text()
         body = function(source, 'PixelDepth(int id, const std::set<std::pair<float, float> >& coords) {')
         probe = body.index('depth_texture->IsBusy()')
-        guard = body.rfind('if (timing_enabled)', 0, probe)
+        guard = body.rfind('if (timing_enabled && detailed_timing_enabled)', 0, probe)
         lock = body.index('depth_texture->LockRect(')
         self.assertGreater(guard, body.index('if (!b.depth_stored)'))
         self.assertLess(probe, lock)

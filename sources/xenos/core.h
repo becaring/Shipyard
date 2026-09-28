@@ -64,6 +64,9 @@ struct NativeTimingCounters {
 };
 // A false-to-true transition starts a fresh interval. Repeated values preserve it.
 void SetTimingEnabled(bool enabled);
+// Opt-in diagnostic work: tile coverage scans, ring-space queries and depth
+// busy-state sampling. Off by default; independent of ordinary elapsed timing.
+void SetDetailedTimingEnabled(bool enabled);
 // Render-thread-only, off by default. Applies only to a 1920x1080,
 // two-tile, single-sample target.
 void SetTilingGuardTrialEnabled(bool enabled);

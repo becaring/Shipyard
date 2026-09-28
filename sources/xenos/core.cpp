@@ -37,6 +37,7 @@ namespace {
 ShipyardXenos::ShaderCacheOps shader_cache_ops = {NULL, NULL};
 ShipyardXenos::NativeTimingCounters timing_counts;
 bool timing_enabled;
+bool detailed_timing_enabled;
 uint64_t timing_frequency;
 class NativeTimingScope {
     uint64_t* ticks;
@@ -856,9 +857,9 @@ void Draw(float* vertices, size_t count, size_t triangles) {
     BeginFramebuffer();
 #if SHIPYARD_XENOS_TILING_TRIALS
     bool tile1Only = false;
-    if (timing_enabled || tile1_predication_trial_enabled) {
+    if ((timing_enabled && detailed_timing_enabled) || tile1_predication_trial_enabled) {
         const Framebuffer& b = buffers[active_fb];
-        const bool profileTarget = timing_enabled && b.width == 1920 &&
+        const bool profileTarget = timing_enabled && detailed_timing_enabled && b.width == 1920 &&
                                    b.height == 1080 && b.tiles.size() == 2;
         const bool trialTarget = tile1_predication_trial_enabled && b.width == 1920 &&
                                  b.height == 1080 && b.tiles.size() == 2 && b.samples == 1;
@@ -888,7 +889,7 @@ void Draw(float* vertices, size_t count, size_t triangles) {
         }
     }
 #else
-    if (timing_enabled) {
+    if (timing_enabled && detailed_timing_enabled) {
         const Framebuffer& b = buffers[active_fb];
         if (b.width == 1920 && b.height == 1080 && b.tiles.size() == 2) {
             D3DVIEWPORT9 viewport;
@@ -909,7 +910,7 @@ void Draw(float* vertices, size_t count, size_t triangles) {
     }
 #endif
     const Framebuffer& ringFramebuffer = buffers[active_fb];
-    const bool probeRing = timing_enabled && ringFramebuffer.width == 1920 &&
+    const bool probeRing = timing_enabled && detailed_timing_enabled && ringFramebuffer.width == 1920 &&
                            ringFramebuffer.height == 1080 && ringFramebuffer.tiles.size() == 2;
     const ShipyardXenos::RingCursor ringBefore(
         probeRing ? (uintptr_t)xenos_device->m_pRing : 0,
@@ -1098,7 +1099,7 @@ void ClearFramebufferTargets(DWORD flags) {
 }
 bool ProfileTilingSpace() {
     const Framebuffer& b = buffers[active_fb];
-    return timing_enabled && b.width == 1920 && b.height == 1080 && b.tiles.size() == 2;
+    return timing_enabled && detailed_timing_enabled && b.width == 1920 && b.height == 1080 && b.tiles.size() == 2;
 }
 void QueryTilingSpace(DWORD* used, DWORD* remaining) {
     NativeTimingScope timing(timing_counts.tilingSpaceQueryTicks,
@@ -1546,7 +1547,7 @@ PixelDepth(int id, const std::set<std::pair<float, float> >& coords) {
         Shipyard_Log("initialized depth before first draw: framebuffer=%d samples=%u", id,
                      b.samples);
     }
-    if (timing_enabled) {
+    if (timing_enabled && detailed_timing_enabled) {
         // IsBusy is a nonblocking state sample. Do not pre-wait here: that
         // would change the LockRect schedule being measured.
         const bool busy = depth_texture->IsBusy() != FALSE;
@@ -1969,6 +1970,10 @@ void SetShaderCache(const ShaderCacheOps* operations) {
         shader_cache_ops.load = NULL;
         shader_cache_ops.store = NULL;
     }
+}
+void SetDetailedTimingEnabled(bool enabled) {
+    detailed_timing_enabled = enabled;
+    if (!enabled) tiling_space_probe.active = false;
 }
 void SetTimingEnabled(bool enabled) {
     if (enabled == timing_enabled)

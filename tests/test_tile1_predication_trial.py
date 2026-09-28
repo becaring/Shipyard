@@ -136,7 +136,7 @@ int main() {
         draw = function(source, 'void Draw(float* vertices, size_t count, size_t triangles) {')
         self.assertLess(draw.index('PrepareDrawState();'), draw.index('SubmitTile1PredicatedDraw('))
         self.assertLess(draw.index('ApplyAlpha();'), draw.index('SubmitTile1PredicatedDraw('))
-        self.assertIn('if (timing_enabled || tile1_predication_trial_enabled)', draw)
+        self.assertIn('if ((timing_enabled && detailed_timing_enabled) || tile1_predication_trial_enabled)', draw)
         self.assertIn('ClassifyTile1Predication(', draw)
         self.assertIn('Shipyard_Check(drawResult, "Shipyard DrawPrimitiveUP")', draw)
         self.assertNotIn('SetPredication(', draw)
