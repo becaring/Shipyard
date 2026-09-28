@@ -45,6 +45,7 @@
     "python/xbox360_platform/logging_core.py": "1900a00ee9da66f4c1a97874522e364bd33e3a8ca3554f518e30c86d45c19e06",
     "python/xbox360_platform/logging_queue.py": "e8a300dc6b0b9baea18d8f8fc3ae132f123c6257fdf8f4bde3b5cb0d36b00da3",
     "python/xbox360_platform/logging_syntax.py": "2d3824f24e12d654b85e9bb56fd6dff2612667c5c6644ba7287ed34b8ed82f5c",
+    "python/xbox360_platform/matrix_product.py": "bbf49f6f5c06652f65bd2ed24acc920b9a39d4e5e1aada0ebd100026a4ae3f01",
     "python/xbox360_platform/parallel_build.py": "9cff07d7a460e4e06d0e65b025c2a9560f4514cbcdf1ced050dd959f027d5563",
     "python/xbox360_platform/png.py": "fa3bf5e98292f16463a5ad517a0d81bb04262f5886698841e30f50ac64ff29f1",
     "python/xbox360_platform/prism.py": "dfb10f09f6528130edbef0eed9c36ee4ed8633c281daffc340b3d16b7c500aca",
