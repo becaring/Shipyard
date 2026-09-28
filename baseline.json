@@ -15,6 +15,7 @@
     "python/xbox360_platform/combiner_lookup.py": "bdb7c2158a8bfeeccf5f6e9e10a9a0d4c31c1ed89cdddd2258f02e7a8aa77b48",
     "python/xbox360_platform/console_variable_lookup.py": "51c95b3993809f19b671d482f8026fd02b23bd7a6b99267051db1eab35c449f4",
     "python/xbox360_platform/contract.py": "588fef79b831e0496021ee1341f20ca156ebf5fdb9f24f2eba8f68c3df87c165",
+    "python/xbox360_platform/controller_routes.py": "bd62b2c913de791c4cdde04b5695983fbb1ea64a81568fd593d1c1b6245ebbc6",
     "python/xbox360_platform/cpp_aggregate.py": "757f8770631b29a9d074d3b27e7e1a5a9a720e66b942c0d074c7352b25706dce",
     "python/xbox360_platform/cpp_bindings.py": "35ffa32753c20c6c2bc6dea9eb80c3cb5fae46cee0acd4117d8407d0a223e30c",
     "python/xbox360_platform/cpp_call_initializers.py": "9fe3231e57078ac57f5718a09f3151259aeb09ff5919cb77d421c89fb8354d4c",
