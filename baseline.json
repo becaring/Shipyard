@@ -79,6 +79,7 @@
     "sources/diagnostics/exception_filter.h": "59c0ada28c4e188c038d5e1e642fa9e4618038cccdec61e13598c35e091d252b",
     "sources/diagnostics/queue.cpp": "99a838c169bc5dd2ee2b4d41e8155d2ca59173c2a59479a4671f52048180bc8c",
     "sources/diagnostics/queue.h": "3ebf192779f813279b103f20e30fbfef260dae79f4785d17649264ee47f61e46",
+    "sources/diagnostics/timing_totals.h": "4071579c12571dc229cf95882fc679bd451d05281b84e9f51f1c6b94cb8065f5",
     "sources/entropy/lifecycle.h": "d4260b4d3ff1dac4e1988a0e066dbba420f8d81cfa6e826089df61757a34548b",
     "sources/entropy/native.h": "7f676343729585f991bdf5395a17c9e5cab2ea3ab10cd89e07071b607febafe6",
     "sources/environment/app_directories.h": "9612b9c018e2ee9ef9e6cda94053285c581fe3ee1abb5c7f21073a74b59e32be",
