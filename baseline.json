@@ -18,6 +18,7 @@
     "python/xbox360_platform/fast3d_triangle_certificate.py": "1d562b1676eaeb2bb5f11ae3b93c33eee37d22d02fbdc5896dd4a1401da9ac98",
     "python/xbox360_platform/fast3d_triangle_split.py": "d7d76b5b50f9f8e72b0ffea6f1cf7145bed6c71f94e19919d7a41dbe5d6d75f1",
     "python/xbox360_platform/gui_mouse_capture.py": "548d093680fd88b3cdf347c68e6e10ccc79d1aac8e526e18be544348f89bbcca",
+    "python/xbox360_platform/interpolation_pairing.py": "328ea22691c01d6e887d587de798633b21c4ebee901aeb8449e4ef5bc9d3a4bd",
     "python/xbox360_platform/json/__init__.py": "00cbce8da54f719cb9b23b0f03eab323dc2ecf0a5bc1dfa122f515e6bd1bda5b",
     "python/xbox360_platform/json/backend.py": "8c02ec02149d94ce71d728fe9bcd200f9c1bd8612a874eab78d158393d6b1b4b",
     "python/xbox360_platform/json/generate_algorithms.py": "f60fa96ac0616a745c93b7d809dbd358e28b8c691bffde78e223e63cf2b1aaf4",
