@@ -360,3 +360,32 @@ def texture_hash_cache_handler(source):
             }'''
     body = _once(body, old, new)
     return source[:begin] + body + source[end:]
+
+
+def settled_alternate_header(source):
+    return _once(source, '    ~ResourceManager();',
+        '    ~ResourceManager();\n    std::shared_ptr<IResource> GetSettledAlternate(const char* path);')
+
+
+def settled_alternate_source(source):
+    anchor='std::shared_ptr<IResource> ResourceManager::LoadResourceProcess(const char* filePath'
+    start=source.index(anchor)
+    return source[:start]+"""std::shared_ptr<IResource> ResourceManager::GetSettledAlternate(const char* path) {
+    if (!mAltAssetsEnabled) return std::shared_ptr<IResource>();
+    if (OtrSignatureCheck(path)) path += 7;
+    // The consumer preflight removes only one signature, and explicit alt paths
+    // intentionally evict that very resource. Preserve both exceptional paths.
+    const std::string& prefix = IResource::gAltAssetPrefix;
+    if (OtrSignatureCheck(path) || std::strncmp(path, prefix.c_str(), prefix.size()) == 0)
+        return std::shared_ptr<IResource>();
+    const Shipyard::Async::lock_guard<Shipyard::Async::mutex> lock(mMutex);
+    ResourceIdentifier base(path, mDefaultCacheOwner, mDefaultCacheArchive, ResourceIdentifier::BorrowedLookup());
+    if (mResourceCache.find(base) != mResourceCache.end()) return std::shared_ptr<IResource>();
+    ResourceIdentifier alternate(path, mDefaultCacheOwner, mDefaultCacheArchive,
+        ResourceIdentifier::BorrowedLookup(), prefix.data(), prefix.size());
+    const auto found = mResourceCache.find(alternate);
+    if (found == mResourceCache.end()) return std::shared_ptr<IResource>();
+    return GetCachedResource(found->second);
+}
+
+"""+source[start:]
