@@ -63,6 +63,10 @@ class ResourceLookupProjectionTests(unittest.TestCase):
         self.assertIn('!= ResourceLoadError::NotCached',result)
         self.assertNotIn('operator=(const ResourceIdentifier&',result)
         with self.assertRaises(ValueError): borrowed_cache_source(source.replace('Path == rhs.Path','Path != rhs.Path'))
+        rvalue = constructor.replace('const std::string& path', 'std::string&& path').replace('Path(path)', 'Path(std::move(path))')
+        with self.assertRaises(ValueError): borrowed_cache_source(source+rvalue)
+        selected = borrowed_cache_source(source+rvalue, owned_rvalue_constructor=True)
+        self.assertIn('Path(std::move(path)), Owner(owner), Parent(parent), mBorrowedPath(NULL)', selected)
 
     def test_stateless_signature_keeps_pointer_guards(self):
         prefix='int check(const char* imgData) {\n    if (!imgData || ((uintptr_t)imgData & 1)) return 0;\n    '

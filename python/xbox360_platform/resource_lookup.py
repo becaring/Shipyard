@@ -59,7 +59,7 @@ def borrowed_cache_header(source):
 ''' + anchor)
 
 
-def borrowed_cache_source(source):
+def borrowed_cache_source(source, *, owned_rvalue_constructor=False):
     signature = 'ResourceManager::GetCachedResource(xbox_compat::variant<ResourceLoadError, std::shared_ptr<IResource>> cacheLine)'
     begin = source.index(signature)
     end = source.index('\n}', begin) + 2
@@ -86,6 +86,13 @@ ResourceIdentifier::ResourceIdentifier(const char* path, uintptr_t owner,
       mBorrowedPrefix(prefix), mBorrowedPrefixLength(prefixLength) {
     mHash = CalculateHash();
 }''' + source[end:]
+    rvalue = ': Path(std::move(path)), Owner(owner), Parent(parent) {'
+    if owned_rvalue_constructor:
+        source = _once(source, rvalue,
+            ': Path(std::move(path)), Owner(owner), Parent(parent), mBorrowedPath(NULL), '
+            'mBorrowedLength(0), mBorrowedPrefix(""), mBorrowedPrefixLength(0) {')
+    elif rvalue in source:
+        raise ValueError('ResourceIdentifier rvalue constructor requires an explicit capability')
     source = _once(source, 'return Owner == rhs.Owner && Path == rhs.Path && Parent == rhs.Parent;',
         'return Owner == rhs.Owner && LookupView() == rhs.LookupView() && Parent == rhs.Parent;')
     source = _once(source, 'Shipyard::Resources::PathHash()(Path)',
@@ -139,6 +146,26 @@ ResourceIdentifier::ResourceIdentifier(const char* path, uintptr_t owner,
 
 ''' + source[start:]
     return '#include <cstring>\n' + source
+
+
+def drain_header(source):
+    return _once(source, '    ~ResourceManager();',
+        '    ~ResourceManager();\n    void WaitForPendingTasks();')
+
+
+def drain_source(source):
+    return _once(source, 'ResourceManager::~ResourceManager() {', '''void ResourceManager::WaitForPendingTasks() {
+    // Called by the application thread after producers stop, while Context lives.
+    if (mThreadPool) {
+        mThreadPool->unpause();
+        mThreadPool->wait();
+    }
+}
+
+ResourceManager::~ResourceManager() {
+    WaitForPendingTasks();
+    // Workers must leave before the cache mutex and other members are destroyed.
+    mThreadPool.reset();''')
 
 
 def stateless_signature(source):
