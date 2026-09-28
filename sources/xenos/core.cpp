@@ -100,11 +100,11 @@ struct Framebuffer {
     uint32_t width, height, samples;
     float shader_width, shader_height;
     TextureSampler sampler;
-    bool stored, depth_stored, render_target;
+    bool stored, depth_stored, render_target, hiz_capable;
     Framebuffer()
         : color(NULL), depth(NULL), image(NULL), width(0), height(0), samples(1), shader_width(0),
           shader_height(0), sampler(true), stored(false), depth_stored(false),
-          render_target(false) {
+          render_target(false), hiz_capable(false) {
         for (int i = 0; i < 4; ++i) {
             color_samples[i] = NULL;
             depth_samples[i] = NULL;
@@ -170,8 +170,10 @@ IDirect3DPixelShader9* restore_depth;
 IDirect3DVertexDeclaration9* restore_declaration;
 IDirect3DStateBlock9* restore_state;
 bool live_framebuffer, tile_constants_owned;
+int pending_game_depth_clear = -1;
 size_t tiling_draw_bytes;
 void BeginFramebuffer();
+void Clear(bool color, bool depth);
 void FinishFramebuffer(bool preserveDepth = true, bool preserveColor = true);
 void TilingSpaceBegin();
 void TilingSpaceSetup();
@@ -1140,14 +1142,32 @@ void TilingSpaceBeforeEnd() {
     QueryTilingSpace(&used, &remaining);
     tiling_space_probe.BeforeEnd(used, remaining);
 }
+bool FramebufferHiZCapable(bool owns_depth, uint32_t physical_width, uint32_t physical_height,
+                           D3DMULTISAMPLE_TYPE samples) {
+    return owns_depth &&
+           XGHierarchicalZSize(physical_width, physical_height, samples) <=
+               GPU_HIERARCHICAL_Z_TILES;
+}
+bool FreshFramebufferHiZ(bool capable, bool has_depth, bool retained_depth) {
+    return capable && has_depth && !retained_depth;
+}
 void BeginFramebuffer() {
     if (live_framebuffer)
         return;
+    if (pending_game_depth_clear == active_fb)
+        pending_game_depth_clear = -1;
     NativeTimingScope timing(timing_counts.framebufferSetupTicks, timing_counts.framebufferSetupCalls);
     InvalidateNativeState();
     Framebuffer& b = buffers[active_fb];
     if (!b.color)
         Shipyard_Fatal("framebuffer render surface unavailable", E_INVALIDARG);
+    const bool fresh_hiz = FreshFramebufferHiZ(b.hiz_capable, b.depth != NULL, b.depth_stored);
+    // The previous target may have owned the shared HiZ allocation. Keep tests
+    // disabled while the fresh depth clear seeds its metadata; force writes
+    // only across this setup bracket, then use automatic gating for game draws.
+    xenos_device->SetRenderState(D3DRS_HIZENABLE, D3DHIZ_DISABLE);
+    xenos_device->SetRenderState(D3DRS_HIZWRITEENABLE,
+                                 fresh_hiz ? D3DHIZ_ENABLE : D3DHIZ_DISABLE);
     D3DVIEWPORT9 viewport;
     xenos_device->GetViewport(&viewport);
     Shipyard_Check(xenos_device->SetRenderTarget(0, b.color), "bind framebuffer color");
@@ -1175,6 +1195,12 @@ void BeginFramebuffer() {
         }
         EndRestoreQuad(restore_constants);
     }
+    // Retained depth is copied without rebuilding HiZ metadata. A fresh depth
+    // clear initializes the metadata, including after a color-only restore.
+    xenos_device->SetRenderState(D3DRS_HIZENABLE,
+                                 fresh_hiz ? D3DHIZ_AUTOMATIC : D3DHIZ_DISABLE);
+    xenos_device->SetRenderState(D3DRS_HIZWRITEENABLE,
+                                 fresh_hiz ? D3DHIZ_AUTOMATIC : D3DHIZ_DISABLE);
     live_framebuffer = true;
     tiling_draw_bytes = 0;
     SetTileConstants();
@@ -1198,6 +1224,10 @@ void RebindSampledTextures() {
     }
 }
 void FinishFramebuffer(bool preserveDepth, bool preserveColor) {
+    // Reads, copies and target switches must observe the requested depth clear
+    // even when no game draw has materialized the target yet.
+    if (pending_game_depth_clear == active_fb)
+        BeginFramebuffer();
     if (!live_framebuffer)
         return;
     NativeTimingScope timing(timing_counts.framebufferResolveTicks, timing_counts.framebufferResolveCalls);
@@ -1270,7 +1300,7 @@ void FinishFramebuffer(bool preserveDepth, bool preserveColor) {
 }
 void Resolve(int id) {
     ValidateFramebuffer(id);
-    if (live_framebuffer && active_fb == id)
+    if (active_fb == id && (live_framebuffer || pending_game_depth_clear == id))
         FinishFramebuffer();
 }
 int NewFramebuffer() {
@@ -1399,7 +1429,11 @@ void UpdateFramebuffer(int id, uint32_t width, uint32_t height, uint32_t request
                        "framebuffer color surface");
     if (depth) {
         parameters.Base = color_tiles;
-        if (id == 0 && width == 1280 && height == 720 && samples == 1) {
+        const bool owns_depth = !(id == 0 && width == 1280 && height == 720 && samples == 1);
+        b.hiz_capable = FramebufferHiZCapable(owns_depth, tile_width, tile_height, msaa);
+        if (!b.hiz_capable)
+            parameters.HierarchicalZBase = 0xffffffffu;
+        if (!owns_depth) {
             b.depth = presentation_depth;
             b.depth->AddRef();
         } else
@@ -1445,11 +1479,37 @@ void BindFramebuffer(int id, float scale) {
     // Defer restoration until drawing or setting target-dependent viewport /
     // scissor state. A full color/depth clear may follow this bind.
 }
+void BeginGameDepthClear() {
+    if (live_framebuffer || !buffers[active_fb].depth) {
+        Clear(false, true);
+        return;
+    }
+    Framebuffer& b = buffers[active_fb];
+    ++framebuffer_clear_count;
+    if (b.stored && b.depth_stored)
+        framebuffer_depth_restore_avoided += b.samples;
+    b.depth_stored = false;
+    pending_game_depth_clear = active_fb;
+}
+bool TryDiscardGameColor() {
+    // The interpreter proves full opaque coverage before emitting its first
+    // color draw. Native state can still reject the hint; MSAA stays conservative.
+    if (pending_game_depth_clear != active_fb || live_framebuffer || !color_writes ||
+        !buffers[active_fb].depth || buffers[active_fb].samples != 1)
+        return false;
+    Framebuffer& b = buffers[active_fb];
+    if (b.stored)
+        framebuffer_restore_avoided += b.samples;
+    b.stored = false;
+    return true;
+}
 void Clear(bool color, bool depth) {
     if (!color && !depth)
         return;
     ++framebuffer_clear_count;
-    const bool begin_clears_both = !live_framebuffer && color && depth &&
+    const bool wasLive = live_framebuffer;
+    const bool begin_clears_depth = !wasLive && depth && !color && buffers[active_fb].depth;
+    const bool begin_clears_both = !wasLive && color && depth &&
                                    buffers[active_fb].depth && buffers[active_fb].tiles.size() == 1;
     if (!live_framebuffer) {
         Framebuffer& b = buffers[active_fb];
@@ -1468,9 +1528,10 @@ void Clear(bool color, bool depth) {
         }
     }
     BeginFramebuffer();
-    // Single-tile BeginFramebuffer has just cleared both attachments after
-    // the retained samples were discarded. No draw can occur before here.
-    if (begin_clears_both)
+    // A fresh tiled bracket clears depth/stencil for every tile; a fresh
+    // single-tile bracket clears depth when the retained depth was discarded.
+    // The existing full-clear shortcut applies only to single-tile targets.
+    if (begin_clears_depth || begin_clears_both)
         return;
     const DWORD flags =
         (color ? D3DCLEAR_TARGET : 0) |
@@ -1704,7 +1765,7 @@ void End() {
     }
     if (discardPresentationColor && !canDiscardPresentationColor)
         ++presentation_color_discard_blocked;
-    if (live_framebuffer || !buffers[active_fb].stored) {
+    if (live_framebuffer || pending_game_depth_clear == active_fb || !buffers[active_fb].stored) {
         BeginFramebuffer();
         if (active_fb == 0)
             FinishFramebuffer(!discardPresentationDepth, !canDiscardPresentationColor);
@@ -2204,6 +2265,12 @@ void CopyFramebuffer(int destination, int source, int sourceX0, int sourceY0, in
 }
 void ClearFramebuffer(bool color, bool depth) {
     ::Fast::Clear(color, depth);
+}
+void BeginGameFramebufferDepthClear() {
+    ::Fast::BeginGameDepthClear();
+}
+bool TryDiscardGameFramebufferColor() {
+    return ::Fast::TryDiscardGameColor();
 }
 void SetColorWriteMask(bool enabled) {
     color_writes = enabled;
