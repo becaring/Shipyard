@@ -7,6 +7,7 @@
 #include "tile_coverage.h"
 #include "tile1_predication_draw.h"
 #include "ring_probe.h"
+#include "sampler_certificate.h"
 
 #include "metrics.h"
 #include <xgraphics.h>
@@ -198,6 +199,7 @@ typedef char NativeConstantsAligned[(__alignof(NativeStateCache) >= 16 &&
 // A prepared draw reuses the existing native-state payloads; no resource pointer
 // is retained. Mutations and external drawing revoke this render-thread certificate.
 bool draw_state_prepared;
+ShipyardXenos::SamplerCertificate sampler_certificate;
 unsigned draw_sampler_mask;
 ShipyardNativeStateCounts native_state_counts;
 unsigned binding_attempted, binding_written, binding_suppressed;
@@ -205,6 +207,7 @@ const D3DSAMPLERSTATETYPE sampler_fields[5] = {
     D3DSAMP_MINFILTER, D3DSAMP_MAGFILTER, D3DSAMP_MIPFILTER, D3DSAMP_ADDRESSU, D3DSAMP_ADDRESSV};
 
 void InvalidateNativeState() {
+    sampler_certificate.Invalidate();
     depth_clip.Invalidate();
     primitive_depth_valid = false;
     draw_state_prepared = false;
@@ -320,6 +323,10 @@ void SetNativeBindingConstants(const float* values) {
 }
 
 template <int tile> void ApplySamplerSlot(const TextureSampler& sampler) {
+    const bool logical_change = sampler_certificate.Update(
+        tile, sampler.linear, sampler.s, sampler.t, unsigned(filtering));
+    if (!native_state.sampler_valid[tile] || logical_change)
+        draw_state_prepared = false;
     const unsigned key = sampler.key | filtering_key;
     if (native_state.sampler_valid[tile] && native_state.sampler_key[tile] == key) {
         native_state_counts.sampler_attempted += 5;
@@ -364,7 +371,6 @@ template <int tile> void ApplySamplerSlot(const TextureSampler& sampler) {
 }
 
 void ApplySampler(int tile, const TextureSampler& sampler) {
-    draw_state_prepared = false;
     switch (tile) {
     case 0:
         ApplySamplerSlot<0>(sampler);
