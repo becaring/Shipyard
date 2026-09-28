@@ -5,6 +5,7 @@
 #include "tile_coverage.h"
 #include "tile1_predication_draw.h"
 #include "ring_probe.h"
+#include "sampler_certificate.h"
 
 #include "xenos_backend.h"
 #include "metrics.h"
@@ -14,6 +15,15 @@
 #include <stdio.h>
 #include <map>
 #include <algorithm>
+
+#ifndef SHIPYARD_XENOS_DIAGNOSTICS
+#define SHIPYARD_XENOS_DIAGNOSTICS 0
+#endif
+#if SHIPYARD_XENOS_DIAGNOSTICS
+#define SHIPYARD_DIAGNOSTIC(statement) do { statement; } while (0)
+#else
+#define SHIPYARD_DIAGNOSTIC(statement) do { } while (0)
+#endif
 
 namespace Fast {
 // The graphics device is created during display initialization and released by Shutdown().
@@ -33,6 +43,7 @@ ShipyardXenos::ShaderCacheOps shader_cache_ops = {NULL, NULL};
 ShipyardXenos::NativeTimingCounters timing_counts;
 bool timing_enabled;
 uint64_t timing_frequency;
+#if SHIPYARD_XENOS_DIAGNOSTICS
 class NativeTimingScope {
     uint64_t* ticks;
     LARGE_INTEGER started;
@@ -52,6 +63,12 @@ public:
         }
     }
 };
+#else
+class NativeTimingScope {
+public:
+    NativeTimingScope(uint64_t&, unsigned&) {}
+};
+#endif
 
 struct TextureSampler {
     bool linear;
@@ -168,6 +185,7 @@ void Resolve(int id);
 unsigned frame_number;
 float shader_frame_number;
 float noise_scale = 1;
+float noise_scale_input = 1;
 FilteringMode filtering = FILTER_THREE_POINT;
 unsigned filtering_key = unsigned(FILTER_THREE_POINT) << 4;
 
@@ -193,6 +211,7 @@ typedef char NativeConstantsAligned[(__alignof(NativeStateCache) >= 16 &&
 // A prepared draw reuses the existing native-state payloads; no resource pointer
 // is retained. Mutations and external drawing revoke this render-thread certificate.
 bool draw_state_prepared;
+ShipyardXenos::SamplerCertificate sampler_certificate;
 unsigned draw_sampler_mask;
 ShipyardNativeStateCounts native_state_counts;
 ShipyardXenos::NativeAlphaHistogram alpha_histogram;
@@ -202,6 +221,7 @@ const D3DSAMPLERSTATETYPE sampler_fields[5] = {
 
 void InvalidateNativeState() {
     draw_state_prepared = false;
+    sampler_certificate.Invalidate();
     for (int i = 0; i < 6; ++i) {
         native_state.sampler_valid[i] = false;
     }
@@ -257,11 +277,11 @@ __forceinline bool SameNativeConstants(const float* constants) {
     return (condition & 0x80) != 0; // XDK XM_CRMASK_CR6TRUE: all lanes equal.
 }
 void SetNativeConstants(const float* constants) {
-    ++native_state_counts.constants_attempted;
+    SHIPYARD_DIAGNOSTIC(++native_state_counts.constants_attempted);
     if (native_state.constants_valid && SameNativeConstants(constants)) {
         if (Shipyard_VerifyFast3DReuse())
             VerifyNativeConstants(constants);
-        ++native_state_counts.constants_suppressed;
+        SHIPYARD_DIAGNOSTIC(++native_state_counts.constants_suppressed);
         return;
     }
     // One small upload is cheaper than scalar range scans and split SDK calls.
@@ -271,7 +291,7 @@ void SetNativeConstants(const float* constants) {
     __stvx(__lvx(constants, 16), native_state.constants, 16);
     __stvx(__lvx(constants, 32), native_state.constants, 32);
     native_state.constants_valid = true;
-    ++native_state_counts.constants_written;
+    SHIPYARD_DIAGNOSTIC(++native_state_counts.constants_written);
 }
 
 __declspec(noinline) void VerifyNativeBindingConstants(const float* values) {
@@ -283,24 +303,26 @@ __declspec(noinline) void VerifyNativeBindingConstants(const float* values) {
 }
 
 void SetNativeBindingConstants(const float* values) {
-    ++binding_attempted;
+    SHIPYARD_DIAGNOSTIC(++binding_attempted);
     float* cached = native_state.binding_constants;
     typedef char
         BindingConstantsAligned[(offsetof(NativeStateCache, binding_constants) % 16 == 0) ? 1 : -1];
-    const __vector4 d0 = __vxor(__lvx(cached, 0), __lvx(values, 0));
-    const __vector4 d1 = __vxor(__lvx(cached, 16), __lvx(values, 16));
-    const __vector4 d2 = __vxor(__lvx(cached, 32), __lvx(values, 32));
-    const __vector4 d3 = __vxor(__lvx(cached, 48), __lvx(values, 48));
-    const __vector4 d4 = __vxor(__lvx(cached, 64), __lvx(values, 64));
-    const __vector4 d5 = __vxor(__lvx(cached, 80), __lvx(values, 80));
-    unsigned condition;
-    __vcmpequwR(__vor(__vor(__vor(d0, d1), __vor(d2, d3)), __vor(d4, d5)), __vspltisw(0),
-                &condition);
-    if (native_state.binding_constants_valid && (condition & 0x80) != 0) {
-        if (Shipyard_VerifyFast3DReuse())
-            VerifyNativeBindingConstants(values);
-        ++binding_suppressed;
-        return;
+    if (native_state.binding_constants_valid) {
+        const __vector4 d0 = __vxor(__lvx(cached, 0), __lvx(values, 0));
+        const __vector4 d1 = __vxor(__lvx(cached, 16), __lvx(values, 16));
+        const __vector4 d2 = __vxor(__lvx(cached, 32), __lvx(values, 32));
+        const __vector4 d3 = __vxor(__lvx(cached, 48), __lvx(values, 48));
+        const __vector4 d4 = __vxor(__lvx(cached, 64), __lvx(values, 64));
+        const __vector4 d5 = __vxor(__lvx(cached, 80), __lvx(values, 80));
+        unsigned condition;
+        __vcmpequwR(__vor(__vor(__vor(d0, d1), __vor(d2, d3)), __vor(d4, d5)), __vspltisw(0),
+                    &condition);
+        if ((condition & 0x80) != 0) {
+            if (Shipyard_VerifyFast3DReuse())
+                VerifyNativeBindingConstants(values);
+            SHIPYARD_DIAGNOSTIC(++binding_suppressed);
+            return;
+        }
     }
     Shipyard_Check(xenos_device->SetPixelShaderConstantF(8, values, 6), "binding constants");
     __stvx(__lvx(values, 0), cached, 0);
@@ -310,14 +332,18 @@ void SetNativeBindingConstants(const float* values) {
     __stvx(__lvx(values, 64), cached, 64);
     __stvx(__lvx(values, 80), cached, 80);
     native_state.binding_constants_valid = true;
-    ++binding_written;
+    SHIPYARD_DIAGNOSTIC(++binding_written);
 }
 
 template <int tile> void ApplySamplerSlot(const TextureSampler& sampler) {
+    const bool logical_change = sampler_certificate.Update(
+        tile, sampler.linear, sampler.s, sampler.t, unsigned(filtering));
+    if (!native_state.sampler_valid[tile] || logical_change)
+        draw_state_prepared = false;
     const unsigned key = sampler.key | filtering_key;
     if (native_state.sampler_valid[tile] && native_state.sampler_key[tile] == key) {
-        native_state_counts.sampler_attempted += 5;
-        native_state_counts.sampler_suppressed += 5;
+        SHIPYARD_DIAGNOSTIC(native_state_counts.sampler_attempted += 5);
+        SHIPYARD_DIAGNOSTIC(native_state_counts.sampler_suppressed += 5);
         if (Shipyard_VerifyFast3DReuse())
             VerifyNativeSampler(tile, native_state.sampler[tile]);
         return;
@@ -332,12 +358,12 @@ template <int tile> void ApplySamplerSlot(const TextureSampler& sampler) {
                             : (sampler.t & 1) ? D3DTADDRESS_MIRROR
                                               : D3DTADDRESS_WRAP;
     DWORD* cached = native_state.sampler[tile];
-    native_state_counts.sampler_attempted += 5;
+    SHIPYARD_DIAGNOSTIC(native_state_counts.sampler_attempted += 5);
     if (native_state.sampler_valid[tile] && cached[0] == filter && cached[1] == filter &&
         cached[2] == D3DTEXF_NONE && cached[3] == address_u && cached[4] == address_v) {
         if (Shipyard_VerifyFast3DReuse())
             VerifyNativeSampler(tile, cached);
-        native_state_counts.sampler_suppressed += 5;
+        SHIPYARD_DIAGNOSTIC(native_state_counts.sampler_suppressed += 5);
         return;
     }
     // A real change must not rewrite the other four independent fields.
@@ -345,9 +371,9 @@ template <int tile> void ApplySamplerSlot(const TextureSampler& sampler) {
     if (!native_state.sampler_valid[tile] || cached[index] != (DWORD)(value)) {                    \
         xenos_device->SetSamplerState(tile, field, value);                                         \
         cached[index] = (DWORD)(value);                                                            \
-        ++native_state_counts.sampler_written;                                                     \
+        SHIPYARD_DIAGNOSTIC(++native_state_counts.sampler_written);                                \
     } else                                                                                         \
-        ++native_state_counts.sampler_suppressed
+        SHIPYARD_DIAGNOSTIC(++native_state_counts.sampler_suppressed)
     SHIPYARD_SAMPLER_FIELD(0, D3DSAMP_MINFILTER, filter);
     SHIPYARD_SAMPLER_FIELD(1, D3DSAMP_MAGFILTER, filter);
     SHIPYARD_SAMPLER_FIELD(2, D3DSAMP_MIPFILTER, D3DTEXF_NONE);
@@ -358,7 +384,6 @@ template <int tile> void ApplySamplerSlot(const TextureSampler& sampler) {
 }
 
 void ApplySampler(int tile, const TextureSampler& sampler) {
-    draw_state_prepared = false;
     switch (tile) {
     case 0:
         ApplySamplerSlot<0>(sampler);
@@ -608,7 +633,7 @@ void Upload(const uint8_t* bytes, uint32_t width, uint32_t height) {
     Texture& tex = textures[id];
     if (!width || !height || width > 4096 || height > 4096)
         Shipyard_Fatal("texture dimensions", E_INVALIDARG);
-    ++upload_counts.requests;
+    SHIPYARD_DIAGNOSTIC(++upload_counts.requests);
     const size_t size = width * height * 4;
     if (timing_enabled)
         timing_counts.uploadBytes += size;
@@ -616,14 +641,25 @@ void Upload(const uint8_t* bytes, uint32_t width, uint32_t height) {
     if (size <= UPLOAD_SNAPSHOT_BYTES && tex.native && snapshot.native == tex.native &&
         snapshot.id == id && snapshot.width == width && snapshot.height == height &&
         snapshot.rgba.size() == size && memcmp(&snapshot.rgba[0], bytes, size) == 0) {
-        if (Shipyard_VerifyFast3DReuse())
+        const bool verify_reuse = Shipyard_VerifyFast3DReuse();
+        if (verify_reuse)
             VerifyTextureUpload(tex, bytes);
-        ++upload_counts.reused;
-        upload_counts.bytes_saved += size;
-        // The upload target is already selected. The full rebind below owns
-        // the native binding and sampler update for every alias.
+        SHIPYARD_DIAGNOSTIC(++upload_counts.reused);
+        SHIPYARD_DIAGNOSTIC(upload_counts.bytes_saved += size);
+        const bool framebuffer_transition = selected_fb[upload_tile] >= 0;
         selected_fb[upload_tile] = -1;
-        RebindSampledTextures();
+        if (verify_reuse) {
+            // Readback verification may have closed and reopened the render
+            // target, invalidating native texture bindings.
+            RebindSampledTextures();
+        } else {
+            if (framebuffer_transition) {
+                draw_state_prepared = false;
+                Shipyard_Check(SetNativeTexture(upload_tile, tex.native), "rebind upload target");
+                native_state.sampler_valid[upload_tile] = false;
+                ApplySampler(upload_tile, tex.sampler);
+            }
+        }
         return;
     }
     snapshot.native = NULL;
@@ -876,7 +912,7 @@ void Draw(float* vertices, size_t count, size_t triangles) {
                                        (UINT)(current_shader->floats * 4));
     Shipyard_Check(drawResult, "Shipyard DrawPrimitiveUP");
     if (timing_enabled)
-        alpha_histogram.Record(native_state.alpha_mode, (unsigned)triangles);
+        SHIPYARD_DIAGNOSTIC(alpha_histogram.Record(native_state.alpha_mode, (unsigned)triangles));
     const bool trialNeedsFinish = trialContinued && !GuardTrialAfterDraw();
     if (probeRing) {
         const ShipyardXenos::RingCursor ringAfter(
@@ -969,10 +1005,9 @@ void SetTileConstants() {
         xenos_device->SetPixelShaderConstantF(4, zero, 1);
     }
 }
-void RestoreQuad(IDirect3DTexture9* color, IDirect3DTexture9* depth, uint32_t width,
-                 uint32_t height, DWORD sample_mask, const float* copy_quad = NULL) {
+bool BeginRestoreQuad(uint32_t width, uint32_t height, bool has_depth) {
     InvalidateNativeState();
-    bool restore_constants = tile_constants_owned;
+    const bool restore_constants = tile_constants_owned;
     StopTileConstants();
     Shipyard_Check(restore_state->Capture(), "capture framebuffer copy state");
     D3DVIEWPORT9 viewport = {0, 0, width, height, 0, 1};
@@ -980,10 +1015,10 @@ void RestoreQuad(IDirect3DTexture9* color, IDirect3DTexture9* depth, uint32_t wi
     xenos_device->SetRenderState(D3DRS_VIEWPORTENABLE, TRUE);
     xenos_device->SetRenderState(D3DRS_HALFPIXELOFFSET, TRUE);
     xenos_device->SetVertexShader(restore_vertex);
-    xenos_device->SetPixelShader(depth ? restore_depth : restore_color);
+    xenos_device->SetPixelShader(has_depth ? restore_depth : restore_color);
     xenos_device->SetVertexDeclaration(restore_declaration);
-    xenos_device->SetRenderState(D3DRS_ZENABLE, depth != NULL);
-    xenos_device->SetRenderState(D3DRS_ZWRITEENABLE, depth != NULL);
+    xenos_device->SetRenderState(D3DRS_ZENABLE, has_depth);
+    xenos_device->SetRenderState(D3DRS_ZWRITEENABLE, has_depth);
     xenos_device->SetRenderState(D3DRS_ZFUNC, D3DCMP_ALWAYS);
     xenos_device->SetRenderState(D3DRS_HIZENABLE, FALSE);
     xenos_device->SetRenderState(D3DRS_HIZWRITEENABLE, FALSE);
@@ -1000,16 +1035,21 @@ void RestoreQuad(IDirect3DTexture9* color, IDirect3DTexture9* depth, uint32_t wi
     xenos_device->SetRenderState(D3DRS_DEPTHBIAS, 0);
     xenos_device->SetRenderState(D3DRS_SLOPESCALEDEPTHBIAS, 0);
     xenos_device->SetRenderState(D3DRS_MULTISAMPLEANTIALIAS, TRUE);
+    return restore_constants;
+}
+void DrawRestoreQuadSample(IDirect3DTexture9* color, IDirect3DTexture9* depth,
+                           DWORD sample_mask, const float* copy_quad, bool configure_sampler) {
     xenos_device->SetRenderState(D3DRS_MULTISAMPLEMASK, sample_mask);
     SetNativeTexture(0, color);
     SetNativeTexture(1, depth);
-    for (int sampler = 0; sampler < 2; ++sampler) {
-        xenos_device->SetSamplerState(sampler, D3DSAMP_MINFILTER, D3DTEXF_POINT);
-        xenos_device->SetSamplerState(sampler, D3DSAMP_MAGFILTER, D3DTEXF_POINT);
-        xenos_device->SetSamplerState(sampler, D3DSAMP_MIPFILTER, D3DTEXF_NONE);
-        xenos_device->SetSamplerState(sampler, D3DSAMP_ADDRESSU, D3DTADDRESS_CLAMP);
-        xenos_device->SetSamplerState(sampler, D3DSAMP_ADDRESSV, D3DTADDRESS_CLAMP);
-    }
+    if (configure_sampler)
+        for (int sampler = 0; sampler < 2; ++sampler) {
+            xenos_device->SetSamplerState(sampler, D3DSAMP_MINFILTER, D3DTEXF_POINT);
+            xenos_device->SetSamplerState(sampler, D3DSAMP_MAGFILTER, D3DTEXF_POINT);
+            xenos_device->SetSamplerState(sampler, D3DSAMP_MIPFILTER, D3DTEXF_NONE);
+            xenos_device->SetSamplerState(sampler, D3DSAMP_ADDRESSU, D3DTADDRESS_CLAMP);
+            xenos_device->SetSamplerState(sampler, D3DSAMP_ADDRESSV, D3DTADDRESS_CLAMP);
+        }
     // Xenos HALFPIXELOFFSET already aligns pixel and texel centers. Adding a
     // desktop D3D9 half-pixel translation again shifts retained color/depth on
     // every restore (notably when a newly drawn glyph replaces a cached texture).
@@ -1020,10 +1060,18 @@ void RestoreQuad(IDirect3DTexture9* color, IDirect3DTexture9* depth, uint32_t wi
     Shipyard_Check(xenos_device->DrawPrimitiveUP(D3DPT_TRIANGLELIST, 2,
                                                  copy_quad ? copy_quad : quad, 4 * sizeof(float)),
                    "restore framebuffer samples");
+}
+void EndRestoreQuad(bool restore_constants) {
     Shipyard_Check(restore_state->Apply(), "restore framebuffer copy state");
     InvalidateNativeState();
     if (restore_constants)
         SetTileConstants();
+}
+void RestoreQuad(IDirect3DTexture9* color, IDirect3DTexture9* depth, uint32_t width,
+                 uint32_t height, DWORD sample_mask, const float* copy_quad = NULL) {
+    const bool restore_constants = BeginRestoreQuad(width, height, depth != NULL);
+    DrawRestoreQuadSample(color, depth, sample_mask, copy_quad, true);
+    EndRestoreQuad(restore_constants);
 }
 void ClearFramebufferTargets(DWORD flags) {
     NativeTimingScope timing(timing_counts.framebufferClearTicks, timing_counts.framebufferClearCalls);
@@ -1118,12 +1166,15 @@ void BeginFramebuffer() {
     }
     // Each MSAA fragment is retained independently. Resolving only the averaged
     // image here would destroy edge coverage and subsequent depth tests.
-    if (b.stored)
+    if (b.stored) {
+        const bool restore_constants = BeginRestoreQuad(b.width, b.height, b.depth_stored);
         for (uint32_t sample = 0; sample < b.samples; ++sample) {
-            RestoreQuad(b.samples > 1 ? b.color_samples[sample] : b.image,
-                        b.depth_stored ? b.depth_samples[sample] : NULL, b.width, b.height,
-                        b.samples > 1 ? 1u << sample : ~0u);
+            DrawRestoreQuadSample(b.samples > 1 ? b.color_samples[sample] : b.image,
+                                  b.depth_stored ? b.depth_samples[sample] : NULL,
+                                  b.samples > 1 ? 1u << sample : ~0u, NULL, sample == 0);
         }
+        EndRestoreQuad(restore_constants);
+    }
     live_framebuffer = true;
     tiling_draw_bytes = 0;
     SetTileConstants();
@@ -1219,10 +1270,8 @@ void FinishFramebuffer(bool preserveDepth, bool preserveColor) {
 }
 void Resolve(int id) {
     ValidateFramebuffer(id);
-    if (live_framebuffer && active_fb == id) {
+    if (live_framebuffer && active_fb == id)
         FinishFramebuffer();
-        BeginFramebuffer();
-    }
 }
 int NewFramebuffer() {
     if (!free_framebuffers.empty()) {
@@ -1388,9 +1437,10 @@ void BindFramebuffer(int id, float scale) {
     if (active_fb != id)
         FinishFramebuffer();
     active_fb = id;
-    if (scale != 0) {
+    if (scale != 0 && scale != noise_scale_input) {
         draw_state_prepared = false;
         noise_scale = 1.0f / scale;
+        noise_scale_input = scale;
     }
     // Defer restoration until drawing or setting target-dependent viewport /
     // scissor state. A full color/depth clear may follow this bind.
@@ -1563,6 +1613,8 @@ void DeleteTexture(uint32_t id) {
     }
 }
 void Filter(FilteringMode mode) {
+    if (filtering == mode)
+        return;
     draw_state_prepared = false;
     filtering = mode;
     filtering_key = unsigned(mode) << 4;
@@ -1652,13 +1704,25 @@ void End() {
     }
     if (discardPresentationColor && !canDiscardPresentationColor)
         ++presentation_color_discard_blocked;
-    BeginFramebuffer();
-    if (active_fb == 0)
-        FinishFramebuffer(!discardPresentationDepth, !canDiscardPresentationColor);
-    else
-        FinishFramebuffer();
+    if (live_framebuffer || !buffers[active_fb].stored) {
+        BeginFramebuffer();
+        if (active_fb == 0)
+            FinishFramebuffer(!discardPresentationDepth, !canDiscardPresentationColor);
+        else
+            FinishFramebuffer();
+    } else if (active_fb == 0) {
+        // A read-only framebuffer image already completed the resolve. Keep
+        // that result until the next actual draw, and apply end-of-frame
+        // discard policy without restoring its old contents first.
+        if (discardPresentationDepth)
+            buffers[0].depth_stored = false;
+        if (canDiscardPresentationColor)
+            buffers[0].stored = false;
+    }
     if (active_fb != 0) {
         active_fb = 0;
+        // Another target may have occupied the shared EDRAM even when the
+        // presentation image was already resolved. It still needs restoration.
         BeginFramebuffer();
         FinishFramebuffer(!discardPresentationDepth, !canDiscardPresentationColor);
     }
@@ -1905,6 +1969,13 @@ void SetShaderCache(const ShaderCacheOps* operations) {
     }
 }
 void SetTimingEnabled(bool enabled) {
+#if !SHIPYARD_XENOS_DIAGNOSTICS
+    // The normal XEX contains no hot-path diagnostic writes or timing reads.
+    // An explicitly instrumented build defines SHIPYARD_XENOS_DIAGNOSTICS=1.
+    (void)enabled;
+    timing_enabled = false;
+    return;
+#else
     if (enabled == timing_enabled)
         return;
     memset(&timing_counts, 0, sizeof(timing_counts));
@@ -1915,6 +1986,7 @@ void SetTimingEnabled(bool enabled) {
         QueryPerformanceFrequency(&frequency);
         timing_frequency = (uint64_t)frequency.QuadPart;
     }
+#endif
 }
 void SetTilingGuardTrialEnabled(bool enabled) {
     if (tiling_guard_trial_enabled == enabled) return;
