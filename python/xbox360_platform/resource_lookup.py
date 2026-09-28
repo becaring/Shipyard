@@ -360,3 +360,18 @@ def texture_hash_cache_handler(source):
             }'''
     body = _once(body, old, new)
     return source[:begin] + body + source[end:]
+
+
+def synchronous_cache_hit(source):
+    """Use the existing authoritative cache policy before constructing a future."""
+    anchor = '    auto resource = LoadResourceAsync(identifier, loadExact, BS::pr::highest, initData).get();'
+    return _once(source, anchor, """    std::shared_ptr<IResource> cached;
+    if (OtrSignatureCheck(identifier.Path.c_str())) {
+        std::string normalizedPath = identifier.Path.substr(7);
+        while (OtrSignatureCheck(normalizedPath.c_str())) normalizedPath.erase(0, 7);
+        cached = GetCachedResource(ResourceIdentifier(normalizedPath, identifier.Owner, identifier.Parent), loadExact);
+    } else {
+        cached = GetCachedResource(identifier, loadExact);
+    }
+    if (cached) return cached;
+""" + anchor)
