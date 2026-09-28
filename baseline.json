@@ -25,7 +25,7 @@
     "python/xbox360_platform/cpp_literals.py": "eb7342f7e84e14df25d250e77f3fbaef45237dc510e22e4a3ca64564d069aef0",
     "python/xbox360_platform/cpp_maps.py": "179bb31dcc743757c123232f78f145300fcf3e7b8cc1fbbee4b02095ab66b185",
     "python/xbox360_platform/cpp_syntax.py": "e44a7a2023d9a253d9221f15bc58d8ddc8a2a620f9b7c401682e315d768a05c2",
-    "python/xbox360_platform/fast3d_opcode.py": "96c9aba7254c62ac0c6e0bf4e216afb38b0cad093be7aec32e7023dadecaca20",
+    "python/xbox360_platform/fast3d_opcode.py": "ccfcc82f14de7a62b0b4b464e55337b61f71f5c38969a8e571a79948a619e640",
     "python/xbox360_platform/fast3d_triangle_certificate.py": "1d562b1676eaeb2bb5f11ae3b93c33eee37d22d02fbdc5896dd4a1401da9ac98",
     "python/xbox360_platform/fast3d_triangle_split.py": "d7d76b5b50f9f8e72b0ffea6f1cf7145bed6c71f94e19919d7a41dbe5d6d75f1",
     "python/xbox360_platform/gfxd.py": "c93ee007ea09a6069afaba23ef6819b9e7cb97ed7f4654fc5061394932affde7",
