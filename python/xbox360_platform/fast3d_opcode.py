@@ -1,5 +1,7 @@
 """Lower pinned Fast3D opcode tables for the XDK compiler."""
 
+import re
+
 FAST3D_TABLES = ('rdpHandlers', 'otrHandlers', 'f3dex2Handlers',
                  'f3dexHandlers', 'f3dHandlers', 's2dexHandlers')
 
@@ -10,7 +12,28 @@ def _once(text, old, new):
     return text.replace(old, new, 1)
 
 
+def remove_unused_directory(text):
+    """Drop write-only directory storage; reject any new reader in pinned input."""
+    if len(re.findall(r"\bcurrentDir\b", text)) != 3 or len(re.findall(r"\bGetPathWithoutFileName\b", text)) != 2:
+        raise ValueError("Directory storage reference inventory changed")
+    text = _once(text, "std::stack<std::string> currentDir;", "")
+    text = _once(text, "    currentDir = std::stack<std::string>();", "")
+    helper = re.compile(r"^static std::string GetPathWithoutFileName\(char\* filePath\) \{.*?^\}", re.M | re.S)
+    text, count = helper.subn("", text)
+    if count != 1:
+        raise ValueError("Directory parser shape changed")
+    push = re.compile(r"^void gfx_push_current_dir\(char\* path\) \{.*?^\}", re.M | re.S)
+    original = push.findall(text)
+    expected = "void gfx_push_current_dir(char* path) { if (gfx_check_image_signature(path) == 1) path = &path[7]; currentDir.push(GetPathWithoutFileName(path)); }"
+    if len(original) != 1 or " ".join(original[0].split()) != expected:
+        raise ValueError("Directory command shape changed")
+    text = push.sub("void gfx_push_current_dir(char* path) {\n    (void)gfx_check_image_signature(path);\n}", text)
+    return text
+
+
 def lower(text, parser, walk, expected_tables):
+    if "gfx_push_current_dir" in text:
+        text = remove_unused_directory(text)
     start = text.index('class UcodeHandler {')
     end = text.index('\n};', start) + 3
     cls = text[start:end]
