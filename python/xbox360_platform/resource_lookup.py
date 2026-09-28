@@ -10,20 +10,29 @@ def _once(source, old, new):
 def synchronous_cache_hits(source):
     """Return settled synchronous hits without constructing a ready future.
 
-    Use the version's own cache policy; leave normalization and misses to its
-    existing asynchronous path, including owner/archive and init-data handling.
+    Probe normalized tagged names with the version's own cache policy. Leave
+    misses to its asynchronous path, including its init-data normalization rules.
     """
     signature = 'std::shared_ptr<IResource> ResourceManager::LoadResource(const ResourceIdentifier& identifier, bool loadExact,'
     if source.count(signature) != 1:
         raise ValueError('synchronous resource load signature changed')
+    normalization = '''auto newFilePath = identifier.Path.substr(7);
+        return LoadResourceAsync(ResourceIdentifier(newFilePath, identifier.Owner, identifier.Parent), loadExact, priority);'''
+    if source.count(normalization) != 1:
+        raise ValueError('asynchronous resource normalization policy changed')
     start = source.index(signature)
     end = source.index('\n}', start) + 2
     body = _once(source[start:end],
         '    auto resource = LoadResourceAsync(identifier, loadExact, BS::pr::highest, initData).get();',
-        '''    if (!OtrSignatureCheck(identifier.Path.c_str())) {
-        std::shared_ptr<IResource> cached = GetCachedResource(identifier, loadExact);
-        if (cached) return cached;
+        '''    std::shared_ptr<IResource> cached;
+    if (OtrSignatureCheck(identifier.Path.c_str())) {
+        std::string normalizedPath = identifier.Path.substr(7);
+        while (OtrSignatureCheck(normalizedPath.c_str())) normalizedPath.erase(0, 7);
+        cached = GetCachedResource(ResourceIdentifier(normalizedPath, identifier.Owner, identifier.Parent), loadExact);
+    } else {
+        cached = GetCachedResource(identifier, loadExact);
     }
+    if (cached) return cached;
     auto resource = LoadResourceAsync(identifier, loadExact, BS::pr::highest, initData).get();''')
     return source[:start] + body + source[end:]
 
