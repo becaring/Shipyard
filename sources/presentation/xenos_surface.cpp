@@ -1,5 +1,6 @@
 #include "xenos_surface.h"
 #include "xenos_pacing.h"
+#include "xenos_swap_chain.h"
 
 namespace Shipyard {
 XenosPresentationSurface::XenosPresentationSurface() : device(NULL) {}
@@ -26,7 +27,7 @@ HRESULT XenosPresentationSurface::Prepare(double (*now)(), bool* ready) {
 }
 
 HRESULT XenosPresentationSurface::Present() {
-    return device ? device->Present(NULL, NULL, NULL, NULL) : E_INVALIDARG;
+    return device ? XenosPresentationChain().Present() : E_INVALIDARG;
 }
 
 HRESULT XenosPresentationSurface::SetMaxFrameLatency(int frames) {

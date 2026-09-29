@@ -15,5 +15,10 @@ void DiscardPresentationDepthOnEnd();
 // Caller will not read the presentation framebuffer image after the next End().
 // The direct 720p presentation surface remains intact for Present().
 void DiscardPresentationColorOnEnd();
+// Publish the target's retained depth after an update's final replay. Until
+// RetireFramebufferDepth, depth reads of that target return the published
+// depth, and a later depth resolve of the target writes other storage.
+void PublishFramebufferDepth(int id);
+void RetireFramebufferDepth();
 }
 }

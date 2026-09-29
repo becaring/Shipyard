@@ -10,10 +10,10 @@ double Now() { return clockValue; }
 struct Device : IDirect3DDevice9 {
     DWORD refresh;
     DWORD state, value;
-    unsigned modes, presents;
-    HRESULT modeResult, stateResult, presentResult;
-    Device() : refresh(60), state(0), value(0), modes(0), presents(0),
-               modeResult(S_OK), stateResult(S_OK), presentResult(S_OK) {}
+    unsigned modes;
+    HRESULT modeResult, stateResult;
+    Device() : refresh(60), state(0), value(0), modes(0),
+               modeResult(S_OK), stateResult(S_OK) {}
     HRESULT GetDisplayMode(unsigned index, D3DDISPLAYMODE* mode) {
         assert(index == 0);
         ++modes;
@@ -24,10 +24,6 @@ struct Device : IDirect3DDevice9 {
         state = kind;
         value = next;
         return stateResult;
-    }
-    HRESULT Present(const void*, const void*, void*, const void*) {
-        ++presents;
-        return presentResult;
     }
 };
 }
@@ -63,6 +59,16 @@ int main() {
     assert(surface.Prepare(Now, &ready) == S_OK && ready);
     assert(sleeps > 0 && device.value == D3DPRESENT_INTERVAL_FOUR);
 
+    surface.SetUncapped(true);
+    sleeps = 0;
+    for (unsigned i=0; i<20; ++i) {
+        assert(surface.Prepare(Now, &ready) == S_OK && ready);
+        assert(device.value == D3DPRESENT_INTERVAL_IMMEDIATE && sleeps == 0);
+    }
+    surface.SetUncapped(false);
+    surface.SetRate(75);
+    assert(surface.Prepare(Now, &ready) == S_OK && ready);
+    assert(device.value == D3DPRESENT_INTERVAL_ONE);
     device.stateResult = E_FAIL;
     assert(surface.Prepare(Now, &ready) == E_FAIL && ready);
     device.stateResult = S_OK;
@@ -71,9 +77,9 @@ int main() {
     assert(surface.SetMaxFrameLatency(2) == S_OK && device.value == 1);
     device.stateResult = E_FAIL;
     assert(surface.SetMaxFrameLatency(2) == E_FAIL);
-    assert(surface.Present() == S_OK && device.presents == 1);
-    device.presentResult = E_FAIL;
-    assert(surface.Present() == E_FAIL && device.presents == 2);
+    // Frames go through the device's swap chain, which device setup creates;
+    // swap_chain_cases.cpp covers it. The surface never calls device Present.
+    assert(surface.Present() == E_UNEXPECTED);
 
     bool threw = false;
     try { surface.SetRate(0); } catch (const std::invalid_argument&) { threw = true; }

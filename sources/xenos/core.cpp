@@ -10,6 +10,8 @@
 
 #include "xenos_backend.h"
 #include "metrics.h"
+#include "presentation/xenos_swap_chain.h"
+#include "depth_discard.h"
 #include <xgraphics.h>
 #include <vectorintrinsics.h>
 #include <stddef.h>
@@ -137,6 +139,18 @@ std::vector<PendingTextureRelease> pending_texture_releases;
 size_t pending_texture_bytes;
 std::vector<Framebuffer> buffers;
 std::vector<int> free_framebuffers;
+// The depth an update's final replay left in a framebuffer, published for the
+// next update's deferred game read. The game reads it only after that update's
+// first replay was submitted; a depth resolve of the framebuffer in between
+// moves the framebuffer to the spare instead of overwriting the published
+// texture (copy on write). Steady replays discard intermediate depth, so the
+// spare is allocated only when a replay switches targets mid-frame.
+struct PublishedDepth {
+    IDirect3DTexture9* texture; // Owned reference while published.
+    IDirect3DTexture9* spare;   // Owned; a retired texture kept for the next copy.
+    int framebuffer;
+    uint32_t width, height, spare_width, spare_height;
+} published_depth = {NULL, NULL, -1, 0, 0, 0, 0};
 unsigned framebuffer_clear_count, framebuffer_restore_avoided, framebuffer_depth_restore_avoided;
 unsigned framebuffer_depth_resolves, framebuffer_depth_resolves_skipped;
 unsigned framebuffer_early_depth_fences;
@@ -1263,6 +1277,22 @@ void RebindSampledTextures() {
             ApplySampler(i, *sampler);
     }
 }
+// A depth resolve is about to overwrite the published texture: give the
+// framebuffer other sample-zero storage. The published reference stays valid.
+void ProtectPublishedDepth(Framebuffer& b) {
+    IDirect3DTexture9* storage = published_depth.spare;
+    published_depth.spare = NULL;
+    if (storage && (published_depth.spare_width != b.width || published_depth.spare_height != b.height)) {
+        storage->Release();
+        storage = NULL;
+    }
+    if (!storage)
+        Shipyard_Check(xenos_device->CreateTexture(b.width, b.height, 1, 0, D3DFMT_D24S8,
+                                                   D3DPOOL_DEFAULT, &storage, NULL),
+                       "published depth copy storage");
+    b.depth_samples[0]->Release();
+    b.depth_samples[0] = storage;
+}
 void FinishFramebuffer(bool preserveDepth, bool preserveColor) {
     // Reads, copies and target switches must observe the requested depth clear
     // even when no game draw has materialized the target yet.
@@ -1279,6 +1309,9 @@ void FinishFramebuffer(bool preserveDepth, bool preserveColor) {
     StopTileConstants();
     for (int binding = 0; binding < 6; ++binding)
         SetNativeTexture(binding, NULL);
+    if (b.depth && preserveDepth && published_depth.texture &&
+        b.depth_samples[0] == published_depth.texture)
+        ProtectPublishedDepth(b);
     const DWORD fragments[] = {D3DRESOLVE_FRAGMENT0, D3DRESOLVE_FRAGMENT1, D3DRESOLVE_FRAGMENT2,
                                D3DRESOLVE_FRAGMENT3};
     D3DVECTOR4 clear = {0, 0, 0, 1};
@@ -1614,31 +1647,45 @@ PixelDepth(int id, const std::set<std::pair<float, float> >& coords) {
     NativeTimingScope depthReading(timing_counts.depthReadTicks, timing_counts.depthReadCalls);
     if (timing_enabled)
         timing_counts.depthSamples += (unsigned)coords.size();
-    bool resume = live_framebuffer;
-    FinishFramebuffer();
-    Framebuffer& b = buffers[id];
-    // A caller may read depth before its next draw after switching targets.
-    // Xenos retains actual depth fragments regardless of the draw-side hint.
-    IDirect3DTexture9* depth_texture = b.depth_samples[0];
-    if (!depth_texture)
-        Shipyard_Fatal("depth readback unavailable", E_FAIL);
-    if (!b.depth_stored) {
-        // A depth query can precede the first draw after an MSAA or resolution
-        // change. Initialize real GPU color/depth storage through the same
-        // clear/resolve path used for the first draw, then read sample zero.
-        int previous = active_fb;
-        active_fb = id;
-        BeginFramebuffer();
+    bool resume = false;
+    IDirect3DTexture9* depth_texture;
+    uint32_t width, height;
+    if (published_depth.texture && published_depth.framebuffer == id) {
+        // The previous update's final replay. Later replays of this update
+        // never wrote this texture, so no framebuffer work is needed; the lock
+        // waits only for that replay's depth resolve.
+        depth_texture = published_depth.texture;
+        width = published_depth.width;
+        height = published_depth.height;
+    } else {
+        resume = live_framebuffer;
         FinishFramebuffer();
-        active_fb = previous;
-        Shipyard_Log("initialized depth before first draw: framebuffer=%d samples=%u", id,
-                     b.samples);
+        Framebuffer& b = buffers[id];
+        // A caller may read depth before its next draw after switching targets.
+        // Xenos retains actual depth fragments regardless of the draw-side hint.
+        if (!b.depth_samples[0])
+            Shipyard_Fatal("depth readback unavailable", E_FAIL);
+        if (!b.depth_stored) {
+            // A depth query can precede the first draw after an MSAA or resolution
+            // change. Initialize real GPU color/depth storage through the same
+            // clear/resolve path used for the first draw, then read sample zero.
+            int previous = active_fb;
+            active_fb = id;
+            BeginFramebuffer();
+            FinishFramebuffer();
+            active_fb = previous;
+            Shipyard_Log("initialized depth before first draw: framebuffer=%d samples=%u", id,
+                         b.samples);
+        }
+        depth_texture = b.depth_samples[0];
+        width = b.width;
+        height = b.height;
     }
     if (timing_enabled) {
         // IsBusy is a nonblocking state sample. Do not pre-wait here: that
         // would change the LockRect schedule being measured.
         const bool busy = depth_texture->IsBusy() != FALSE;
-        const bool is1080 = b.width == 1920 && b.height == 1080;
+        const bool is1080 = width == 1920 && height == 1080;
         if (busy) {
             ++timing_counts.depthBusyCalls;
             if (is1080)
@@ -1662,14 +1709,14 @@ PixelDepth(int id, const std::set<std::pair<float, float> >& coords) {
     for (std::set<std::pair<float, float> >::const_iterator it = coords.begin(); it != coords.end();
          ++it) {
         int x = (int)it->first, y = (int)it->second;
-        if (x < 0 || y < 0 || x >= (int)b.width || y >= (int)b.height) {
+        if (x < 0 || y < 0 || x >= (int)width || y >= (int)height) {
             result[*it] = 65532;
             continue;
         }
         DWORD value;
         POINT destination = {0, 0};
-        RECT source = {x, (LONG)b.height - 1 - y, x + 1, (LONG)b.height - y};
-        XGUntileTextureLevel(b.width, b.height, 0, XGGetGpuFormat(desc.Format), 0, &value,
+        RECT source = {x, (LONG)height - 1 - y, x + 1, (LONG)height - y};
+        XGUntileTextureLevel(width, height, 0, XGGetGpuFormat(desc.Format), 0, &value,
                              sizeof(value), &destination, lock.pBits, &source);
         // Match the Fast3D D3D11 backend's sample-zero read for multisampled depth.
         result[*it] = (uint16_t)(((value >> 8) / 16777215.0) * 65532.0);
@@ -1743,9 +1790,14 @@ void InitializeDisplay() {
     // The XDK owns this ring; two bounded tiling brackets can coexist while the
     // CPU records the next one.
     pp.RingBufferParameters.SecondarySize = 8 * 1024 * 1024;
+    // Presentation owns its front buffers and swaps asynchronously; see
+    // presentation/xenos_swap_chain.h. The device keeps its EDRAM back buffer.
+    pp.DisableAutoFrontBuffer = TRUE;
     Shipyard_Check(d3d->CreateDevice(0, D3DDEVTYPE_HAL, NULL, D3DCREATE_HARDWARE_VERTEXPROCESSING,
                                      &pp, &xenos_device),
                    "CreateDevice 720p");
+    Shipyard_Check(::Shipyard::XenosPresentationChain().Create(xenos_device, pp),
+                   "presentation front buffers");
     d3d->Release();
     Shipyard_Log("Xenos native display ready before system UI");
 }
@@ -1865,6 +1917,11 @@ void Shipyard_ShutdownGraphics() {
         published_framebuffer_image->Release();
         published_framebuffer_image = NULL;
     }
+    ShipyardXenos::RetireFramebufferDepth();
+    if (published_depth.spare) {
+        published_depth.spare->Release();
+        published_depth.spare = NULL;
+    }
     // State blocks retain resources too. Release them before the owned textures
     // and surfaces, then destroy the device to unregister XDK GPU callbacks.
     if (restore_state) {
@@ -1922,6 +1979,7 @@ void Shipyard_ShutdownGraphics() {
         presentation_depth->Release();
         presentation_depth = NULL;
     }
+    ::Shipyard::XenosPresentationChain().Release();
     ULONG remaining = xenos_device->Release();
     xenos_device = NULL;
     Shipyard_Log("graphics shutdown device_references=%lu", remaining);
@@ -2061,6 +2119,41 @@ void DiscardPresentationColorOnEnd() {
 void DiscardFramebufferDepth(int id) {
     if (live_framebuffer && active_fb == id && buffers[id].depth)
         FinishFramebuffer(false);
+}
+void RetireFramebufferDepth() {
+    IDirect3DTexture9* texture = published_depth.texture;
+    if (!texture)
+        return;
+    const int id = published_depth.framebuffer;
+    published_depth.texture = NULL;
+    published_depth.framebuffer = -1;
+    const bool owned = id >= 0 && (size_t)id < buffers.size() && buffers[id].depth_samples[0] == texture;
+    if (owned || published_depth.spare) {
+        texture->Release();
+        return;
+    }
+    // Copied away from: keep it as storage for the next copy.
+    published_depth.spare = texture;
+    published_depth.spare_width = published_depth.width;
+    published_depth.spare_height = published_depth.height;
+}
+void PublishFramebufferDepth(int id) {
+    RetireFramebufferDepth();
+    if (id < 0 || (size_t)id >= buffers.size() ||
+        std::find(free_framebuffers.begin(), free_framebuffers.end(), id) != free_framebuffers.end())
+        return;
+    // Only depth the final replay retained is published. Otherwise reads take
+    // the framebuffer path, exactly as before publication existed.
+    const Framebuffer& b = buffers[id];
+    if (live_framebuffer && active_fb == id)
+        return;
+    if (!b.depth || !b.depth_stored || !b.depth_samples[0])
+        return;
+    b.depth_samples[0]->AddRef();
+    published_depth.texture = b.depth_samples[0];
+    published_depth.framebuffer = id;
+    published_depth.width = b.width;
+    published_depth.height = b.height;
 }
 void SetShaderCache(const ShaderCacheOps* operations) {
     if (operations)
@@ -2259,7 +2352,7 @@ HRESULT PresentStartupUI() {
         return E_UNEXPECTED;
     HRESULT result = xenos_device->Clear(
         0, NULL, D3DCLEAR_TARGET | D3DCLEAR_ZBUFFER | D3DCLEAR_STENCIL, 0xff000000, 1, 0);
-    return FAILED(result) ? result : xenos_device->Present(NULL, NULL, NULL, NULL);
+    return FAILED(result) ? result : ::Shipyard::XenosPresentationChain().Present();
 }
 void BeginGuiDraw() {
     ::Fast::BeginFramebuffer();
