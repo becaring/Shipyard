@@ -154,6 +154,20 @@ private:
     DWORD thread_id_;
 };
 
+#ifdef _XBOX
+// A thread created without XSetThreadProcessor inherits its creator's
+// hardware thread, so service threads started by the title thread would
+// otherwise share hardware thread 0 with the game and renderer. Hardware
+// thread 2 runs the audio mixer and the default XAudio2 engine uses 4 and 5.
+// Like the SoH 4.0.5 Xbox build's log and save writers, services run on 3; a
+// pool alternates its workers between 3 and 5, where XAudio2's time-critical
+// thread still preempts them.
+const unsigned ServiceProcessor = 3;
+inline unsigned ServiceProcessorFor(size_t index) {
+    return (index & 1) ? 5u : ServiceProcessor;
+}
+#endif
+
 } // namespace Async
 } // namespace Shipyard
 #endif

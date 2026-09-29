@@ -54,6 +54,11 @@ void launch_detached(const std::function<void()>& callable) {
         finish_detached();
         throw native_error("CreateThread", error);
     }
+#ifdef _XBOX
+    // Placement is advisory: the handle stays valid even if the worker has
+    // already finished, and a refused move leaves it on the creator's thread.
+    XSetThreadProcessor(thread, ServiceProcessor);
+#endif
     // Close the native handle after launch; failure leaves ownership unresolved.
     if (!CloseHandle(thread))
         std::terminate();
