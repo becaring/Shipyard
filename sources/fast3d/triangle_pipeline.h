@@ -130,14 +130,26 @@ struct XboxTrianglePipelineKey {
                 return false;
         }
         // A pending import is skipped only when the reload restored the
-        // captured material byte for byte; the flag stays set, exactly as
-        // after an upstream import that found the bound cache node.
+        // captured material byte for byte (Certify then clears the flag).
         if (reloaded &&
             (palettes[0] != XboxTrianglePipelineTraits::PaletteIdentity(owner, 0) ||
              palettes[1] != XboxTrianglePipelineTraits::PaletteIdentity(owner, 1) ||
              !XboxTriangleBytesEqual(images[0], &r.loaded_texture[0], sizeof(images[0])) ||
              !XboxTriangleBytesEqual(images[1], &r.loaded_texture[1], sizeof(images[1]))))
             return false;
+        return true;
+    }
+
+    // Consumers certify through this, not Matches. A hit may restore a
+    // byte-identical reload of a used slot; upstream's import would have found
+    // the bound node and cleared that slot's dirty flag, so clear it here too.
+    // Unused slots keep theirs, exactly as upstream reconciliation does.
+    template <class Owner> __forceinline bool Certify(Owner& owner) const {
+        if (!Matches(owner))
+            return false;
+        for (unsigned i = 0; i < 2; ++i)
+            if (used[i])
+                owner.mRdp->textures_changed[i] = false;
         return true;
     }
 
