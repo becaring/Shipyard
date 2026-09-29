@@ -62,7 +62,7 @@
     "sources/fast3d/clip_quantize.cpp": "17d01beb2a71f969b06899401608a0abce119ad6c36a300d84e62a4fd15fe930",
     "sources/fast3d/clip_quantize.h": "1941da22c6610f9e56a664f25d59c73bb28e726685f768e3355d0ca6117b0c5f",
     "sources/fast3d/command_stack.h": "68f3a66dd54f5154f5ed4914db0b1f0396fea31f5dc56cb762a9d5e7898fd6d1",
-    "sources/fast3d/coordinate.h": "56ab1a9dc11458582f2926e175a63af4a69f342fb377abf7a53f8a9534ddc73d",
+    "sources/fast3d/coordinate.h": "2d80580c9c3658244974abc7889e4edd9e395fe58f42013b37475acffb1ad606",
     "sources/fast3d/dispatch_owner.h": "2a4ae94341718888111ec791bf5c27a46194be8a489877204dfface24407e8d3",
     "sources/fast3d/light_color_cache.h": "e5ad9dc364fefd45a4eeff9318c96d186001a2fa8d9abf57406d21eb71f6c122",
     "sources/fast3d/material_value_cache.h": "1ddfdb5fcd8876577c50a35b60139fe1600d168a3413e408c154f540b775d095",
