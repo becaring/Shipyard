@@ -39,23 +39,23 @@ __declspec(align(128)) static const float kCoordinateInverse[32] = {
     1.0f / 16777216.0f, 1.0f / 33554432.0f, 1.0f / 67108864.0f, 1.0f / 134217728.0f,
     1.0f / 268435456.0f, 1.0f / 536870912.0f, 1.0f / 1073741824.0f, 1.0f / 2147483648.0f};
 
-// Coordinate for one tile axis, prepared once per triangle and applied to each
-// vertex. It returns Coordinate's exact bits: raw / 32, the tile shift, start / 4
-// and a power-of-two dimension are exact power-of-two scalings, and multiplying
-// by 2^-k rounds the same real value as dividing by 2^k. The subtraction, half
-// texel addition and any non-power-of-two division keep their order. Per vertex
-// this removes the dimension's and shift's integer-to-float conversions (Xenon
-// load-hit-store round trips) and, for power-of-two textures, the division.
+// Coordinate for one tile axis, prepared when the tile/extent state is
+// reconciled and applied to each vertex. It returns Coordinate's exact bits:
+// raw / 32, the tile shift, start / 4 and a power-of-two dimension are exact
+// power-of-two scalings, and multiplying by 2^-k rounds the same real value as
+// dividing by 2^k. The subtraction, half texel addition and any
+// non-power-of-two division keep their order. Per vertex this removes the
+// extent's and shift's integer-to-float conversions (Xenon load-hit-store
+// round trips) and, for power-of-two textures, the division.
 struct CoordinateAxis {
     float scale, start, dimension, reciprocal;
     float rawStart;
     int rawShift;
-    bool scaled, half, exact, generic;
+    bool scaled, exact, generic;
 
-    __forceinline void Prepare(int shift, float startValue, bool halfTexel, uint32_t size) {
+    __forceinline void Prepare(int shift, float startValue, uint32_t size) {
         rawShift = shift;
         rawStart = startValue;
-        half = halfTexel;
         scaled = shift != 0;
         generic = shift < 0 || shift > 16;
         scale = shift > 0 && shift <= 10 ? kCoordinateInverse[shift]
@@ -74,7 +74,7 @@ struct CoordinateAxis {
         }
     }
 
-    __forceinline float Apply(float raw) const {
+    __forceinline float Apply(float raw, bool half) const {
         if (generic)
             return Coordinate(raw, rawShift, rawStart, half, dimension);
         float value = raw * 0.03125f;
