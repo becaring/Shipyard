@@ -1,11 +1,13 @@
 #include "services.h"
 #include "shader_cache.h"
+#include "shader_pack.h"
 #include <xdk.h>
 #include <stdio.h>
 #include <map>
 #include <new>
 #include <utility>
 #include <vector>
+#include <algorithm>
 
 namespace Shipyard {
 namespace Xenos {
@@ -126,6 +128,75 @@ struct CodeCache {
     void Store(const std::string& key, const void* code, size_t size);
 } cache;
 
+// Read-only prebuilt pack: only its index stays resident; microcode is read on
+// a hit. Lookups happen on the render thread, which alone owns the handle.
+struct PrebuiltPack {
+    FILE* file;
+    std::vector<ShaderPackEntry> index;
+    PrebuiltPack() : file(NULL) {}
+    bool Open(const char* path) {
+        if (file || !path)
+            return false;
+        FILE* handle = fopen(path, "rb");
+        if (!handle)
+            return false;
+        unsigned char header[ShaderPackHeaderBytes];
+        bool valid = fread(header, 1, sizeof(header), handle) == sizeof(header) &&
+                     ShaderPackRead32(header) == ShaderPackMagic &&
+                     ShaderPackRead32(header + 4) == ShaderPackVersion &&
+                     ShaderPackRead32(header + 8) == _XDK_VER &&
+                     ShaderPackRead32(header + 12) == D3DX_SDK_VERSION;
+        const uint32_t count = valid ? ShaderPackRead32(header + 16) : 0;
+        valid = valid && count <= ShaderPackMaxEntries;
+        std::vector<ShaderPackEntry> entries;
+        try {
+            std::vector<unsigned char> raw(count * ShaderPackEntryBytes);
+            valid = valid && (!count || fread(&raw[0], 1, raw.size(), handle) == raw.size());
+            entries.reserve(count);
+            for (uint32_t i = 0; valid && i < count; ++i) {
+                entries.push_back(ShaderPackParseEntry(&raw[i * ShaderPackEntryBytes]));
+                valid = entries.back().size && entries.back().size <= MaxCode &&
+                        !(entries.back().size & 3) &&
+                        (!i || ShaderPackBefore(entries[i - 1].digest, entries[i].digest));
+            }
+        } catch (const std::bad_alloc&) {
+            valid = false;
+        }
+        if (!valid) {
+            fclose(handle);
+            Shipyard_Log("shader pack rejected: truncated, unsorted or built for another XDK");
+            return false;
+        }
+        file = handle;
+        index.swap(entries);
+        Shipyard_Log("shader pack loaded entries=%u", (unsigned)index.size());
+        return true;
+    }
+    static bool Less(const ShaderPackEntry& entry, const ShaderPackDigest& digest) {
+        return ShaderPackBefore(entry.digest, digest);
+    }
+    ID3DXBuffer* Find(const std::string& key) {
+        if (!file)
+            return NULL;
+        const ShaderPackDigest digest = DigestShaderKey(key);
+        std::vector<ShaderPackEntry>::const_iterator it =
+            std::lower_bound(index.begin(), index.end(), digest, Less);
+        if (it == index.end() || !ShaderPackSame(it->digest, digest))
+            return NULL;
+        ID3DXBuffer* buffer = NULL;
+        if (FAILED(D3DXCreateBuffer(it->size, &buffer)))
+            return NULL;
+        const bool read = fseek(file, (long)it->offset, SEEK_SET) == 0 &&
+                          fread(buffer->GetBufferPointer(), 1, it->size, file) == it->size &&
+                          ShaderPackChecksum(buffer->GetBufferPointer(), it->size) == it->checksum;
+        if (!read) {
+            buffer->Release();
+            return NULL;
+        }
+        return buffer;
+    }
+} pack;
+
 void CacheCompleted(bool ok) {
     if (!ok && cache.writable) {
         cache.writable = false;
@@ -196,6 +267,9 @@ void CodeCache::Store(const std::string& key, const void* code, size_t size) {
 }
 } // namespace
 
+bool ConfigureShaderPack(const char* path) {
+    return pack.Open(path);
+}
 bool ConfigureShaderCache(const ShaderCacheConfig& config) {
     if (cache.loaded || cache.configured || !config.path || !config.path[0] ||
         !config.formatVersion)
@@ -207,10 +281,15 @@ bool ConfigureShaderCache(const ShaderCacheConfig& config) {
     return true;
 }
 ID3DXBuffer* LoadShaderCode(const std::string& source, const char* entry, const char* profile) {
-    if (!cache.configured)
-        return NULL;
     try {
-        const std::vector<DWORD>* code = cache.Find(Key(source, entry, profile));
+        const std::string key = Key(source, entry, profile);
+        // Offline-built code first; the appendable cache holds runtime misses.
+        ID3DXBuffer* packed = pack.Find(key);
+        if (packed)
+            return packed;
+        if (!cache.configured)
+            return NULL;
+        const std::vector<DWORD>* code = cache.Find(key);
         if (!code)
             return NULL;
         ID3DXBuffer* buffer = NULL;

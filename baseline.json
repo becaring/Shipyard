@@ -64,6 +64,7 @@
     "sources/fast3d/command_stack.h": "68f3a66dd54f5154f5ed4914db0b1f0396fea31f5dc56cb762a9d5e7898fd6d1",
     "sources/fast3d/coordinate.h": "61ce195e81b7009f1ecf3b8a7460ef4dc3686d9ad5cdeed5689248e5df4d2e9e",
     "sources/fast3d/dispatch_owner.h": "2a4ae94341718888111ec791bf5c27a46194be8a489877204dfface24407e8d3",
+    "sources/fast3d/instruction_buffer.h": "5a46410d4d79d720ec0e90243fd1dc93f04c5d96e913c2fb064bc00da6c568e5",
     "sources/fast3d/light_color_cache.h": "e5ad9dc364fefd45a4eeff9318c96d186001a2fa8d9abf57406d21eb71f6c122",
     "sources/fast3d/material_value_cache.h": "1ddfdb5fcd8876577c50a35b60139fe1600d168a3413e408c154f540b775d095",
     "sources/fast3d/normal_sources.h": "b7eaff8b7d9369da27f9ca1a23b78147dce19e14ec0e13ca88c9709bcff29d34",
@@ -74,6 +75,7 @@
     "sources/fast3d/texture_bindings.h": "7979045071f3647ee57937a0429ee4ac1071354ba9b63b8b9fbc44f124a1383b",
     "sources/fast3d/triangle_pipeline.h": "230efb2716f2ff349f3cf8869fbdac7d85c484c1804039db4a6c0db21c14bfb3",
     "sources/fast3d/unit_color.h": "8006e0bea6945083ba0999df471041e2ac8b2240c7b6034b9f426bd74b56f654",
+    "sources/fast3d/update_instruction.h": "caada967b02abf6cba46ac1de445aff964e87d813ad6bfc728da45d5c5d704e5",
     "sources/fast3d/value_init.h": "9452882f213a480bf668415fc111f4ce5464ad038dc897f26ffdcc7c87e55883",
     "sources/fast3d/vertex_transform.cpp": "9261cc0f2727089ff282533ee04dd357cf3f33f01946637915101154812bd290",
     "sources/fast3d/vertex_transform.h": "5f3fce17449774bb03589c025b470e0a1286193d3a9b8dbceebf4ec3f0f67173",
@@ -113,6 +115,7 @@
     "sources/presentation/xenos_pacing.h": "6e405fcab66f1dd4d6ea2f2b7b3de68c9c5947fe6cec047bdd81514ac25d8acd",
     "sources/presentation/xenos_surface.cpp": "49fe05e382a214caccb86ac6fe1dcee08cc20101106aa1db8052382af05859f8",
     "sources/presentation/xenos_surface.h": "38e025e1c2ec98c4c3affe5fbfa7701967fea958537cb1158bd60d1ee6860d2a",
+    "sources/presentation/xenos_swap_chain.h": "4b1c37ad1df878eb2eb199aeeee5ad22738f3660d6544804c9546ff14ca19421",
     "sources/prism/compat.h": "979345f2558a661bcd961f18349e6070861bc7633c07355a44e00e55f4996308",
     "sources/resources/path_hash.h": "5d50046fd4a263dbbc12ff08d999f0b78f00fc257a10862dd2af47e73f8c18c8",
     "sources/resources/path_span.h": "3b82b80b171bccadbb7830eb28ae70599ce9e819fe677e950d39f3cffa886749",
@@ -136,8 +139,9 @@
     "sources/xenos/pixels.h": "9425ff73bb6274f435cde970587903e39a8d0a0d3d528e13228d61e907d8427e",
     "sources/xenos/ring_probe.h": "0ca4aacd65f932b77f77028358be75adf5f9027ee6109a422b7afba5db78eaf3",
     "sources/xenos/sampler_certificate.h": "af7317187d9fe1ed250d22b4b0bf2d3e6f7c38c4f2b18b4c3b7cf14f48774793",
-    "sources/xenos/shader_cache.cpp": "00e182b113a5b25176af900149a282db467a4af29ca5ddb6ad892b0c3496d7fd",
-    "sources/xenos/shader_cache.h": "5a907009bb2167f8a79beefd50937f72fd444473890dfc4d84e1369e53c44958",
+    "sources/xenos/shader_cache.cpp": "abb1191e202f9e8dbc516b874f934a337d492f92e29728aa1279282b8ac4c8a9",
+    "sources/xenos/shader_cache.h": "03d5a9943fefc772e1e14b64f3640ecdc1fad643e5dac5123a67083c761595f4",
+    "sources/xenos/shader_pack.h": "e7b3ef7fcc34a1133b6286340e515f33375590b0ddafb34f2f6b579392fa6549",
     "sources/xenos/shader_variant.h": "e873ed1949124316d0bb8cf740ac27f9704dbf4577a658147a5f9d93b1b52786",
     "sources/xenos/tile1_predication_draw.h": "1e26567a14db825f7140cd5139809f554b5e9e825ef774abcbc3f46478bbfebd",
     "sources/xenos/tile1_predication_trial.h": "49607954efdf6c361ac90638fbe7c33adcfc2f59d9df90905b029c2218aaf315",
@@ -150,9 +154,6 @@
     "third_party/nlohmann-3.12.0/include/nlohmann/detail/conversions/to_chars.hpp": "20b9bc4469ee490bc626d8dbcdee060a494292473df4bdbcecfe2f2145ed562d",
     "third_party/nlohmann-3.12.0/include/nlohmann/detail/input/lexer.hpp": "a8b73e55242731375c088133f3a355af7b1bb82d6b9531678cb20560d3733c1d",
     "third_party/nlohmann-3.12.0/include/nlohmann/detail/output/serializer.hpp": "4c079acb8f6936c4f787fd5706a52c77a1751dd34787a821705845698ec8540e",
-    "third_party/nlohmann-3.12.0/include/nlohmann/ordered_map.hpp": "2d4e2d9f6e6a0c2d2adadcb620da1f49585fa4e54e54cfa16b6d20e01d857d61",
-    "sources/fast3d/update_instruction.h": "caada967b02abf6cba46ac1de445aff964e87d813ad6bfc728da45d5c5d704e5",
-    "sources/fast3d/instruction_buffer.h": "5a46410d4d79d720ec0e90243fd1dc93f04c5d96e913c2fb064bc00da6c568e5",
-    "sources/presentation/xenos_swap_chain.h": "4b1c37ad1df878eb2eb199aeeee5ad22738f3660d6544804c9546ff14ca19421"
+    "third_party/nlohmann-3.12.0/include/nlohmann/ordered_map.hpp": "2d4e2d9f6e6a0c2d2adadcb620da1f49585fa4e54e54cfa16b6d20e01d857d61"
   }
 }
