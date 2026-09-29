@@ -76,6 +76,17 @@ struct XboxTrianglePipelineKey {
     };
     uint32_t loaded[2][4];
     uint8_t sampler[2][3];
+    // Reload restoration (consumer trait RestoresReloadedTextures): both TMEM
+    // entries and the consumer's palette identity (PaletteIdentity) at
+    // capture. Imports may fall back to the other TMEM entry, so both are kept.
+    // A texture command sequence that reloads exactly this material leaves
+    // every import key, and so the bound cache node, unchanged; the SoH 4.0.5
+    // Xbox renderer restored its pipeline instead of rebuilding it.
+    union {
+        uint32_t imageAlignment;
+        unsigned char images[2][sizeof(((RDP*)0)->loaded_texture[0])];
+    };
+    const void* palettes[2];
     XboxTrianglePipelineKey() : valid(false) {
     }
 
@@ -93,19 +104,21 @@ struct XboxTrianglePipelineKey {
             (shaderPresent && shaderTop != XboxTrianglePipelineTraits::ShaderIdentity(owner)) ||
             !XboxTriangleBytesEqual(rendering, &owner.mRenderingState, sizeof(rendering)))
             return false;
+        bool reloaded = false;
         for (unsigned i = 0; i < 2; ++i) {
             if (masked[i] != r.loaded_texture[i].masked ||
                 blended[i] != r.loaded_texture[i].blended)
                 return false;
             if (!used[i])
                 continue;
-            if (r.textures_changed[i])
+            if (r.textures_changed[i] && !XboxTrianglePipelineTraits::RestoresReloadedTextures(owner))
                 return false;
             const unsigned tile = XboxTrianglePipelineTraits::EffectiveTile(owner, i);
             if (tile >= 8 || r.texture_tile[tile].tmem_index >= 2 ||
                 !XboxTriangleBytesEqual(tiles[i], &r.texture_tile[tile], sizeof(tiles[i])))
                 return false;
             const unsigned tmem = r.texture_tile[tile].tmem_index;
+            reloaded = reloaded || r.textures_changed[i];
             if (loaded[i][0] != r.loaded_texture[tmem].size_bytes ||
                 loaded[i][1] != r.loaded_texture[tmem].line_size_bytes ||
                 loaded[i][2] != r.loaded_texture[tmem].full_image_line_size_bytes ||
@@ -116,6 +129,15 @@ struct XboxTrianglePipelineKey {
                          sampler[i][1] != node->second.cms || sampler[i][2] != node->second.cmt))
                 return false;
         }
+        // A pending import is skipped only when the reload restored the
+        // captured material byte for byte; the flag stays set, exactly as
+        // after an upstream import that found the bound cache node.
+        if (reloaded &&
+            (palettes[0] != XboxTrianglePipelineTraits::PaletteIdentity(owner, 0) ||
+             palettes[1] != XboxTrianglePipelineTraits::PaletteIdentity(owner, 1) ||
+             !XboxTriangleBytesEqual(images[0], &r.loaded_texture[0], sizeof(images[0])) ||
+             !XboxTriangleBytesEqual(images[1], &r.loaded_texture[1], sizeof(images[1]))))
+            return false;
         return true;
     }
 
@@ -139,6 +161,10 @@ struct XboxTrianglePipelineKey {
         shaderPresent = XboxTrianglePipelineTraits::ShaderPresent(owner);
         shaderTop = shaderPresent ? XboxTrianglePipelineTraits::ShaderIdentity(owner) : 0;
         std::memcpy(rendering, &owner.mRenderingState, sizeof(rendering));
+        palettes[0] = XboxTrianglePipelineTraits::PaletteIdentity(owner, 0);
+        palettes[1] = XboxTrianglePipelineTraits::PaletteIdentity(owner, 1);
+        std::memcpy(images[0], &r.loaded_texture[0], sizeof(images[0]));
+        std::memcpy(images[1], &r.loaded_texture[1], sizeof(images[1]));
         for (unsigned i = 0; i < 2; ++i) {
             masked[i] = r.loaded_texture[i].masked;
             blended[i] = r.loaded_texture[i].blended;

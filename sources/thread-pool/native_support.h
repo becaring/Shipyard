@@ -26,9 +26,20 @@ inline void run_function(void* arg) {
     std::unique_ptr<std::function<void()> > owned(static_cast<std::function<void()>*>(arg));
     (*owned)();
 }
+// Every caller is a pool or service worker (resource and save pools,
+// network, randomizer generation). On Xbox, successive workers alternate
+// between the service hardware threads instead of inheriting the title
+// thread's hardware thread 0. Threads that need a specific hardware thread
+// use make_thread_on_processor.
 inline joining_thread make_thread(const std::function<void()>& fn) {
     std::unique_ptr<std::function<void()> > owned(new std::function<void()>(fn));
+#ifdef _XBOX
+    static volatile LONG serviceIndex = -1;
+    joining_thread thread(&run_function, owned.get(),
+                          ServiceProcessorFor((size_t)InterlockedIncrement(&serviceIndex)));
+#else
     joining_thread thread(&run_function, owned.get());
+#endif
     owned.release();
     return std::move(thread);
 }

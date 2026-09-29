@@ -9,6 +9,23 @@ struct Texture {
 };
 
 int main() {
+    {
+        // An unchanged lookup generation keeps resolutions across batches; a
+        // moved one releases every owner at the next batch boundary.
+        Shipyard::Resources::TextureHashCache<Texture, 4> persistent;
+        std::shared_ptr<Texture> kept(new Texture());
+        std::weak_ptr<Texture> keptOwner = kept;
+        persistent.Retire(3);
+        persistent.Store(2, "alt/k", 3, kept);
+        kept.reset();
+        persistent.Retire(3);
+        persistent.Retire(3);
+        assert(persistent.LookupBorrowed(2, "alt/k", 3));
+        persistent.Retire(4);
+        assert(keptOwner.expired());
+        assert(!persistent.LookupBorrowed(2, "alt/k", 3));
+        assert(!persistent.LookupBorrowed(2, "alt/k", 4));
+    }
     Shipyard::Resources::TextureHashCache<Texture, 4> cache;
     std::shared_ptr<Texture> first(new Texture());
     std::weak_ptr<Texture> owned = first;
