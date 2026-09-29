@@ -145,7 +145,7 @@
     "sources/network/transport.h": "3488e5e9d6ce75313ded0693e9a78ae23e3bd54c6c2c6672bcdc2322bcccad38",
     "sources/presentation/pacing.h": "071790603c87bfc85980db0dfe88ed224a3cc59c323dc8792a2085911a179e1b",
     "sources/presentation/xenos_pacing.h": "6e405fcab66f1dd4d6ea2f2b7b3de68c9c5947fe6cec047bdd81514ac25d8acd",
-    "sources/presentation/xenos_surface.cpp": "e20b52bb5e55dd18f8f03376f4244514ad5473b4346fc922da665a8e0c48726a",
+    "sources/presentation/xenos_surface.cpp": "3014bb19d698ed91e90b020cfb7aed803ce27a32cac86dab9ee258bee13ec0de",
     "sources/presentation/xenos_surface.h": "483691afa7864adee3f330f7246ba02d2dc52127911df9ec666ead22361f9b40",
     "sources/prism/compat.h": "979345f2558a661bcd961f18349e6070861bc7633c07355a44e00e55f4996308",
     "sources/random/shuffle.h": "32fd4982745fbb7f754e3c142821be583779613e4a8cb2acdde70807baeaa624",
@@ -164,7 +164,7 @@
     "sources/value_types/xbox_compat/common.h": "9885c1790916ab10d31b32aca7c7c7decc6a6b79dd1ea98d34b9b36e5ecbdaf6",
     "sources/value_types/xbox_compat/optional.h": "c2f636d3b098706146580922f2129b898308bc33e297052d9357b30180132785",
     "sources/value_types/xbox_compat/variant.h": "397d588e01009d487e3b11cdae52adea1d009110416c2b0b8b1e2a4bf4d345a9",
-    "sources/xenos/core.cpp": "d8de9b0fd7681835f3b9076c674df12917ce7a2e798c8327bfdbc30c42a9f4f5",
+    "sources/xenos/core.cpp": "cd48fcde9305bc59e9561347bd0a3df223b1d8a27e2b16f4d4a86f29308caec0",
     "sources/xenos/core.h": "5bf7fd0f5e0a265e2c227c210e9bc7d5b3d10dab348bb57483fb7f351d8e1ee0",
     "sources/xenos/depth_clip.h": "d6eea4f86f071129b79145aee58d79a18da0c68cff7e7240a7b13368e3f5c04b",
     "sources/xenos/depth_discard.h": "56dd351c1272e7b33b840bd3bd796714de05d7e665a85b8a91b090fd9e0029d0",
@@ -186,6 +186,7 @@
     "third_party/nlohmann-3.12.0/include/nlohmann/detail/conversions/to_chars.hpp": "20b9bc4469ee490bc626d8dbcdee060a494292473df4bdbcecfe2f2145ed562d",
     "third_party/nlohmann-3.12.0/include/nlohmann/detail/input/lexer.hpp": "a8b73e55242731375c088133f3a355af7b1bb82d6b9531678cb20560d3733c1d",
     "third_party/nlohmann-3.12.0/include/nlohmann/detail/output/serializer.hpp": "4c079acb8f6936c4f787fd5706a52c77a1751dd34787a821705845698ec8540e",
-    "third_party/nlohmann-3.12.0/include/nlohmann/ordered_map.hpp": "2d4e2d9f6e6a0c2d2adadcb620da1f49585fa4e54e54cfa16b6d20e01d857d61"
+    "third_party/nlohmann-3.12.0/include/nlohmann/ordered_map.hpp": "2d4e2d9f6e6a0c2d2adadcb620da1f49585fa4e54e54cfa16b6d20e01d857d61",
+    "sources/presentation/xenos_swap_chain.h": "4b1c37ad1df878eb2eb199aeeee5ad22738f3660d6544804c9546ff14ca19421"
   }
 }

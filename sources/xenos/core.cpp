@@ -14,6 +14,7 @@
 #include "sampler_certificate.h"
 
 #include "metrics.h"
+#include "presentation/xenos_swap_chain.h"
 #include <xgraphics.h>
 #include <vectorintrinsics.h>
 #include <stddef.h>
@@ -1676,9 +1677,14 @@ void InitializeDisplay() {
     // The XDK owns this ring; two bounded tiling brackets can coexist while the
     // CPU records the next one.
     pp.RingBufferParameters.SecondarySize = 8 * 1024 * 1024;
+    // Presentation owns its front buffers and swaps asynchronously; see
+    // presentation/xenos_swap_chain.h. The device keeps its EDRAM back buffer.
+    pp.DisableAutoFrontBuffer = TRUE;
     Shipyard_Check(d3d->CreateDevice(0, D3DDEVTYPE_HAL, NULL, D3DCREATE_HARDWARE_VERTEXPROCESSING,
                                      &pp, &xenos_device),
                    "CreateDevice 720p");
+    Shipyard_Check(::Shipyard::XenosPresentationChain().Create(xenos_device, pp),
+                   "presentation front buffers");
     d3d->Release();
     Shipyard_Log("Xenos native display ready before system UI");
 }
@@ -1844,6 +1850,7 @@ void Shipyard_ShutdownGraphics() {
         presentation_depth->Release();
         presentation_depth = NULL;
     }
+    ::Shipyard::XenosPresentationChain().Release();
     ULONG remaining = xenos_device->Release();
     xenos_device = NULL;
     Shipyard_Log("graphics shutdown device_references=%lu", remaining);
@@ -2211,7 +2218,7 @@ HRESULT PresentStartupUI() {
         return E_UNEXPECTED;
     HRESULT result = xenos_device->Clear(
         0, NULL, D3DCLEAR_TARGET | D3DCLEAR_ZBUFFER | D3DCLEAR_STENCIL, 0xff000000, 1, 0);
-    return FAILED(result) ? result : xenos_device->Present(NULL, NULL, NULL, NULL);
+    return FAILED(result) ? result : ::Shipyard::XenosPresentationChain().Present();
 }
 void BeginGuiDraw() {
     ::Fast::BeginFramebuffer();
