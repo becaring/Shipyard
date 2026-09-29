@@ -5,6 +5,7 @@
 #include "tile_coverage.h"
 #include "tile1_predication_draw.h"
 #include "ring_probe.h"
+#include "tiling_budget.h"
 #include "sampler_certificate.h"
 
 #include "xenos_backend.h"
@@ -172,6 +173,7 @@ IDirect3DStateBlock9* restore_state;
 bool live_framebuffer, tile_constants_owned;
 int pending_game_depth_clear = -1;
 size_t tiling_draw_bytes;
+ShipyardXenos::TilingBudget tiling_budget;
 void BeginFramebuffer();
 void Clear(bool color, bool depth);
 void FinishFramebuffer(bool preserveDepth = true, bool preserveColor = true);
@@ -181,6 +183,8 @@ void TilingSpaceBeforeResolve();
 void TilingSpaceBeforeEnd();
 void QueryTilingSpace(DWORD* used, DWORD* remaining);
 bool GuardTrialBeforeDraw(uint64_t inputBytes);
+bool ContinueTilingBeforeDraw(uint64_t inputBytes);
+bool ContinueTilingAfterDraw();
 bool GuardTrialAfterDraw();
 void RebindSampledTextures();
 void Resolve(int id);
@@ -855,10 +859,16 @@ void Draw(float* vertices, size_t count, size_t triangles) {
     // restart the native bracket before it consumes its reserved command space.
     // The allowance includes state-command space for each Fast3D batch.
     bool trialContinued = false;
+    bool budgetContinued = false;
+    bool restoreGuardViewport = false;
+    D3DVIEWPORT9 guardViewport;
     if (live_framebuffer && buffers[active_fb].tiles.size() > 1 &&
         tiling_draw_bytes + count * sizeof(float) + 8192 > 2 * 1024 * 1024) {
-        trialContinued = GuardTrialBeforeDraw(uint64_t(count) * sizeof(float));
+        budgetContinued = ContinueTilingBeforeDraw(uint64_t(count) * sizeof(float));
+        trialContinued = budgetContinued || GuardTrialBeforeDraw(uint64_t(count) * sizeof(float));
         if (!trialContinued) {
+            xenos_device->GetViewport(&guardViewport);
+            restoreGuardViewport = true;
             ++tiling_draw_restarts;
             tiling_guard_restart_pending = timing_enabled;
             FinishFramebuffer();
@@ -866,6 +876,8 @@ void Draw(float* vertices, size_t count, size_t triangles) {
         }
     }
     BeginFramebuffer();
+    if (restoreGuardViewport)
+        Shipyard_Check(xenos_device->SetViewport(&guardViewport), "restore tiling restart viewport");
     bool tile1Only = false;
     if (timing_enabled || tile1_predication_trial_enabled) {
         const Framebuffer& b = buffers[active_fb];
@@ -912,10 +924,12 @@ void Draw(float* vertices, size_t count, size_t triangles) {
               (UINT)(current_shader->floats * 4), &tile1_predication_trial_counts)
         : xenos_device->DrawPrimitiveUP(D3DPT_TRIANGLELIST, (UINT)triangles, vertices,
                                        (UINT)(current_shader->floats * 4));
+    tiling_budget.ChargeVertices(uint64_t(count) * sizeof(float));
     Shipyard_Check(drawResult, "Shipyard DrawPrimitiveUP");
     if (timing_enabled)
         SHIPYARD_DIAGNOSTIC(alpha_histogram.Record(native_state.alpha_mode, (unsigned)triangles));
-    const bool trialNeedsFinish = trialContinued && !GuardTrialAfterDraw();
+    const bool trialNeedsFinish = trialContinued &&
+        !(budgetContinued ? ContinueTilingAfterDraw() : GuardTrialAfterDraw());
     if (probeRing) {
         const ShipyardXenos::RingCursor ringAfter(
             (uintptr_t)xenos_device->m_pRing, (uintptr_t)xenos_device->m_pRingLimit);
@@ -936,8 +950,14 @@ void Draw(float* vertices, size_t count, size_t triangles) {
     tiling_draw_bytes += count * sizeof(float) + 8192;
     if (buffers[active_fb].tiles.size() > 1 && tiling_draw_bytes > tiling_peak_bytes)
         tiling_peak_bytes = (unsigned)tiling_draw_bytes;
-    if (trialNeedsFinish)
+    if (trialNeedsFinish) {
+        // A rejected post-draw reservation must preserve the logical viewport
+        // across both SDK tiling boundaries, just like the pre-draw restart.
+        xenos_device->GetViewport(&guardViewport);
         FinishFramebuffer();
+        BeginFramebuffer();
+        Shipyard_Check(xenos_device->SetViewport(&guardViewport), "restore tiling fallback viewport");
+    }
 }
 void ValidateFramebuffer(int id) {
     if (id < 0 || (size_t)id >= buffers.size() ||
@@ -1062,6 +1082,7 @@ void DrawRestoreQuadSample(IDirect3DTexture9* color, IDirect3DTexture9* depth,
     Shipyard_Check(xenos_device->DrawPrimitiveUP(D3DPT_TRIANGLELIST, 2,
                                                  copy_quad ? copy_quad : quad, 4 * sizeof(float)),
                    "restore framebuffer samples");
+    tiling_budget.ChargeVertices(sizeof(quad));
 }
 void EndRestoreQuad(bool restore_constants) {
     Shipyard_Check(restore_state->Apply(), "restore framebuffer copy state");
@@ -1098,7 +1119,22 @@ bool ProfileTilingSpace() {
 void QueryTilingSpace(DWORD* used, DWORD* remaining) {
     NativeTimingScope timing(timing_counts.tilingSpaceQueryTicks,
                              timing_counts.tilingSpaceQueryCalls);
+    *used = *remaining = 0;
     xenos_device->QueryBufferSpace(used, remaining);
+}
+bool ContinueTilingBeforeDraw(uint64_t inputBytes) {
+    if (!tiling_budget.active) return false;
+    DWORD used = 0, remaining = 0;
+    QueryTilingSpace(&used, &remaining);
+    return tiling_budget.BeforeDraw(used, remaining, (uintptr_t)xenos_device->m_pRing,
+                                   (uintptr_t)xenos_device->m_pRingLimit,
+                                   inputBytes, &tiling_draw_bytes);
+}
+bool ContinueTilingAfterDraw() {
+    DWORD used = 0, remaining = 0;
+    QueryTilingSpace(&used, &remaining);
+    return tiling_budget.AfterDraw(used, remaining, (uintptr_t)xenos_device->m_pRing,
+                                  (uintptr_t)xenos_device->m_pRingLimit);
 }
 bool GuardTrialBeforeDraw(uint64_t inputBytes) {
     if (!tiling_guard_trial_enabled) return false;
@@ -1118,9 +1154,13 @@ void TilingSpaceBegin() {
     const bool profile = ProfileTilingSpace();
     const bool trial = tiling_guard_trial_enabled && b.width == 1920 && b.height == 1080 &&
                        b.tiles.size() == 2 && b.samples == 1;
-    if (!profile && !trial) return;
+    const bool budget = b.width == 1920 && b.height == 1080 &&
+                        b.tiles.size() == 2 && b.samples == 1;
+    tiling_budget.Close();
+    if (!profile && !trial && !budget) return;
     DWORD used, remaining;
     QueryTilingSpace(&used, &remaining);
+    if (budget) tiling_budget.Begin(used, remaining);
     if (profile) tiling_space_probe.Begin(used, remaining);
     if (trial) tiling_guard_trial_window.Begin(used, remaining);
 }
@@ -1172,7 +1212,7 @@ void BeginFramebuffer() {
     xenos_device->GetViewport(&viewport);
     Shipyard_Check(xenos_device->SetRenderTarget(0, b.color), "bind framebuffer color");
     Shipyard_Check(xenos_device->SetDepthStencilSurface(b.depth), "bind framebuffer depth");
-    xenos_device->SetViewport(&viewport);
+    Shipyard_Check(xenos_device->SetViewport(&viewport), "restore framebuffer viewport");
     xenos_device->SetRenderState(D3DRS_MULTISAMPLEANTIALIAS, TRUE);
     xenos_device->SetRenderState(D3DRS_MULTISAMPLEMASK, ~0u);
     D3DVECTOR4 clear = {0, 0, 0, 1};
@@ -1282,6 +1322,7 @@ void FinishFramebuffer(bool preserveDepth, bool preserveColor) {
         // fragments. Disable EndTiling's automatic single-target resolve.
         Shipyard_Check(xenos_device->EndTiling(0, NULL, NULL, &clear, 1, 0, NULL),
                        "finish framebuffer tiling");
+        tiling_budget.Close();
         tiling_guard_trial_window.Close();
     }
     // Seal the resolved depth resource's SDK fence before later presentation

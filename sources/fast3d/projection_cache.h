@@ -43,13 +43,24 @@ struct ProjectionValueCache {
     inline
 #endif
     void Load(const float& inputX, const float& inputY, const float& inputW) {
+        Load(inputX, inputY, inputW, ProjectionRoundingMode());
+    }
+
+    // A caller may share this token across arithmetic that cannot change RN.
+    // Divisions update exception flags but preserve the two rounding bits.
+    // Keep the source-word guards and exceptional-operation behavior below.
+#ifdef _MSC_VER
+    __forceinline
+#else
+    inline
+#endif
+    void Load(const float& inputX, const float& inputY, const float& inputW, uint32_t mode) {
         uint32_t bitsX;
         uint32_t bitsY;
         uint32_t bitsW;
         memcpy(&bitsX, &inputX, 4);
         memcpy(&bitsY, &inputY, 4);
         memcpy(&bitsW, &inputW, 4);
-        const uint32_t mode = ProjectionRoundingMode();
         if (valid && keyX == bitsX && keyY == bitsY && keyW == bitsW && roundingMode == mode)
             return;
         x = inputX / inputW;
