@@ -8,9 +8,10 @@
 namespace Shipyard {
 namespace Resources {
 
-// Short lived, owning cache for texture commands in one interpolation batch.
-// The archive path is checked on every lookup, so a changed hash table cannot
-// silently reuse a texture from an earlier archive mapping.
+// Owning cache for texture commands. Every hit requires the resource
+// manager's lookup generation (loads, unloads, dirty and alternate-asset
+// changes) and the archive path or epoch it was stored under, so entries stay
+// valid across interpolation batches until one of those changes.
 template <typename Texture, size_t Capacity = 256> class TextureHashCache {
   public:
     enum { Ways = 4 };
@@ -27,7 +28,7 @@ template <typename Texture, size_t Capacity = 256> class TextureHashCache {
                   lastUse(0), valid(false) {}
     };
 
-    TextureHashCache() : mClock(0) {}
+    TextureHashCache() : mClock(0), mRetiredGeneration(0) {}
 
     std::shared_ptr<Texture> Lookup(uint64_t hash, const char* path, unsigned generation) {
         const std::shared_ptr<Texture>* hit = LookupBorrowed(hash, path, generation);
@@ -148,6 +149,18 @@ template <typename Texture, size_t Capacity = 256> class TextureHashCache {
 
   public:
 
+    // Once per interpolation batch: a moved lookup generation already makes
+    // every entry miss, so release their owners together instead of keeping
+    // unloaded textures alive until each slot is reused. An unchanged
+    // generation keeps the resolutions, as the pointer-patched display lists
+    // of the SoH 4.0.5 Xbox renderer did.
+    void Retire(unsigned generation) {
+        if (generation == mRetiredGeneration)
+            return;
+        Clear();
+        mRetiredGeneration = generation;
+    }
+
     void Clear() {
         for (size_t i = 0; i < Capacity; ++i) {
             mEntries[i].valid = false;
@@ -170,6 +183,7 @@ template <typename Texture, size_t Capacity = 256> class TextureHashCache {
     }
     Entry mEntries[Capacity];
     uint64_t mClock;
+    unsigned mRetiredGeneration;
 };
 
 } // namespace Resources
