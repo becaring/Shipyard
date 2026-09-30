@@ -1,3 +1,4 @@
+from xenos_source import core_source
 import os
 from pathlib import Path
 import subprocess
@@ -9,7 +10,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 class FramebufferClearTests(unittest.TestCase):
     def test_selected_clear_boundary_and_counts(self):
-        source = (ROOT/'sources/xenos/core.cpp').read_text()
+        source = core_source()
         start = source.index('void Clear(bool color, bool depth) {')
         end = source.index('\nvoid ResolveMSAA(', start)
         method = source[start:end]

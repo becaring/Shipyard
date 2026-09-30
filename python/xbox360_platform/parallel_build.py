@@ -113,12 +113,13 @@ def plan(project, manifest, output, jobs=8):
         'sources': [(row.include, str(row.source), str(row.object), row.sha256) for row in records],
     }, sort_keys=True, separators=(',', ':')).encode()
     manifest_digest = hashlib.sha256(payload).hexdigest()
+    count = min(jobs, len(records))
     layout = json.dumps({
         'project_sha256': project_digest,
+        'shards': count,
         'sources': [(row.include, str(row.source), str(row.object)) for row in records],
     }, sort_keys=True, separators=(',', ':')).encode()
     layout_digest = hashlib.sha256(layout).hexdigest()
-    count = min(jobs, len(records))
     shards = []
     for index in range(count):
         chosen = tuple(records[index::count])

@@ -186,7 +186,11 @@ bool RejectUnsupported(const std::string& text, std::string& error) {
 
 } // namespace
 
-bool Shipyard_LowerShader(const std::string& hlsl, std::string& lowered, std::string& error) {
+bool Shipyard_LowerShader(const std::string& hlsl, std::string& lowered, std::string& error, unsigned abi) {
+    if (abi != 2 && abi != 3) {
+        error = "Unsupported Xenos shader ABI";
+        return false;
+    }
     std::string text = hlsl;
     Replace(text, "\r\n", "\n");
     if (text.find("@prism") != std::string::npos) {
@@ -209,7 +213,7 @@ bool Shipyard_LowerShader(const std::string& hlsl, std::string& lowered, std::st
         return false;
     }
     const size_t primitive = text.find("cbuffer PerPrimDepthCB");
-    if (primitive != std::string::npos) {
+    if (abi >= 3 && primitive != std::string::npos) {
         const size_t end = text.find('}', primitive);
         std::string shape;
         if (end != std::string::npos) {
@@ -232,7 +236,7 @@ bool Shipyard_LowerShader(const std::string& hlsl, std::string& lowered, std::st
     if (text.find("float4 texInfo[2]") == std::string::npos) {
         text = "float4 texInfo[2] : register(c1);\n" + text;
     }
-    if (text.find("VSMain(") != std::string::npos) {
+    if (abi >= 3 && text.find("VSMain(") != std::string::npos) {
         const std::string assignment = "result.position = position;";
         const size_t position = text.find(assignment);
         if (position == std::string::npos ||
@@ -251,7 +255,7 @@ bool Shipyard_LowerShader(const std::string& hlsl, std::string& lowered, std::st
         return false;
     }
 
-    lowered = "// Shipyard Xenos lowering ABI 3\n"
+    lowered = std::string(abi == 2 ? "// Shipyard Xenos lowering ABI 2\n" : "// Shipyard Xenos lowering ABI 3\n") +
               "float4 framebufferTile : register(c4);\n"
               "float4 bindingInfo[6] : register(c8);\n" +
               text;

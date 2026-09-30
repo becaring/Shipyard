@@ -1,3 +1,4 @@
+from xenos_source import core_source
 import os
 from pathlib import Path
 import subprocess
@@ -10,7 +11,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 class TextureBindingTests(unittest.TestCase):
     def test_upload_has_one_native_binding_pass(self):
-        source = (ROOT / 'sources/xenos/core.cpp').read_text()
+        source = core_source()
         upload = source[source.index('void Upload(const uint8_t* bytes,'):source.index('\nvoid Sampler(', source.index('void Upload(const uint8_t* bytes,'))]
         self.assertEqual(upload.count('RebindSampledTextures();'), 2)
         self.assertEqual(upload.count('selected_fb[upload_tile] = -1;'), 2)
@@ -18,7 +19,7 @@ class TextureBindingTests(unittest.TestCase):
                          'SelectTexture binds the upload slot again before RebindSampledTextures')
 
     def test_rebind_restores_sampler_after_native_texture(self):
-        source = (ROOT / 'sources/xenos/core.cpp').read_text()
+        source = core_source()
         rebind = source[source.index('void RebindSampledTextures() {'):source.index('\nvoid FinishFramebuffer(', source.index('void RebindSampledTextures() {'))]
         self.assertLess(rebind.index('SetNativeTexture(i, texture);'),
                         rebind.index('ApplySampler(i, *sampler);'))

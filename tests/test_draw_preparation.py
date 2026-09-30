@@ -1,3 +1,4 @@
+from xenos_source import core_source
 import os
 from pathlib import Path
 import subprocess
@@ -23,7 +24,7 @@ def function(source, signature):
 
 class DrawPreparationTests(unittest.TestCase):
     def test_original_differential_and_preparation_counts(self):
-        source = (ROOT/'sources/xenos/core.cpp').read_text()
+        source = core_source()
         if 'void PrepareDrawState() {' in source:
             methods = function(source, 'void RebuildDrawState() {') + '\n' + function(source, 'void PrepareDrawState() {')
             methods = function(source, 'void VerifyPreparedDrawState() {') + '\n' + methods
@@ -55,7 +56,7 @@ class DrawPreparationTests(unittest.TestCase):
             print(result.stdout.strip())
 
     def test_complete_mutation_and_external_boundaries(self):
-        source = (ROOT/'sources/xenos/core.cpp').read_text()
+        source = core_source()
         for signature in ['void InvalidateNativeState()', 'void ApplySamplerSlot(',
                           'uint32_t NewTexture()', 'void SelectTexture(int tile,',
                           'void RebindSampledTextures()', 'void DeleteTexture(uint32_t id)',

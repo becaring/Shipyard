@@ -5,9 +5,10 @@ selected by the consumer's configuration, add its `python/` directory to Python'
 import path and call `xbox360_platform.contract.verify(base, lock)` before using
 package files. The consumer owns checkout discovery and dependency acquisition.
 
-The lock contains:
+The base must be the Git checkout root. API 7 rejects the retired `selection`
+field; no package subdirectory is selected. The lock contains:
 
-- `git_revision`: the selected Git HEAD, with at least seven hexadecimal characters;
+- `git_revision`: the complete commit ID selected by this consumer;
 - `api_version`: the package interface version;
 - `baseline_sha256`: SHA-256 of the complete `baseline.json` file.
 

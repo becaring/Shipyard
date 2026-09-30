@@ -31,7 +31,7 @@ def remove_unused_directory(text):
     return text
 
 
-def lower(text, parser, walk, expected_tables):
+def lower(text, parser, walk, expected_tables, *, composed_dispatch=False):
     if "gfx_push_current_dir" in text:
         text = remove_unused_directory(text)
     start = text.index('class UcodeHandler {')
@@ -57,6 +57,26 @@ def lower(text, parser, walk, expected_tables):
     cls = _once(cls, old, new)
     cls = _once(cls, 'std::numeric_limits<uint8_t>::max() + 1',
                 '256 /* complete uint8_t opcode domain */')
+    if composed_dispatch:
+        cls = _once(cls,
+                    '    inline std::pair<const char*, GfxOpcodeHandlerFunc> at(int8_t opcode) const {\n'
+                    '        return mHandlers[static_cast<uint8_t>(opcode)];\n'
+                    '    }',
+                    '    inline const std::pair<const char*, GfxOpcodeHandlerFunc>& at(int8_t opcode) const {\n'
+                    '        return mHandlers[static_cast<uint8_t>(opcode)];\n'
+                    '    }')
+        cls = _once(cls, '  private:\n',
+                    '''    UcodeHandler(const UcodeHandler& otr, const UcodeHandler& rdp,
+                     const UcodeHandler& ucode) {
+            for (unsigned i = 0; i < 256; ++i) {
+                const std::pair<const char*, GfxOpcodeHandlerFunc>& o = otr.mHandlers[i];
+                const std::pair<const char*, GfxOpcodeHandlerFunc>& r = rdp.mHandlers[i];
+                mHandlers[i] = o.first ? o : (r.first ? r : ucode.mHandlers[i]);
+            }
+        }
+
+      private:
+    ''')
     text = text[:start] + 'struct UcodeEntry { int8_t opcode; const char* name; GfxOpcodeHandlerFunc handler; };\n' + cls + text[end:]
     source = text.encode()
     edits = []
@@ -88,4 +108,72 @@ def lower(text, parser, walk, expected_tables):
         raise ValueError('Opcode table inventory drift: ' + repr(tables))
     for start, end, replacement in sorted(edits, reverse=True):
         source = source[:start] + replacement + source[end:]
-    return source.decode(), tables
+    if not composed_dispatch:
+        return source.decode(), tables
+    text = source.decode()
+    start = text.index('static constexpr std::array ucode_handlers = {')
+    end = text.index('\n};', start) + len('\n};')
+    handlers = text[start:end]
+    for base, expected in [('f3d', 2), ('f3dex', 2), ('f3dex2', 1), ('s2dex', 1)]:
+        old = '&' + base + 'Handlers'
+        if handlers.count(old) != expected:
+            raise ValueError('Opcode dispatch ucode inventory drift: ' + base)
+        handlers = handlers.replace(old, '&' + base + 'Dispatch')
+    handlers = handlers.replace('static constexpr std::array ucode_handlers = {',
+                                'static const std::array<const UcodeHandler*, 6> ucode_handlers = { {', 1)
+    handlers = handlers[:-3] + '\n} };'
+    dispatch = '''static const UcodeHandler f3dDispatch(otrHandlers, rdpHandlers, f3dHandlers);
+static const UcodeHandler f3dexDispatch(otrHandlers, rdpHandlers, f3dexHandlers);
+static const UcodeHandler f3dex2Dispatch(otrHandlers, rdpHandlers, f3dex2Handlers);
+static const UcodeHandler s2dexDispatch(otrHandlers, rdpHandlers, s2dexHandlers);
+
+'''
+    text = text[:start] + dispatch + handlers + text[end:]
+    name_start = text.index('const char* GfxGetOpcodeName(int8_t opcode) {')
+    name_end = text.index('\n}', name_start)
+    old_name = text[name_start:name_end]
+    new_name = '''const char* GfxGetOpcodeName(int8_t opcode) {
+    if (ucode_handler_index < ucode_handlers.size()) {
+        const auto& handler = ucode_handlers[ucode_handler_index]->at(opcode);
+        if (handler.first) return handler.first;
+        SPDLOG_CRITICAL("Unhandled OP code: 0x{:X}, for loaded ucode: {}", (uint8_t)opcode,
+                        (uint32_t)ucode_handler_index);
+    } else {
+        // Preserve the original OTR/RDP priority even for an invalid ucode.
+        if (otrHandlers.contains(opcode)) return otrHandlers.at(opcode).first;
+        if (rdpHandlers.contains(opcode)) return rdpHandlers.at(opcode).first;
+        SPDLOG_CRITICAL("Unhandled OP code: 0x{:X}, invalid ucode: {}", (uint8_t)opcode,
+                        (uint32_t)ucode_handler_index);
+    }
+    return nullptr;'''
+    if old_name.count('otrHandlers.contains(opcode)') != 1 or old_name.count('rdpHandlers.contains(opcode)') != 1:
+        raise ValueError('Opcode name dispatch anchor changed')
+    text = text[:name_start] + new_name + text[name_end:]
+    step_start = text.index('static void gfx_step() {')
+    step_end = text.index('\n}', step_start)
+    step = text[step_start:step_end]
+    dispatch_start = step.index('    if (otrHandlers.contains(opcode)) {')
+    dispatch_end = step.index('\n    ++cmd;', dispatch_start)
+    new_step = '''    if (ucode_handler_index < ucode_handlers.size()) {
+        const auto& handler = ucode_handlers[ucode_handler_index]->at(opcode);
+        if (handler.first) {
+            if (handler.second(&cmd)) return;
+        } else {
+            SPDLOG_CRITICAL("Unhandled OP code: 0x{:X}, for loaded ucode: {}", (uint8_t)opcode,
+                            (uint32_t)ucode_handler_index);
+        }
+    } else {
+        // Invalid ucode retains the independent OTR/RDP dispatch paths.
+        if (otrHandlers.contains(opcode)) {
+            if (otrHandlers.at(opcode).second(&cmd)) return;
+        } else if (rdpHandlers.contains(opcode)) {
+            if (rdpHandlers.at(opcode).second(&cmd)) return;
+        } else {
+            SPDLOG_CRITICAL("Unhandled OP code: 0x{:X}, invalid ucode: {}", (uint8_t)opcode,
+                            (uint32_t)ucode_handler_index);
+        }
+    }
+'''
+    step = step[:dispatch_start] + new_step + step[dispatch_end:]
+    text = text[:step_start] + step + text[step_end:]
+    return text, tables

@@ -94,7 +94,7 @@ int main() {
         finish = function(source, 'void FinishFramebuffer(bool preserveDepth, bool preserveColor) {')
         self.assertIn('Shipyard_Check(xenos_device->EndTiling(', finish)
         self.assertLess(finish.index('EndTiling('), finish.index('tiling_guard_trial_window.Close();'))
-        self.assertIn('if (!tiling_guard_trial_enabled) return false;', source)
+        self.assertIn('if (!SHIPYARD_XENOS_TILING_TRIALS || !tiling_guard_trial_enabled) return false;', source)
         self.assertIn('b.width == 1920 && b.height == 1080 &&', source)
         self.assertIn('b.tiles.size() == 2 && b.samples == 1', source)
 

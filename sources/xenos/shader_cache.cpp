@@ -1,11 +1,14 @@
 #include "services.h"
 #include "shader_cache.h"
+#include "shader_pack.h"
 #include <xdk.h>
 #include <stdio.h>
+#include <string.h>
 #include <map>
 #include <new>
 #include <utility>
 #include <vector>
+#include <algorithm>
 
 namespace Shipyard {
 namespace Xenos {
@@ -126,6 +129,124 @@ struct CodeCache {
     void Store(const std::string& key, const void* code, size_t size);
 } cache;
 
+// Read-only prebuilt pack, resident after one sequential read at startup: a
+// hit costs a binary search, never file I/O on the render thread. Lookups
+// happen on the render thread only.
+struct PrebuiltPack {
+    std::vector<DWORD> words; // whole file; DWORD storage keeps microcode aligned
+    std::vector<ShaderPackProgram> index;
+    std::vector<unsigned char> checked; // 0 unchecked, 1 good, 2 corrupt
+    uint32_t probe;
+    unsigned char probeDigest[32];
+    PrebuiltPack() : probe(0) {}
+    const unsigned char* Bytes() const {
+        return reinterpret_cast<const unsigned char*>(&words[0]);
+    }
+    bool Open(const char* path) {
+        if (!index.empty() || !path)
+            return false;
+        FILE* handle = fopen(path, "rb");
+        if (!handle)
+            return false;
+        bool valid = fseek(handle, 0, SEEK_END) == 0;
+        const long length = valid ? ftell(handle) : -1;
+        valid = valid && length >= (long)ShaderPackHeaderBytes && !(length & 3) &&
+                fseek(handle, 0, SEEK_SET) == 0;
+        std::vector<DWORD> file;
+        std::vector<ShaderPackProgram> entries;
+        try {
+            if (valid) {
+                file.resize((size_t)length / 4);
+                valid = fread(&file[0], 1, (size_t)length, handle) == (size_t)length;
+            }
+            const unsigned char* bytes = valid ? reinterpret_cast<const unsigned char*>(&file[0]) : NULL;
+            valid = valid && ShaderPackRead32(bytes) == ShaderPackMagic &&
+                    ShaderPackRead32(bytes + 4) == ShaderPackVersion &&
+                    ShaderPackRead32(bytes + 8) == _XDK_VER &&
+                    ShaderPackRead32(bytes + 12) == D3DX_SDK_VERSION;
+            const uint32_t count = valid ? ShaderPackRead32(bytes + 16) : 0;
+            probe = valid ? ShaderPackRead32(bytes + 20) : 0;
+            valid = valid && count && count <= ShaderPackMaxEntries && probe < count &&
+                    ShaderPackHeaderBytes + (size_t)count * ShaderPackEntryBytes <= (size_t)length;
+            entries.reserve(count);
+            for (uint32_t i = 0; valid && i < count; ++i) {
+                const ShaderPackProgram entry =
+                    ShaderPackParseProgram(bytes + ShaderPackHeaderBytes + i * ShaderPackEntryBytes);
+                valid = Within(entry.vertexOffset, entry.vertexSize, (size_t)length) &&
+                        Within(entry.pixelOffset, entry.pixelSize, (size_t)length) &&
+                        entry.floats && entry.flags <= (ShaderPackThreePoint | ShaderPackSrgb) &&
+                        (!i || ShaderPackBefore(entries[i - 1].shaderId0, entries[i - 1].shaderId1,
+                                                entries[i - 1].flags, entry.shaderId0,
+                                                entry.shaderId1, entry.flags));
+                entries.push_back(entry);
+            }
+            if (valid) {
+                checked.assign(count, 0);
+                memcpy(probeDigest, bytes + 32, sizeof(probeDigest));
+            }
+        } catch (const std::bad_alloc&) {
+            valid = false;
+        }
+        fclose(handle);
+        if (!valid) {
+            Shipyard_Log("shader pack rejected: truncated, unsorted or built for another XDK");
+            return false;
+        }
+        words.swap(file);
+        index.swap(entries);
+        Shipyard_Log("shader pack loaded programs=%u bytes=%u", (unsigned)index.size(),
+                     (unsigned)(words.size() * 4));
+        return true;
+    }
+    static bool Within(uint32_t offset, uint32_t size, size_t length) {
+        return size && size <= MaxCode && !(size & 3) && !(offset & 3) &&
+               offset >= ShaderPackHeaderBytes && offset <= length && size <= length - offset;
+    }
+    static bool Less(const ShaderPackProgram& entry, const ShaderPackProgram& key) {
+        return ShaderPackBefore(entry.shaderId0, entry.shaderId1, entry.flags, key.shaderId0,
+                                key.shaderId1, key.flags);
+    }
+    // The checksum covers the key, floats and both microcode blobs; each entry
+    // is verified on its first use.
+    bool Intact(size_t i) {
+        if (!checked[i]) {
+            const ShaderPackProgram& entry = index[i];
+            const unsigned char* bytes = Bytes();
+            unsigned char head[20];
+            for (int b = 0; b < 8; ++b)
+                head[b] = (unsigned char)(entry.shaderId0 >> (56 - 8 * b));
+            const uint32_t fields[3] = {entry.shaderId1, entry.flags, entry.floats};
+            for (int f = 0; f < 3; ++f)
+                for (int b = 0; b < 4; ++b)
+                    head[8 + f * 4 + b] = (unsigned char)(fields[f] >> (24 - 8 * b));
+            uint32_t crc = ShaderPackChecksum(head, sizeof(head));
+            crc = ShaderPackChecksum(bytes + entry.vertexOffset, entry.vertexSize, crc);
+            crc = ShaderPackChecksum(bytes + entry.pixelOffset, entry.pixelSize, crc);
+            checked[i] = crc == entry.checksum ? 1 : 2;
+        }
+        return checked[i] == 1;
+    }
+    bool Find(uint64_t shaderId0, uint32_t shaderId1, uint32_t flags, PackedShaderProgram* out) {
+        if (index.empty() || !out)
+            return false;
+        ShaderPackProgram key = {};
+        key.shaderId0 = shaderId0;
+        key.shaderId1 = shaderId1;
+        key.flags = flags;
+        std::vector<ShaderPackProgram>::const_iterator it =
+            std::lower_bound(index.begin(), index.end(), key, Less);
+        if (it == index.end() || Less(key, *it) || !Intact(it - index.begin()))
+            return false;
+        const unsigned char* bytes = Bytes();
+        out->vertex = reinterpret_cast<const DWORD*>(bytes + it->vertexOffset);
+        out->vertexBytes = it->vertexSize;
+        out->pixel = reinterpret_cast<const DWORD*>(bytes + it->pixelOffset);
+        out->pixelBytes = it->pixelSize;
+        out->floats = it->floats;
+        return true;
+    }
+} pack;
+
 void CacheCompleted(bool ok) {
     if (!ok && cache.writable) {
         cache.writable = false;
@@ -196,6 +317,26 @@ void CodeCache::Store(const std::string& key, const void* code, size_t size) {
 }
 } // namespace
 
+bool ConfigureShaderPack(const char* path) {
+    return pack.Open(path);
+}
+bool FindPackedProgram(uint64_t shaderId0, uint32_t shaderId1, bool threePoint, bool srgb,
+                       PackedShaderProgram* program) {
+    return pack.Find(shaderId0, shaderId1, ShaderPackFlags(threePoint, srgb), program);
+}
+bool GetShaderPackProbe(uint64_t* shaderId0, uint32_t* shaderId1, bool* threePoint, bool* srgb,
+                        size_t* floats, unsigned char sourceDigest[32]) {
+    if (pack.index.empty())
+        return false;
+    const ShaderPackProgram& entry = pack.index[pack.probe];
+    *shaderId0 = entry.shaderId0;
+    *shaderId1 = entry.shaderId1;
+    *threePoint = (entry.flags & ShaderPackThreePoint) != 0;
+    *srgb = (entry.flags & ShaderPackSrgb) != 0;
+    *floats = entry.floats;
+    memcpy(sourceDigest, pack.probeDigest, sizeof(pack.probeDigest));
+    return true;
+}
 bool ConfigureShaderCache(const ShaderCacheConfig& config) {
     if (cache.loaded || cache.configured || !config.path || !config.path[0] ||
         !config.formatVersion)
@@ -207,10 +348,13 @@ bool ConfigureShaderCache(const ShaderCacheConfig& config) {
     return true;
 }
 ID3DXBuffer* LoadShaderCode(const std::string& source, const char* entry, const char* profile) {
-    if (!cache.configured)
-        return NULL;
     try {
-        const std::vector<DWORD>* code = cache.Find(Key(source, entry, profile));
+        // Programs the pack covers never reach source compilation; this cache
+        // holds the runtime misses.
+        const std::string key = Key(source, entry, profile);
+        if (!cache.configured)
+            return NULL;
+        const std::vector<DWORD>* code = cache.Find(key);
         if (!code)
             return NULL;
         ID3DXBuffer* buffer = NULL;

@@ -44,6 +44,15 @@ int main() {
     assert(Shipyard_LowerShader(frame + vertex, lowered, error));
     assert(lowered.find("float4 rasterDepthInfo : register(c14);") != std::string::npos);
     assert(lowered.find("result.position.z *= rasterDepthInfo.x;") != std::string::npos);
+    assert(Shipyard_LowerShader(frame + vertex, lowered, error, 2));
+    assert(lowered.find("// Shipyard Xenos lowering ABI 2\n") == 0);
+    assert(lowered.find("rasterDepthInfo") == std::string::npos);
+    assert(lowered.find("result.position = position;") != std::string::npos);
+    const std::string abi2 = lowered;
+    assert(!Shipyard_LowerShader(frame + depth + output, lowered, error, 2));
+    assert(lowered == abi2);
+    assert(!Shipyard_LowerShader(frame + vertex, lowered, error, 4));
+    assert(lowered == abi2);
     // Unknown vertex forms must fail rather than silently omit depth behavior.
     std::string unknown = vertex;
     unknown.replace(unknown.find("result.position = position;"), 27, "result.position = position * 1.0;");

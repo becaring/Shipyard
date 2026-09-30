@@ -23,6 +23,19 @@ Consumers supply their pinned upstream headers, platform adapters, build project
 and Xbox 360 SDK installation. See [architecture](docs/ARCHITECTURE.md) for the
 interface boundaries.
 
+## One shared package
+
+All three consumers compile the package at the repository root. Each consumer
+pins its own exact Git revision, API version and baseline digest; adoption of a
+shared change remains a deliberate step in that consumer.
+
+API 7 replaces the former complete per-game snapshots with additive interfaces,
+explicit source-projection options and native renderer capabilities. The common
+code is maintained once. Consumer adapters select the shader ABI, framebuffer
+reuse and diagnostic behavior their upstream version supports. See the
+[capability contract](docs/CAPABILITIES.md) for the current selections and tests.
+The retired snapshots remain recoverable in Git history.
+
 ## Use and development
 
 Pin a Git revision, API version and manifest digest in the consumer's lock file,

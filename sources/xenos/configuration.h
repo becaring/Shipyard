@@ -1,0 +1,34 @@
+#pragma once
+
+// Consumer build capabilities. Defaults preserve the original shared backend.
+// Define these for the entire backend build; never infer policy from game names.
+#ifndef SHIPYARD_XENOS_SHADER_ABI
+#define SHIPYARD_XENOS_SHADER_ABI 3
+#endif
+#if SHIPYARD_XENOS_SHADER_ABI != 2 && SHIPYARD_XENOS_SHADER_ABI != 3
+#error Unsupported Xenos shader ABI
+#endif
+#ifndef SHIPYARD_XENOS_SHADER_PACK
+#define SHIPYARD_XENOS_SHADER_PACK 0
+#endif
+#ifndef SHIPYARD_XENOS_DIAGNOSTICS
+#define SHIPYARD_XENOS_DIAGNOSTICS 1
+#endif
+#ifndef SHIPYARD_XENOS_DETAILED_TIMING
+#define SHIPYARD_XENOS_DETAILED_TIMING 1
+#endif
+#ifndef SHIPYARD_XENOS_ALPHA_HISTOGRAM
+#define SHIPYARD_XENOS_ALPHA_HISTOGRAM 0
+#endif
+#ifndef SHIPYARD_XENOS_DEFERRED_FRAMEBUFFERS
+#define SHIPYARD_XENOS_DEFERRED_FRAMEBUFFERS 0
+#endif
+#ifndef SHIPYARD_XENOS_BINDING_REUSE
+#define SHIPYARD_XENOS_BINDING_REUSE 0
+#endif
+#ifndef SHIPYARD_XENOS_TILING_BUDGET
+#define SHIPYARD_XENOS_TILING_BUDGET 0
+#endif
+#ifndef SHIPYARD_XENOS_TILING_TRIALS
+#define SHIPYARD_XENOS_TILING_TRIALS 1
+#endif

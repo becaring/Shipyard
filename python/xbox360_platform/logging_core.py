@@ -245,13 +245,14 @@ def native_file_paths(t):
     return t
 
 
-def _project_operating_system(texts):
+def _project_operating_system(texts, normalize_file_paths):
     t = read('details/os.h')
     t = t.replace('int pid() SPDLOG_NOEXCEPT', 'int pid()')
     texts['details/os.h'] = generic(t)
     t = read('details/os-inl.h')
-    t = native_file_paths(t)
-    t = '#include "' + (Path(__file__).resolve().parents[2] / 'sources/filesystem/filesystem.h').as_posix() + '"\n' + t
+    if normalize_file_paths:
+        t = native_file_paths(t)
+        t = '#include "' + (Path(__file__).resolve().parents[2] / 'sources/filesystem/filesystem.h').as_posix() + '"\n' + t
     t = t.replace(
         '#include <spdlog/details/windows_include.h>',
         '#include "' + (BASE / 'native.h').as_posix() + '"\n#include <share.h>',
@@ -694,10 +695,10 @@ def _project_async_backend_workaround(texts):
     texts[name] = t
 
 
-def generate(out):
+def generate(out, *, normalize_file_paths=True):
     texts = {'common.h': common()}
     _project_common_support(texts)
-    _project_operating_system(texts)
+    _project_operating_system(texts, normalize_file_paths)
     _project_log_messages(texts)
     _project_formatters(texts)
     _project_logger(texts)

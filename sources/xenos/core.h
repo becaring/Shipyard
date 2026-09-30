@@ -14,17 +14,32 @@
 #include "tiling_space_probe.h"
 #include "tiling_guard_trial.h"
 #include "tile1_predication_trial.h"
+#include "alpha_mode_histogram.h"
 
 namespace Fast {
 struct ShaderProgram;
 
 namespace ShipyardXenos {
+// Vertex and pixel microcode plus the vertex float count for one program.
+struct ShaderProgramCode {
+    const DWORD* vertex;
+    size_t vertexBytes;
+    const DWORD* pixel;
+    size_t pixelBytes;
+    size_t floats;
+};
 struct ShaderCacheOps {
     ID3DXBuffer* (*load)(const std::string&, const char*, const char*);
     void (*store)(const std::string&, const char*, const char*, ID3DXBuffer*);
+    // Optional prebuilt program by key. A hit skips shader generation,
+    // lowering and compilation; the code must stay valid until shutdown.
+    bool (*program)(const ShaderProgramKey&, ShaderProgramCode*);
 };
 void SetShaderCache(const ShaderCacheOps* operations);
 struct NativeCounters {
+    unsigned alphaDraws[NativeAlphaHistogram::ModeCount];
+    unsigned alphaTriangles[NativeAlphaHistogram::ModeCount];
+    unsigned alphaVertices[NativeAlphaHistogram::ModeCount];
     unsigned samplerAttempted, samplerWritten, samplerSuppressed;
     unsigned constantsAttempted, constantsWritten, constantsSuppressed;
     unsigned bindingAttempted, bindingWritten, bindingSuppressed;
@@ -64,6 +79,7 @@ struct NativeTimingCounters {
 };
 // A false-to-true transition starts a fresh interval. Repeated values preserve it.
 void SetTimingEnabled(bool enabled);
+void SetDetailedTimingEnabled(bool enabled);
 // Render-thread-only, off by default. Applies only to a 1920x1080,
 // two-tile, single-sample target.
 void SetTilingGuardTrialEnabled(bool enabled);

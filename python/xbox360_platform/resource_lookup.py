@@ -7,6 +7,36 @@ def _once(source, old, new):
     return source.replace(old, new, 1)
 
 
+def synchronous_cache_hits(source):
+    """Return settled synchronous hits without constructing a ready future.
+
+    Probe normalized tagged names with the version's own cache policy. Leave
+    misses to its asynchronous path, including its init-data normalization rules.
+    """
+    signature = 'std::shared_ptr<IResource> ResourceManager::LoadResource(const ResourceIdentifier& identifier, bool loadExact,'
+    if source.count(signature) != 1:
+        raise ValueError('synchronous resource load signature changed')
+    normalization = '''auto newFilePath = identifier.Path.substr(7);
+        return LoadResourceAsync(ResourceIdentifier(newFilePath, identifier.Owner, identifier.Parent), loadExact, priority);'''
+    if source.count(normalization) != 1:
+        raise ValueError('asynchronous resource normalization policy changed')
+    start = source.index(signature)
+    end = source.index('\n}', start) + 2
+    body = _once(source[start:end],
+        '    auto resource = LoadResourceAsync(identifier, loadExact, BS::pr::highest, initData).get();',
+        '''    std::shared_ptr<IResource> cached;
+    if (OtrSignatureCheck(identifier.Path.c_str())) {
+        std::string normalizedPath = identifier.Path.substr(7);
+        while (OtrSignatureCheck(normalizedPath.c_str())) normalizedPath.erase(0, 7);
+        cached = GetCachedResource(ResourceIdentifier(normalizedPath, identifier.Owner, identifier.Parent), loadExact);
+    } else {
+        cached = GetCachedResource(identifier, loadExact);
+    }
+    if (cached) return cached;
+    auto resource = LoadResourceAsync(identifier, loadExact, BS::pr::highest, initData).get();''')
+    return source[:start] + body + source[end:]
+
+
 def borrowed_cache_header(source):
     source = '#include "resources/path_span.h"\n' + source
     source = _once(source,
@@ -38,7 +68,7 @@ def borrowed_cache_header(source):
 ''' + anchor)
 
 
-def borrowed_cache_source(source):
+def borrowed_cache_source(source, *, owned_rvalue_constructor=False):
     signature = 'ResourceManager::GetCachedResource(xbox_compat::variant<ResourceLoadError, std::shared_ptr<IResource>> cacheLine)'
     begin = source.index(signature)
     end = source.index('\n}', begin) + 2
@@ -65,6 +95,13 @@ ResourceIdentifier::ResourceIdentifier(const char* path, uintptr_t owner,
       mBorrowedPrefix(prefix), mBorrowedPrefixLength(prefixLength) {
     mHash = CalculateHash();
 }''' + source[end:]
+    rvalue = ': Path(std::move(path)), Owner(owner), Parent(parent) {'
+    if owned_rvalue_constructor:
+        source = _once(source, rvalue,
+            ': Path(std::move(path)), Owner(owner), Parent(parent), mBorrowedPath(NULL), '
+            'mBorrowedLength(0), mBorrowedPrefix(""), mBorrowedPrefixLength(0) {')
+    elif rvalue in source:
+        raise ValueError('ResourceIdentifier rvalue constructor requires an explicit capability')
     source = _once(source, 'return Owner == rhs.Owner && Path == rhs.Path && Parent == rhs.Parent;',
         'return Owner == rhs.Owner && LookupView() == rhs.LookupView() && Parent == rhs.Parent;')
     source = _once(source, 'Shipyard::Resources::PathHash()(Path)',
@@ -118,6 +155,26 @@ ResourceIdentifier::ResourceIdentifier(const char* path, uintptr_t owner,
 
 ''' + source[start:]
     return '#include <cstring>\n' + source
+
+
+def drain_header(source):
+    return _once(source, '    ~ResourceManager();',
+        '    ~ResourceManager();\n    void WaitForPendingTasks();')
+
+
+def drain_source(source):
+    return _once(source, 'ResourceManager::~ResourceManager() {', '''void ResourceManager::WaitForPendingTasks() {
+    // Called by the application thread after producers stop, while Context lives.
+    if (mThreadPool) {
+        mThreadPool->unpause();
+        mThreadPool->wait();
+    }
+}
+
+ResourceManager::~ResourceManager() {
+    WaitForPendingTasks();
+    // Workers must leave before the cache mutex and other members are destroyed.
+    mThreadPool.reset();''')
 
 
 def stateless_signature(source):

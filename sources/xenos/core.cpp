@@ -1,22 +1,38 @@
+#include "configuration.h"
 #include "core.h"
 #include "services.h"
+#if SHIPYARD_XENOS_SHADER_ABI >= 3
 #include "raster_bounds.h"
 #include "depth_clip.h"
+#endif
 #include "pixels.h"
 #include "shader_provider.h"
 #include "tile_coverage.h"
 #include "tile1_predication_draw.h"
 #include "ring_probe.h"
+#include "tiling_budget.h"
 #include "sampler_certificate.h"
 
 #include "metrics.h"
 #include "presentation/xenos_swap_chain.h"
+#include "depth_discard.h"
 #include <xgraphics.h>
 #include <vectorintrinsics.h>
 #include <stddef.h>
 #include <stdio.h>
 #include <map>
 #include <algorithm>
+
+#if SHIPYARD_XENOS_DIAGNOSTICS
+#define SHIPYARD_DIAGNOSTIC(statement) do { statement; } while (0)
+#else
+#define SHIPYARD_DIAGNOSTIC(statement) do { } while (0)
+#endif
+
+// The feature decode Shipyard_BuildFast3DShader runs first (shader_provider).
+#if SHIPYARD_XENOS_SHADER_PACK
+void Shipyard_DecodeFast3DFeatures(const Fast::ShaderProgramKey&, CCFeatures*);
+#endif
 
 namespace Fast {
 // The graphics device is created during display initialization and released by Shutdown().
@@ -32,10 +48,12 @@ struct ShaderProgram {
 namespace {
 // Consumer callbacks may load/store shader bytecode. Shipyard owns the compiled
 // D3D objects and their lifetime regardless of the bytecode cache policy.
-ShipyardXenos::ShaderCacheOps shader_cache_ops = {NULL, NULL};
+ShipyardXenos::ShaderCacheOps shader_cache_ops = {NULL, NULL, NULL};
 ShipyardXenos::NativeTimingCounters timing_counts;
 bool timing_enabled;
+bool detailed_timing_enabled = SHIPYARD_XENOS_DETAILED_TIMING != 0;
 uint64_t timing_frequency;
+#if SHIPYARD_XENOS_DIAGNOSTICS
 class NativeTimingScope {
     uint64_t* ticks;
     LARGE_INTEGER started;
@@ -55,6 +73,12 @@ public:
         }
     }
 };
+#else
+class NativeTimingScope {
+public:
+    NativeTimingScope(uint64_t&, unsigned&) {}
+};
+#endif
 
 struct TextureSampler {
     bool linear;
@@ -86,11 +110,11 @@ struct Framebuffer {
     uint32_t width, height, samples;
     float shader_width, shader_height;
     TextureSampler sampler;
-    bool stored, depth_stored, render_target;
+    bool stored, depth_stored, render_target, hiz_capable;
     Framebuffer()
         : color(NULL), depth(NULL), image(NULL), width(0), height(0), samples(1), shader_width(0),
           shader_height(0), sampler(true), stored(false), depth_stored(false),
-          render_target(false) {
+          render_target(false), hiz_capable(false) {
         for (int i = 0; i < 4; ++i) {
             color_samples[i] = NULL;
             depth_samples[i] = NULL;
@@ -140,6 +164,18 @@ std::vector<PendingTextureRelease> pending_texture_releases;
 size_t pending_texture_bytes;
 std::vector<Framebuffer> buffers;
 std::vector<int> free_framebuffers;
+// The depth an update's final replay left in a framebuffer, published for the
+// next update's deferred game read. The game reads it only after that update's
+// first replay was submitted; a depth resolve of the framebuffer in between
+// moves the framebuffer to the spare instead of overwriting the published
+// texture (copy on write). Steady replays discard intermediate depth, so the
+// spare is allocated only when a replay switches targets mid-frame.
+struct PublishedDepth {
+    IDirect3DTexture9* texture; // Owned reference while published.
+    IDirect3DTexture9* spare;   // Owned; a retired texture kept for the next copy.
+    int framebuffer;
+    uint32_t width, height, spare_width, spare_height;
+} published_depth = {NULL, NULL, -1, 0, 0, 0, 0};
 unsigned framebuffer_clear_count, framebuffer_restore_avoided, framebuffer_depth_restore_avoided;
 unsigned framebuffer_depth_resolves, framebuffer_depth_resolves_skipped;
 unsigned framebuffer_early_depth_fences;
@@ -160,6 +196,8 @@ bool discard_presentation_depth_on_end;
 bool discard_presentation_color_on_end;
 unsigned presentation_color_resolves_skipped, presentation_color_discard_blocked;
 ShaderProgram* current_shader;
+#if SHIPYARD_XENOS_SHADER_ABI >= 3
+#endif
 float primitive_depth;
 bool primitive_depth_enabled, primitive_depth_valid;
 uint32_t selected[6];
@@ -176,10 +214,15 @@ IDirect3DPixelShader9* restore_depth;
 IDirect3DVertexDeclaration9* restore_declaration;
 IDirect3DStateBlock9* restore_state;
 bool live_framebuffer, tile_constants_owned;
+#if SHIPYARD_XENOS_SHADER_ABI >= 3
 Shipyard::Xenos::RasterBounds raster_bounds;
 Shipyard::Xenos::DepthClipState depth_clip;
+#endif
+int pending_game_depth_clear = -1;
 size_t tiling_draw_bytes;
+ShipyardXenos::TilingBudget tiling_budget;
 void BeginFramebuffer();
+void Clear(bool color, bool depth);
 void FinishFramebuffer(bool preserveDepth = true, bool preserveColor = true);
 void TilingSpaceBegin();
 void TilingSpaceSetup();
@@ -187,12 +230,15 @@ void TilingSpaceBeforeResolve();
 void TilingSpaceBeforeEnd();
 void QueryTilingSpace(DWORD* used, DWORD* remaining);
 bool GuardTrialBeforeDraw(uint64_t inputBytes);
+bool ContinueTilingBeforeDraw(uint64_t inputBytes);
+bool ContinueTilingAfterDraw();
 bool GuardTrialAfterDraw();
 void RebindSampledTextures();
 void Resolve(int id);
 unsigned frame_number;
 float shader_frame_number;
 float noise_scale = 1;
+float noise_scale_input = 1;
 FilteringMode filtering = FILTER_THREE_POINT;
 unsigned filtering_key = unsigned(FILTER_THREE_POINT) << 4;
 
@@ -221,15 +267,18 @@ bool draw_state_prepared;
 ShipyardXenos::SamplerCertificate sampler_certificate;
 unsigned draw_sampler_mask;
 ShipyardNativeStateCounts native_state_counts;
+ShipyardXenos::NativeAlphaHistogram alpha_histogram;
 unsigned binding_attempted, binding_written, binding_suppressed;
 const D3DSAMPLERSTATETYPE sampler_fields[5] = {
     D3DSAMP_MINFILTER, D3DSAMP_MAGFILTER, D3DSAMP_MIPFILTER, D3DSAMP_ADDRESSU, D3DSAMP_ADDRESSV};
 
 void InvalidateNativeState() {
+    draw_state_prepared = false;
     sampler_certificate.Invalidate();
+#if SHIPYARD_XENOS_SHADER_ABI >= 3
     depth_clip.Invalidate();
     primitive_depth_valid = false;
-    draw_state_prepared = false;
+#endif
     for (int i = 0; i < 6; ++i) {
         native_state.sampler_valid[i] = false;
     }
@@ -285,11 +334,11 @@ __forceinline bool SameNativeConstants(const float* constants) {
     return (condition & 0x80) != 0; // XDK XM_CRMASK_CR6TRUE: all lanes equal.
 }
 void SetNativeConstants(const float* constants) {
-    ++native_state_counts.constants_attempted;
+    SHIPYARD_DIAGNOSTIC(++native_state_counts.constants_attempted);
     if (native_state.constants_valid && SameNativeConstants(constants)) {
         if (Shipyard_VerifyFast3DReuse())
             VerifyNativeConstants(constants);
-        ++native_state_counts.constants_suppressed;
+        SHIPYARD_DIAGNOSTIC(++native_state_counts.constants_suppressed);
         return;
     }
     // One small upload is cheaper than scalar range scans and split SDK calls.
@@ -299,7 +348,7 @@ void SetNativeConstants(const float* constants) {
     __stvx(__lvx(constants, 16), native_state.constants, 16);
     __stvx(__lvx(constants, 32), native_state.constants, 32);
     native_state.constants_valid = true;
-    ++native_state_counts.constants_written;
+    SHIPYARD_DIAGNOSTIC(++native_state_counts.constants_written);
 }
 
 __declspec(noinline) void VerifyNativeBindingConstants(const float* values) {
@@ -311,24 +360,26 @@ __declspec(noinline) void VerifyNativeBindingConstants(const float* values) {
 }
 
 void SetNativeBindingConstants(const float* values) {
-    ++binding_attempted;
+    SHIPYARD_DIAGNOSTIC(++binding_attempted);
     float* cached = native_state.binding_constants;
     typedef char
         BindingConstantsAligned[(offsetof(NativeStateCache, binding_constants) % 16 == 0) ? 1 : -1];
-    const __vector4 d0 = __vxor(__lvx(cached, 0), __lvx(values, 0));
-    const __vector4 d1 = __vxor(__lvx(cached, 16), __lvx(values, 16));
-    const __vector4 d2 = __vxor(__lvx(cached, 32), __lvx(values, 32));
-    const __vector4 d3 = __vxor(__lvx(cached, 48), __lvx(values, 48));
-    const __vector4 d4 = __vxor(__lvx(cached, 64), __lvx(values, 64));
-    const __vector4 d5 = __vxor(__lvx(cached, 80), __lvx(values, 80));
-    unsigned condition;
-    __vcmpequwR(__vor(__vor(__vor(d0, d1), __vor(d2, d3)), __vor(d4, d5)), __vspltisw(0),
-                &condition);
-    if (native_state.binding_constants_valid && (condition & 0x80) != 0) {
-        if (Shipyard_VerifyFast3DReuse())
-            VerifyNativeBindingConstants(values);
-        ++binding_suppressed;
-        return;
+    if (native_state.binding_constants_valid) {
+        const __vector4 d0 = __vxor(__lvx(cached, 0), __lvx(values, 0));
+        const __vector4 d1 = __vxor(__lvx(cached, 16), __lvx(values, 16));
+        const __vector4 d2 = __vxor(__lvx(cached, 32), __lvx(values, 32));
+        const __vector4 d3 = __vxor(__lvx(cached, 48), __lvx(values, 48));
+        const __vector4 d4 = __vxor(__lvx(cached, 64), __lvx(values, 64));
+        const __vector4 d5 = __vxor(__lvx(cached, 80), __lvx(values, 80));
+        unsigned condition;
+        __vcmpequwR(__vor(__vor(__vor(d0, d1), __vor(d2, d3)), __vor(d4, d5)), __vspltisw(0),
+                    &condition);
+        if ((condition & 0x80) != 0) {
+            if (Shipyard_VerifyFast3DReuse())
+                VerifyNativeBindingConstants(values);
+            SHIPYARD_DIAGNOSTIC(++binding_suppressed);
+            return;
+        }
     }
     Shipyard_Check(xenos_device->SetPixelShaderConstantF(8, values, 6), "binding constants");
     __stvx(__lvx(values, 0), cached, 0);
@@ -338,7 +389,7 @@ void SetNativeBindingConstants(const float* values) {
     __stvx(__lvx(values, 64), cached, 64);
     __stvx(__lvx(values, 80), cached, 80);
     native_state.binding_constants_valid = true;
-    ++binding_written;
+    SHIPYARD_DIAGNOSTIC(++binding_written);
 }
 
 template <int tile> void ApplySamplerSlot(const TextureSampler& sampler) {
@@ -348,8 +399,8 @@ template <int tile> void ApplySamplerSlot(const TextureSampler& sampler) {
         draw_state_prepared = false;
     const unsigned key = sampler.key | filtering_key;
     if (native_state.sampler_valid[tile] && native_state.sampler_key[tile] == key) {
-        native_state_counts.sampler_attempted += 5;
-        native_state_counts.sampler_suppressed += 5;
+        SHIPYARD_DIAGNOSTIC(native_state_counts.sampler_attempted += 5);
+        SHIPYARD_DIAGNOSTIC(native_state_counts.sampler_suppressed += 5);
         if (Shipyard_VerifyFast3DReuse())
             VerifyNativeSampler(tile, native_state.sampler[tile]);
         return;
@@ -364,12 +415,12 @@ template <int tile> void ApplySamplerSlot(const TextureSampler& sampler) {
                             : (sampler.t & 1) ? D3DTADDRESS_MIRROR
                                               : D3DTADDRESS_WRAP;
     DWORD* cached = native_state.sampler[tile];
-    native_state_counts.sampler_attempted += 5;
+    SHIPYARD_DIAGNOSTIC(native_state_counts.sampler_attempted += 5);
     if (native_state.sampler_valid[tile] && cached[0] == filter && cached[1] == filter &&
         cached[2] == D3DTEXF_NONE && cached[3] == address_u && cached[4] == address_v) {
         if (Shipyard_VerifyFast3DReuse())
             VerifyNativeSampler(tile, cached);
-        native_state_counts.sampler_suppressed += 5;
+        SHIPYARD_DIAGNOSTIC(native_state_counts.sampler_suppressed += 5);
         return;
     }
     // A real change must not rewrite the other four independent fields.
@@ -377,9 +428,9 @@ template <int tile> void ApplySamplerSlot(const TextureSampler& sampler) {
     if (!native_state.sampler_valid[tile] || cached[index] != (DWORD)(value)) {                    \
         xenos_device->SetSamplerState(tile, field, value);                                         \
         cached[index] = (DWORD)(value);                                                            \
-        ++native_state_counts.sampler_written;                                                     \
+        SHIPYARD_DIAGNOSTIC(++native_state_counts.sampler_written);                                \
     } else                                                                                         \
-        ++native_state_counts.sampler_suppressed
+        SHIPYARD_DIAGNOSTIC(++native_state_counts.sampler_suppressed)
     SHIPYARD_SAMPLER_FIELD(0, D3DSAMP_MINFILTER, filter);
     SHIPYARD_SAMPLER_FIELD(1, D3DSAMP_MAGFILTER, filter);
     SHIPYARD_SAMPLER_FIELD(2, D3DSAMP_MIPFILTER, D3DTEXF_NONE);
@@ -482,32 +533,49 @@ std::map<std::string, IDirect3DVertexDeclaration9*> vertex_declarations;
 ShaderProgram* CreateShader(const ShaderProgramKey& key) {
     ShaderProgram* shader = new ShaderProgram();
     shader->key = key;
-    std::string source, hlsl, error;
-    if (!Shipyard_BuildFast3DShader(key, shader->features, shader->floats, hlsl, error) ||
-        !Shipyard_LowerShader(hlsl, source, error)) {
-        Shipyard_Log("Fast3D shader generation/lowering failed: %s", error.c_str());
-        delete shader;
-        Shipyard_Fatal(error.c_str(), E_FAIL);
+    // A prebuilt program supplies both microcode blobs and the float count the
+    // builder would produce; the feature decode is the builder's own first step.
+    ShipyardXenos::ShaderProgramCode code = {NULL, 0, NULL, 0, 0};
+    ID3DXBuffer* vertex_code = NULL;
+    ID3DXBuffer* pixel_code = NULL;
+#if SHIPYARD_XENOS_SHADER_PACK
+    if (shader_cache_ops.program && shader_cache_ops.program(key, &code)) {
+        Shipyard_DecodeFast3DFeatures(key, &shader->features);
+        shader->floats = code.floats;
+    } else
+#endif
+    {
+        std::string source, hlsl, error;
+        if (!Shipyard_BuildFast3DShader(key, shader->features, shader->floats, hlsl, error) ||
+            !Shipyard_LowerShader(hlsl, source, error, SHIPYARD_XENOS_SHADER_ABI)) {
+            Shipyard_Log("Fast3D shader generation/lowering failed: %s", error.c_str());
+            delete shader;
+            Shipyard_Fatal(error.c_str(), E_FAIL);
+        }
+        vertex_code = Compile(source, "VSMain", "vs_3_0");
+        pixel_code = Compile(source, "PSMain", "ps_3_0");
+        code.vertex = (const DWORD*)vertex_code->GetBufferPointer();
+        code.vertexBytes = vertex_code->GetBufferSize();
+        code.pixel = (const DWORD*)pixel_code->GetBufferPointer();
+        code.pixelBytes = pixel_code->GetBufferSize();
     }
-    ID3DXBuffer* code = Compile(source, "VSMain", "vs_3_0");
-    const std::string vertex_key((const char*)code->GetBufferPointer(), code->GetBufferSize());
+    const std::string vertex_key((const char*)code.vertex, code.vertexBytes);
     std::map<std::string, IDirect3DVertexShader9*>::iterator existing_vertex =
         vertex_programs.find(vertex_key);
     if (existing_vertex != vertex_programs.end()) {
         shader->vertex = existing_vertex->second;
         shader->vertex->AddRef();
     } else {
-        Shipyard_Check(
-            xenos_device->CreateVertexShader((DWORD*)code->GetBufferPointer(), &shader->vertex),
-            "CreateVertexShader");
+        Shipyard_Check(xenos_device->CreateVertexShader(code.vertex, &shader->vertex),
+                       "CreateVertexShader");
         vertex_programs.insert(std::make_pair(vertex_key, shader->vertex));
     }
-    code->Release();
-    code = Compile(source, "PSMain", "ps_3_0");
-    Shipyard_Check(
-        xenos_device->CreatePixelShader((DWORD*)code->GetBufferPointer(), &shader->pixel),
-        "CreatePixelShader");
-    code->Release();
+    Shipyard_Check(xenos_device->CreatePixelShader(code.pixel, &shader->pixel),
+                   "CreatePixelShader");
+    if (vertex_code)
+        vertex_code->Release();
+    if (pixel_code)
+        pixel_code->Release();
     std::vector<D3DVERTEXELEMENT9> elements;
     WORD offset = 0;
     Element(elements, offset, 4, D3DDECLUSAGE_POSITION, 0);
@@ -677,7 +745,7 @@ void Upload(const uint8_t* bytes, uint32_t width, uint32_t height) {
     Texture& tex = textures[id];
     if (!width || !height || width > 4096 || height > 4096)
         Shipyard_Fatal("texture dimensions", E_INVALIDARG);
-    ++upload_counts.requests;
+    SHIPYARD_DIAGNOSTIC(++upload_counts.requests);
     const size_t size = width * height * 4;
     if (timing_enabled)
         timing_counts.uploadBytes += size;
@@ -685,14 +753,29 @@ void Upload(const uint8_t* bytes, uint32_t width, uint32_t height) {
     if (size <= UPLOAD_SNAPSHOT_BYTES && tex.native && snapshot.native == tex.native &&
         snapshot.id == id && snapshot.width == width && snapshot.height == height &&
         snapshot.rgba.size() == size && memcmp(&snapshot.rgba[0], bytes, size) == 0) {
-        if (Shipyard_VerifyFast3DReuse())
+        const bool verify_reuse = Shipyard_VerifyFast3DReuse();
+        if (verify_reuse)
             VerifyTextureUpload(tex, bytes);
-        ++upload_counts.reused;
-        upload_counts.bytes_saved += size;
-        // The upload target is already selected. The full rebind below owns
-        // the native binding and sampler update for every alias.
+        SHIPYARD_DIAGNOSTIC(++upload_counts.reused);
+        SHIPYARD_DIAGNOSTIC(upload_counts.bytes_saved += size);
+        const bool framebuffer_transition = selected_fb[upload_tile] >= 0;
         selected_fb[upload_tile] = -1;
+#if SHIPYARD_XENOS_BINDING_REUSE
+        if (verify_reuse) {
+            // Readback verification may have closed and reopened the render
+            // target, invalidating native texture bindings.
+            RebindSampledTextures();
+        } else {
+            if (framebuffer_transition) {
+                draw_state_prepared = false;
+                Shipyard_Check(SetNativeTexture(upload_tile, tex.native), "rebind upload target");
+                native_state.sampler_valid[upload_tile] = false;
+                ApplySampler(upload_tile, tex.sampler);
+            }
+        }
+#else
         RebindSampledTextures();
+#endif
         return;
     }
     snapshot.native = NULL;
@@ -761,7 +844,9 @@ void Sampler(int tile, bool linear, uint32_t s, uint32_t t) {
     ApplySampler(tile, sampler);
 }
 void Depth(bool test, bool write) {
+#if SHIPYARD_XENOS_SHADER_ABI >= 3
     depth_clip.SetDepth(test, write);
+#endif
     xenos_device->SetRenderState(D3DRS_ZENABLE, test || write);
     xenos_device->SetRenderState(D3DRS_ZWRITEENABLE, write);
     xenos_device->SetRenderState(D3DRS_ZFUNC, test ? D3DCMP_LESSEQUAL : D3DCMP_ALWAYS);
@@ -780,25 +865,35 @@ void Viewport(int x, int y, int w, int h) {
     // pending target switch (including BeginTiling) before applying Fast3D's
     // viewport, including after a switch from a smaller offscreen target.
     BeginFramebuffer();
+#if SHIPYARD_XENOS_SHADER_ABI >= 3
     raster_bounds.SetViewport(x, y, w, h);
     raster_bounds.Apply(xenos_device, buffers[active_fb].height);
+#else
+    D3DVIEWPORT9 v = {(DWORD)x, buffers[active_fb].height - y - h, (DWORD)w, (DWORD)h, 0, 1};
+    Shipyard_Check(xenos_device->SetViewport(&v), "viewport");
+#endif
 }
 void Scissor(int x, int y, int w, int h) {
     BeginFramebuffer();
+#if SHIPYARD_XENOS_SHADER_ABI >= 3
     raster_bounds.SetScissor(x, y, w, h);
     raster_bounds.ApplyScissor(xenos_device, buffers[active_fb].height);
+#else
+    LONG height = (LONG)buffers[active_fb].height;
+    RECT r = {x, height - y - h, x + w, height - y};
+    xenos_device->SetScissorRect(&r);
+    xenos_device->SetRenderState(D3DRS_SCISSORTESTENABLE, TRUE);
+#endif
 }
 bool requested_alpha;
 bool color_writes = true;
 unsigned NativeAlphaMode(bool enable, const CCFeatures* features) {
-    if (!enable)
-        return 0;
     // Keep alpha in the combiner for rejection; opaque survivors do not blend.
     // Other alpha modes retain the configured blending path.
-    return features && features->opt_alpha && features->opt_texture_edge && !features->opt_noise &&
-                   !features->opt_invisible
-               ? 2
-               : 1;
+    return ShipyardXenos::ClassifyNativeAlphaMode(
+        enable, features && features->opt_alpha,
+        features && features->opt_texture_edge,
+        features && features->opt_noise, features && features->opt_invisible);
 }
 void ApplyAlpha() {
     const unsigned mode =
@@ -865,11 +960,13 @@ __declspec(noinline) void RebuildDrawState() {
         }
     }
     SetNativeConstants(constants);
+#if SHIPYARD_XENOS_SHADER_ABI >= 3
     if (primitive_depth_enabled && !primitive_depth_valid) {
         const float depth[4] = {primitive_depth, 0, 0, 0};
         Shipyard_Check(xenos_device->SetPixelShaderConstantF(3, depth, 1), "primitive depth");
         primitive_depth_valid = true;
     }
+#endif
     for (int binding = 2; binding < 6; ++binding) {
         if (selected_fb[binding] >= 0) {
             const Framebuffer& b = buffers[selected_fb[binding]];
@@ -908,24 +1005,47 @@ void Draw(float* vertices, size_t count, size_t triangles) {
     // EndTiling cannot submit a partially filled SDK ring. Retain the target and
     // restart the native bracket before it consumes its reserved command space.
     // The allowance includes state-command space for each Fast3D batch.
+#if SHIPYARD_XENOS_TILING_TRIALS || SHIPYARD_XENOS_TILING_BUDGET
     bool trialContinued = false;
+    bool budgetContinued = false;
+    bool restoreGuardViewport = false;
+    D3DVIEWPORT9 guardViewport;
     if (live_framebuffer && buffers[active_fb].tiles.size() > 1 &&
         tiling_draw_bytes + count * sizeof(float) + 8192 > 2 * 1024 * 1024) {
-        trialContinued = GuardTrialBeforeDraw(uint64_t(count) * sizeof(float));
+        budgetContinued = ContinueTilingBeforeDraw(uint64_t(count) * sizeof(float));
+        trialContinued = budgetContinued || GuardTrialBeforeDraw(uint64_t(count) * sizeof(float));
         if (!trialContinued) {
+#if SHIPYARD_XENOS_DEFERRED_FRAMEBUFFERS
+            xenos_device->GetViewport(&guardViewport);
+            restoreGuardViewport = true;
+#endif
             ++tiling_draw_restarts;
             tiling_guard_restart_pending = timing_enabled;
             FinishFramebuffer();
             tiling_guard_restart_pending = false;
         }
     }
+#else
+    if (live_framebuffer && buffers[active_fb].tiles.size() > 1 &&
+        tiling_draw_bytes + count * sizeof(float) + 8192 > 2 * 1024 * 1024) {
+        ++tiling_draw_restarts;
+        tiling_guard_restart_pending = timing_enabled;
+        FinishFramebuffer();
+        tiling_guard_restart_pending = false;
+    }
+#endif
     BeginFramebuffer();
+#if SHIPYARD_XENOS_DEFERRED_FRAMEBUFFERS && (SHIPYARD_XENOS_TILING_TRIALS || SHIPYARD_XENOS_TILING_BUDGET)
+    if (restoreGuardViewport)
+        Shipyard_Check(xenos_device->SetViewport(&guardViewport), "restore tiling restart viewport");
+#endif
+#if SHIPYARD_XENOS_TILING_TRIALS
     bool tile1Only = false;
-    if (timing_enabled || tile1_predication_trial_enabled) {
+    if ((timing_enabled && detailed_timing_enabled) || (SHIPYARD_XENOS_TILING_TRIALS && tile1_predication_trial_enabled)) {
         const Framebuffer& b = buffers[active_fb];
-        const bool profileTarget = timing_enabled && b.width == 1920 &&
+        const bool profileTarget = timing_enabled && detailed_timing_enabled && b.width == 1920 &&
                                    b.height == 1080 && b.tiles.size() == 2;
-        const bool trialTarget = tile1_predication_trial_enabled && b.width == 1920 &&
+        const bool trialTarget = SHIPYARD_XENOS_TILING_TRIALS && tile1_predication_trial_enabled && b.width == 1920 &&
                                  b.height == 1080 && b.tiles.size() == 2 && b.samples == 1;
         D3DVIEWPORT9 viewport = {0};
         if (profileTarget || trialTarget)
@@ -952,23 +1072,59 @@ void Draw(float* vertices, size_t count, size_t triangles) {
             }
         }
     }
+#else
+    if (timing_enabled && detailed_timing_enabled) {
+        const Framebuffer& b = buffers[active_fb];
+        if (b.width == 1920 && b.height == 1080 && b.tiles.size() == 2) {
+            D3DVIEWPORT9 viewport;
+            xenos_device->GetViewport(&viewport);
+            const size_t vertexCount = count / current_shader->floats;
+            ++tiling_1080_batches;
+            tiling_1080_vertices += (unsigned)vertexCount;
+            if (vertexCount > ShipyardXenos::TileCoverageMaximumVertices)
+                ++tiling_1080_oversize_batches;
+            if (viewport.Y <= b.height && viewport.Height <= b.height - viewport.Y &&
+                ShipyardXenos::BatchInsideSecondTile(
+                    vertices, vertexCount, current_shader->floats, viewport.Y,
+                    viewport.Height, (unsigned)b.tiles[0].y2)) {
+                ++tiling_1080_tile1_batches;
+                tiling_1080_tile1_vertices += (unsigned)vertexCount;
+            }
+        }
+    }
+#endif
     const Framebuffer& ringFramebuffer = buffers[active_fb];
-    const bool probeRing = timing_enabled && ringFramebuffer.width == 1920 &&
+    const bool probeRing = timing_enabled && detailed_timing_enabled && ringFramebuffer.width == 1920 &&
                            ringFramebuffer.height == 1080 && ringFramebuffer.tiles.size() == 2;
     const ShipyardXenos::RingCursor ringBefore(
         probeRing ? (uintptr_t)xenos_device->m_pRing : 0,
         probeRing ? (uintptr_t)xenos_device->m_pRingLimit : 0);
     PrepareDrawState();
+#if SHIPYARD_XENOS_SHADER_ABI >= 3
     depth_clip.Apply(xenos_device);
+#endif
     ApplyAlpha(); // Also handles shader-only changes and external state restoration.
+#if SHIPYARD_XENOS_TILING_TRIALS
     const HRESULT drawResult = tile1Only
         ? ShipyardXenos::SubmitTile1PredicatedDraw(
               xenos_device, true, (UINT)triangles, vertices,
               (UINT)(current_shader->floats * 4), &tile1_predication_trial_counts)
         : xenos_device->DrawPrimitiveUP(D3DPT_TRIANGLELIST, (UINT)triangles, vertices,
                                        (UINT)(current_shader->floats * 4));
+#else
+    const HRESULT drawResult = xenos_device->DrawPrimitiveUP(
+        D3DPT_TRIANGLELIST, (UINT)triangles, vertices, (UINT)(current_shader->floats * 4));
+#endif
+#if SHIPYARD_XENOS_TILING_BUDGET
+    tiling_budget.ChargeVertices(uint64_t(count) * sizeof(float));
+#endif
     Shipyard_Check(drawResult, "Shipyard DrawPrimitiveUP");
-    const bool trialNeedsFinish = trialContinued && !GuardTrialAfterDraw();
+    if (SHIPYARD_XENOS_ALPHA_HISTOGRAM && timing_enabled)
+        SHIPYARD_DIAGNOSTIC(alpha_histogram.Record(native_state.alpha_mode, (unsigned)triangles));
+#if SHIPYARD_XENOS_TILING_TRIALS || SHIPYARD_XENOS_TILING_BUDGET
+    const bool trialNeedsFinish = trialContinued &&
+        !(budgetContinued ? ContinueTilingAfterDraw() : GuardTrialAfterDraw());
+#endif
     if (probeRing) {
         const ShipyardXenos::RingCursor ringAfter(
             (uintptr_t)xenos_device->m_pRing, (uintptr_t)xenos_device->m_pRingLimit);
@@ -989,8 +1145,23 @@ void Draw(float* vertices, size_t count, size_t triangles) {
     tiling_draw_bytes += count * sizeof(float) + 8192;
     if (buffers[active_fb].tiles.size() > 1 && tiling_draw_bytes > tiling_peak_bytes)
         tiling_peak_bytes = (unsigned)tiling_draw_bytes;
+#if SHIPYARD_XENOS_TILING_TRIALS || SHIPYARD_XENOS_TILING_BUDGET
+#if SHIPYARD_XENOS_DEFERRED_FRAMEBUFFERS
+    if (trialNeedsFinish) {
+        // A rejected post-draw reservation must preserve the logical viewport
+        // across both SDK tiling boundaries, just like the pre-draw restart.
+        xenos_device->GetViewport(&guardViewport);
+#else
     if (trialNeedsFinish)
+#endif
         FinishFramebuffer();
+#if SHIPYARD_XENOS_DEFERRED_FRAMEBUFFERS
+        BeginFramebuffer();
+        Shipyard_Check(xenos_device->SetViewport(&guardViewport), "restore tiling fallback viewport");
+    }
+#endif
+#endif
+
 }
 void ValidateFramebuffer(int id) {
     if (id < 0 || (size_t)id >= buffers.size() ||
@@ -1115,6 +1286,9 @@ void DrawRestoreQuadSample(IDirect3DTexture9* color, IDirect3DTexture9* depth,
     Shipyard_Check(xenos_device->DrawPrimitiveUP(D3DPT_TRIANGLELIST, 2,
                                                  copy_quad ? copy_quad : quad, 4 * sizeof(float)),
                    "restore framebuffer samples");
+#if SHIPYARD_XENOS_TILING_BUDGET
+    tiling_budget.ChargeVertices(sizeof(quad));
+#endif
 }
 void EndRestoreQuad(bool restore_constants) {
     Shipyard_Check(restore_state->Apply(), "restore framebuffer copy state");
@@ -1146,15 +1320,30 @@ void ClearFramebufferTargets(DWORD flags) {
 }
 bool ProfileTilingSpace() {
     const Framebuffer& b = buffers[active_fb];
-    return timing_enabled && b.width == 1920 && b.height == 1080 && b.tiles.size() == 2;
+    return timing_enabled && detailed_timing_enabled && b.width == 1920 && b.height == 1080 && b.tiles.size() == 2;
 }
 void QueryTilingSpace(DWORD* used, DWORD* remaining) {
     NativeTimingScope timing(timing_counts.tilingSpaceQueryTicks,
                              timing_counts.tilingSpaceQueryCalls);
+    *used = *remaining = 0;
     xenos_device->QueryBufferSpace(used, remaining);
 }
+bool ContinueTilingBeforeDraw(uint64_t inputBytes) {
+    if (!SHIPYARD_XENOS_TILING_BUDGET || !tiling_budget.active) return false;
+    DWORD used = 0, remaining = 0;
+    QueryTilingSpace(&used, &remaining);
+    return tiling_budget.BeforeDraw(used, remaining, (uintptr_t)xenos_device->m_pRing,
+                                   (uintptr_t)xenos_device->m_pRingLimit,
+                                   inputBytes, &tiling_draw_bytes);
+}
+bool ContinueTilingAfterDraw() {
+    DWORD used = 0, remaining = 0;
+    QueryTilingSpace(&used, &remaining);
+    return tiling_budget.AfterDraw(used, remaining, (uintptr_t)xenos_device->m_pRing,
+                                  (uintptr_t)xenos_device->m_pRingLimit);
+}
 bool GuardTrialBeforeDraw(uint64_t inputBytes) {
-    if (!tiling_guard_trial_enabled) return false;
+    if (!SHIPYARD_XENOS_TILING_TRIALS || !tiling_guard_trial_enabled) return false;
     DWORD used = 0, remaining = 0;
     if (tiling_guard_trial_window.active)
         QueryTilingSpace(&used, &remaining);
@@ -1169,11 +1358,17 @@ bool GuardTrialAfterDraw() {
 void TilingSpaceBegin() {
     const Framebuffer& b = buffers[active_fb];
     const bool profile = ProfileTilingSpace();
-    const bool trial = tiling_guard_trial_enabled && b.width == 1920 && b.height == 1080 &&
+    const bool trial = SHIPYARD_XENOS_TILING_TRIALS && tiling_guard_trial_enabled && b.width == 1920 && b.height == 1080 &&
                        b.tiles.size() == 2 && b.samples == 1;
-    if (!profile && !trial) return;
+    const bool budget = SHIPYARD_XENOS_TILING_BUDGET && b.width == 1920 && b.height == 1080 &&
+                        b.tiles.size() == 2 && b.samples == 1;
+#if SHIPYARD_XENOS_TILING_BUDGET
+    tiling_budget.Close();
+#endif
+    if (!profile && !trial && !budget) return;
     DWORD used, remaining;
     QueryTilingSpace(&used, &remaining);
+    if (budget) tiling_budget.Begin(used, remaining);
     if (profile) tiling_space_probe.Begin(used, remaining);
     if (trial) tiling_guard_trial_window.Begin(used, remaining);
 }
@@ -1195,16 +1390,43 @@ void TilingSpaceBeforeEnd() {
     QueryTilingSpace(&used, &remaining);
     tiling_space_probe.BeforeEnd(used, remaining);
 }
+bool FramebufferHiZCapable(bool owns_depth, uint32_t physical_width, uint32_t physical_height,
+                           D3DMULTISAMPLE_TYPE samples) {
+    return owns_depth &&
+           XGHierarchicalZSize(physical_width, physical_height, samples) <=
+               GPU_HIERARCHICAL_Z_TILES;
+}
+bool FreshFramebufferHiZ(bool capable, bool has_depth, bool retained_depth) {
+    return capable && has_depth && !retained_depth;
+}
 void BeginFramebuffer() {
     if (live_framebuffer)
         return;
+#if SHIPYARD_XENOS_DEFERRED_FRAMEBUFFERS
+    if (pending_game_depth_clear == active_fb)
+        pending_game_depth_clear = -1;
+#endif
     NativeTimingScope timing(timing_counts.framebufferSetupTicks, timing_counts.framebufferSetupCalls);
     InvalidateNativeState();
     Framebuffer& b = buffers[active_fb];
     if (!b.color)
         Shipyard_Fatal("framebuffer render surface unavailable", E_INVALIDARG);
+#if SHIPYARD_XENOS_DEFERRED_FRAMEBUFFERS
+    const bool fresh_hiz = FreshFramebufferHiZ(b.hiz_capable, b.depth != NULL, b.depth_stored);
+    // The previous target may have owned the shared HiZ allocation. Keep tests
+    // disabled while the fresh depth clear seeds its metadata; force writes
+    // only across this setup bracket, then use automatic gating for game draws.
+    xenos_device->SetRenderState(D3DRS_HIZENABLE, D3DHIZ_DISABLE);
+    xenos_device->SetRenderState(D3DRS_HIZWRITEENABLE,
+                                 fresh_hiz ? D3DHIZ_ENABLE : D3DHIZ_DISABLE);
+    D3DVIEWPORT9 viewport;
+    xenos_device->GetViewport(&viewport);
+#endif
     Shipyard_Check(xenos_device->SetRenderTarget(0, b.color), "bind framebuffer color");
     Shipyard_Check(xenos_device->SetDepthStencilSurface(b.depth), "bind framebuffer depth");
+#if SHIPYARD_XENOS_DEFERRED_FRAMEBUFFERS
+    Shipyard_Check(xenos_device->SetViewport(&viewport), "restore framebuffer viewport");
+#endif
     xenos_device->SetRenderState(D3DRS_MULTISAMPLEANTIALIAS, TRUE);
     xenos_device->SetRenderState(D3DRS_MULTISAMPLEMASK, ~0u);
     D3DVECTOR4 clear = {0, 0, 0, 1};
@@ -1227,11 +1449,21 @@ void BeginFramebuffer() {
         }
         EndRestoreQuad(restore_constants);
     }
+#if SHIPYARD_XENOS_DEFERRED_FRAMEBUFFERS
+    // Retained depth is copied without rebuilding HiZ metadata. A fresh depth
+    // clear initializes the metadata, including after a color-only restore.
+    xenos_device->SetRenderState(D3DRS_HIZENABLE,
+                                 fresh_hiz ? D3DHIZ_AUTOMATIC : D3DHIZ_DISABLE);
+    xenos_device->SetRenderState(D3DRS_HIZWRITEENABLE,
+                                 fresh_hiz ? D3DHIZ_AUTOMATIC : D3DHIZ_DISABLE);
+#endif
     live_framebuffer = true;
     tiling_draw_bytes = 0;
     SetTileConstants();
     TilingSpaceSetup();
+#if SHIPYARD_XENOS_SHADER_ABI >= 3
     raster_bounds.Apply(xenos_device, b.height);
+#endif
 }
 void RebindSampledTextures() {
     draw_state_prepared = false;
@@ -1250,7 +1482,29 @@ void RebindSampledTextures() {
             ApplySampler(i, *sampler);
     }
 }
+// A depth resolve is about to overwrite the published texture: give the
+// framebuffer other sample-zero storage. The published reference stays valid.
+void ProtectPublishedDepth(Framebuffer& b) {
+    IDirect3DTexture9* storage = published_depth.spare;
+    published_depth.spare = NULL;
+    if (storage && (published_depth.spare_width != b.width || published_depth.spare_height != b.height)) {
+        storage->Release();
+        storage = NULL;
+    }
+    if (!storage)
+        Shipyard_Check(xenos_device->CreateTexture(b.width, b.height, 1, 0, D3DFMT_D24S8,
+                                                   D3DPOOL_DEFAULT, &storage, NULL),
+                       "published depth copy storage");
+    b.depth_samples[0]->Release();
+    b.depth_samples[0] = storage;
+}
 void FinishFramebuffer(bool preserveDepth, bool preserveColor) {
+#if SHIPYARD_XENOS_DEFERRED_FRAMEBUFFERS
+    // Reads, copies and target switches must observe the requested depth clear
+    // even when no game draw has materialized the target yet.
+    if (pending_game_depth_clear == active_fb)
+        BeginFramebuffer();
+#endif
     if (!live_framebuffer)
         return;
     NativeTimingScope timing(timing_counts.framebufferResolveTicks, timing_counts.framebufferResolveCalls);
@@ -1262,6 +1516,11 @@ void FinishFramebuffer(bool preserveDepth, bool preserveColor) {
     StopTileConstants();
     for (int binding = 0; binding < 6; ++binding)
         SetNativeTexture(binding, NULL);
+#if SHIPYARD_XENOS_DEFERRED_FRAMEBUFFERS
+    if (b.depth && preserveDepth && published_depth.texture &&
+        b.depth_samples[0] == published_depth.texture)
+        ProtectPublishedDepth(b);
+#endif
     const DWORD fragments[] = {D3DRESOLVE_FRAGMENT0, D3DRESOLVE_FRAGMENT1, D3DRESOLVE_FRAGMENT2,
                                D3DRESOLVE_FRAGMENT3};
     D3DVECTOR4 clear = {0, 0, 0, 1};
@@ -1305,6 +1564,9 @@ void FinishFramebuffer(bool preserveDepth, bool preserveColor) {
         // fragments. Disable EndTiling's automatic single-target resolve.
         Shipyard_Check(xenos_device->EndTiling(0, NULL, NULL, &clear, 1, 0, NULL),
                        "finish framebuffer tiling");
+#if SHIPYARD_XENOS_TILING_BUDGET
+        tiling_budget.Close();
+#endif
         tiling_guard_trial_window.Close();
     }
     // Seal the resolved depth resource's SDK fence before later presentation
@@ -1323,10 +1585,17 @@ void FinishFramebuffer(bool preserveDepth, bool preserveColor) {
 }
 void Resolve(int id) {
     ValidateFramebuffer(id);
+#if SHIPYARD_XENOS_DEFERRED_FRAMEBUFFERS
+    if (active_fb == id && (live_framebuffer || pending_game_depth_clear == id))
+#else
     if (live_framebuffer && active_fb == id) {
+#endif
         FinishFramebuffer();
+#if SHIPYARD_XENOS_DEFERRED_FRAMEBUFFERS
+#else
         BeginFramebuffer();
     }
+#endif
 }
 int NewFramebuffer() {
     if (!free_framebuffers.empty()) {
@@ -1454,7 +1723,15 @@ void UpdateFramebuffer(int id, uint32_t width, uint32_t height, uint32_t request
                        "framebuffer color surface");
     if (depth) {
         parameters.Base = color_tiles;
+#if SHIPYARD_XENOS_DEFERRED_FRAMEBUFFERS
+        const bool owns_depth = !(id == 0 && width == 1280 && height == 720 && samples == 1);
+        b.hiz_capable = FramebufferHiZCapable(owns_depth, tile_width, tile_height, msaa);
+        if (!b.hiz_capable)
+            parameters.HierarchicalZBase = 0xffffffffu;
+        if (!owns_depth) {
+#else
         if (id == 0 && width == 1280 && height == 720 && samples == 1) {
+#endif
             b.depth = presentation_depth;
             b.depth->AddRef();
         } else
@@ -1492,18 +1769,55 @@ void BindFramebuffer(int id, float scale) {
     if (active_fb != id)
         FinishFramebuffer();
     active_fb = id;
+#if SHIPYARD_XENOS_BINDING_REUSE
+    if (scale != 0 && scale != noise_scale_input) {
+#else
     if (scale != 0) {
+#endif
         draw_state_prepared = false;
         noise_scale = 1.0f / scale;
+#if SHIPYARD_XENOS_BINDING_REUSE
+        noise_scale_input = scale;
+#endif
     }
     // Defer restoration until drawing or setting target-dependent viewport /
     // scissor state. A full color/depth clear may follow this bind.
+}
+void BeginGameDepthClear() {
+    if (live_framebuffer || !buffers[active_fb].depth) {
+        Clear(false, true);
+        return;
+    }
+    Framebuffer& b = buffers[active_fb];
+    ++framebuffer_clear_count;
+    if (b.stored && b.depth_stored)
+        framebuffer_depth_restore_avoided += b.samples;
+    b.depth_stored = false;
+    pending_game_depth_clear = active_fb;
+}
+bool TryDiscardGameColor() {
+    // The interpreter proves full opaque coverage before emitting its first
+    // color draw. Native state can still reject the hint; MSAA stays conservative.
+    if (pending_game_depth_clear != active_fb || live_framebuffer || !color_writes ||
+        !buffers[active_fb].depth || buffers[active_fb].samples != 1)
+        return false;
+    Framebuffer& b = buffers[active_fb];
+    if (b.stored)
+        framebuffer_restore_avoided += b.samples;
+    b.stored = false;
+    return true;
 }
 void Clear(bool color, bool depth) {
     if (!color && !depth)
         return;
     ++framebuffer_clear_count;
+#if SHIPYARD_XENOS_DEFERRED_FRAMEBUFFERS
+    const bool wasLive = live_framebuffer;
+    const bool begin_clears_depth = !wasLive && depth && !color && buffers[active_fb].depth;
+    const bool begin_clears_both = !wasLive && color && depth &&
+#else
     const bool begin_clears_both = !live_framebuffer && color && depth &&
+#endif
                                    buffers[active_fb].depth && buffers[active_fb].tiles.size() == 1;
     if (!live_framebuffer) {
         Framebuffer& b = buffers[active_fb];
@@ -1522,9 +1836,16 @@ void Clear(bool color, bool depth) {
         }
     }
     BeginFramebuffer();
+#if SHIPYARD_XENOS_DEFERRED_FRAMEBUFFERS
+    // A fresh tiled bracket clears depth/stencil for every tile; a fresh
+    // single-tile bracket clears depth when the retained depth was discarded.
+    // The existing full-clear shortcut applies only to single-tile targets.
+    if (begin_clears_depth || begin_clears_both)
+#else
     // Single-tile BeginFramebuffer has just cleared both attachments after
     // the retained samples were discarded. No draw can occur before here.
     if (begin_clears_both)
+#endif
         return;
     const DWORD flags =
         (color ? D3DCLEAR_TARGET : 0) |
@@ -1566,31 +1887,45 @@ PixelDepth(int id, const std::set<std::pair<float, float> >& coords) {
     NativeTimingScope depthReading(timing_counts.depthReadTicks, timing_counts.depthReadCalls);
     if (timing_enabled)
         timing_counts.depthSamples += (unsigned)coords.size();
-    bool resume = live_framebuffer;
-    FinishFramebuffer();
-    Framebuffer& b = buffers[id];
-    // A caller may read depth before its next draw after switching targets.
-    // Xenos retains actual depth fragments regardless of the draw-side hint.
-    IDirect3DTexture9* depth_texture = b.depth_samples[0];
-    if (!depth_texture)
-        Shipyard_Fatal("depth readback unavailable", E_FAIL);
-    if (!b.depth_stored) {
-        // A depth query can precede the first draw after an MSAA or resolution
-        // change. Initialize real GPU color/depth storage through the same
-        // clear/resolve path used for the first draw, then read sample zero.
-        int previous = active_fb;
-        active_fb = id;
-        BeginFramebuffer();
+    bool resume = false;
+    IDirect3DTexture9* depth_texture;
+    uint32_t width, height;
+    if (published_depth.texture && published_depth.framebuffer == id) {
+        // The previous update's final replay. Later replays of this update
+        // never wrote this texture, so no framebuffer work is needed; the lock
+        // waits only for that replay's depth resolve.
+        depth_texture = published_depth.texture;
+        width = published_depth.width;
+        height = published_depth.height;
+    } else {
+        resume = live_framebuffer;
         FinishFramebuffer();
-        active_fb = previous;
-        Shipyard_Log("initialized depth before first draw: framebuffer=%d samples=%u", id,
-                     b.samples);
+        Framebuffer& b = buffers[id];
+        // A caller may read depth before its next draw after switching targets.
+        // Xenos retains actual depth fragments regardless of the draw-side hint.
+        if (!b.depth_samples[0])
+            Shipyard_Fatal("depth readback unavailable", E_FAIL);
+        if (!b.depth_stored) {
+            // A depth query can precede the first draw after an MSAA or resolution
+            // change. Initialize real GPU color/depth storage through the same
+            // clear/resolve path used for the first draw, then read sample zero.
+            int previous = active_fb;
+            active_fb = id;
+            BeginFramebuffer();
+            FinishFramebuffer();
+            active_fb = previous;
+            Shipyard_Log("initialized depth before first draw: framebuffer=%d samples=%u", id,
+                         b.samples);
+        }
+        depth_texture = b.depth_samples[0];
+        width = b.width;
+        height = b.height;
     }
-    if (timing_enabled) {
+    if (timing_enabled && detailed_timing_enabled) {
         // IsBusy is a nonblocking state sample. Do not pre-wait here: that
         // would change the LockRect schedule being measured.
         const bool busy = depth_texture->IsBusy() != FALSE;
-        const bool is1080 = b.width == 1920 && b.height == 1080;
+        const bool is1080 = width == 1920 && height == 1080;
         if (busy) {
             ++timing_counts.depthBusyCalls;
             if (is1080)
@@ -1614,14 +1949,14 @@ PixelDepth(int id, const std::set<std::pair<float, float> >& coords) {
     for (std::set<std::pair<float, float> >::const_iterator it = coords.begin(); it != coords.end();
          ++it) {
         int x = (int)it->first, y = (int)it->second;
-        if (x < 0 || y < 0 || x >= (int)b.width || y >= (int)b.height) {
+        if (x < 0 || y < 0 || x >= (int)width || y >= (int)height) {
             result[*it] = 65532;
             continue;
         }
         DWORD value;
         POINT destination = {0, 0};
-        RECT source = {x, (LONG)b.height - 1 - y, x + 1, (LONG)b.height - y};
-        XGUntileTextureLevel(b.width, b.height, 0, XGGetGpuFormat(desc.Format), 0, &value,
+        RECT source = {x, (LONG)height - 1 - y, x + 1, (LONG)height - y};
+        XGUntileTextureLevel(width, height, 0, XGGetGpuFormat(desc.Format), 0, &value,
                              sizeof(value), &destination, lock.pBits, &source);
         // Match the Fast3D D3D11 backend's sample-zero read for multisampled depth.
         result[*it] = (uint16_t)(((value >> 8) / 16777215.0) * 65532.0);
@@ -1667,6 +2002,10 @@ void DeleteTexture(uint32_t id) {
     }
 }
 void Filter(FilteringMode mode) {
+#if SHIPYARD_XENOS_BINDING_REUSE
+    if (filtering == mode)
+        return;
+#endif
     draw_state_prepared = false;
     filtering = mode;
     filtering_key = unsigned(mode) << 4;
@@ -1677,7 +2016,9 @@ FilteringMode GetFilter() {
 void InitializeDisplay() {
     if (xenos_device)
         return;
+#if SHIPYARD_XENOS_SHADER_ABI >= 3
     raster_bounds.Reset();
+#endif
     IDirect3D9* d3d = Direct3DCreate9(D3D_SDK_VERSION);
     if (!d3d)
         Shipyard_Fatal("Direct3DCreate9", E_FAIL);
@@ -1762,13 +2103,33 @@ void End() {
     }
     if (discardPresentationColor && !canDiscardPresentationColor)
         ++presentation_color_discard_blocked;
+#if SHIPYARD_XENOS_DEFERRED_FRAMEBUFFERS
+    if (live_framebuffer || pending_game_depth_clear == active_fb || !buffers[active_fb].stored) {
+        BeginFramebuffer();
+        if (active_fb == 0)
+            FinishFramebuffer(!discardPresentationDepth, !canDiscardPresentationColor);
+        else
+            FinishFramebuffer();
+    } else if (active_fb == 0) {
+        // A read-only framebuffer image already completed the resolve. Keep
+        // that result until the next actual draw, and apply end-of-frame
+        // discard policy without restoring its old contents first.
+        if (discardPresentationDepth)
+            buffers[0].depth_stored = false;
+        if (canDiscardPresentationColor)
+            buffers[0].stored = false;
+    }
+#else
     BeginFramebuffer();
     if (active_fb == 0)
         FinishFramebuffer(!discardPresentationDepth, !canDiscardPresentationColor);
     else
         FinishFramebuffer();
+#endif
     if (active_fb != 0) {
         active_fb = 0;
+        // Another target may have occupied the shared EDRAM even when the
+        // presentation image was already resolved. It still needs restoration.
         BeginFramebuffer();
         FinishFramebuffer(!discardPresentationDepth, !canDiscardPresentationColor);
     }
@@ -1790,7 +2151,9 @@ void Finish() {
 }
 } // namespace
 void Shipyard_ShutdownGraphics() {
+#if SHIPYARD_XENOS_SHADER_ABI >= 3
     raster_bounds.Reset();
+#endif
     InvalidateNativeState();
     if (!xenos_device)
         return;
@@ -1810,6 +2173,11 @@ void Shipyard_ShutdownGraphics() {
     if (published_framebuffer_image) {
         published_framebuffer_image->Release();
         published_framebuffer_image = NULL;
+    }
+    ShipyardXenos::RetireFramebufferDepth();
+    if (published_depth.spare) {
+        published_depth.spare->Release();
+        published_depth.spare = NULL;
     }
     // State blocks retain resources too. Release them before the owned textures
     // and surfaces, then destroy the device to unregister XDK GPU callbacks.
@@ -2009,15 +2377,62 @@ void DiscardFramebufferDepth(int id) {
     if (live_framebuffer && active_fb == id && buffers[id].depth)
         FinishFramebuffer(false);
 }
+void RetireFramebufferDepth() {
+    IDirect3DTexture9* texture = published_depth.texture;
+    if (!texture)
+        return;
+    const int id = published_depth.framebuffer;
+    published_depth.texture = NULL;
+    published_depth.framebuffer = -1;
+    const bool owned = id >= 0 && (size_t)id < buffers.size() && buffers[id].depth_samples[0] == texture;
+    if (owned || published_depth.spare) {
+        texture->Release();
+        return;
+    }
+    // Copied away from: keep it as storage for the next copy.
+    published_depth.spare = texture;
+    published_depth.spare_width = published_depth.width;
+    published_depth.spare_height = published_depth.height;
+}
+void PublishFramebufferDepth(int id) {
+    RetireFramebufferDepth();
+    if (id < 0 || (size_t)id >= buffers.size() ||
+        std::find(free_framebuffers.begin(), free_framebuffers.end(), id) != free_framebuffers.end())
+        return;
+    // Only depth the final replay retained is published. Otherwise reads take
+    // the framebuffer path, exactly as before publication existed.
+    const Framebuffer& b = buffers[id];
+    if (live_framebuffer && active_fb == id)
+        return;
+    if (!b.depth || !b.depth_stored || !b.depth_samples[0])
+        return;
+    b.depth_samples[0]->AddRef();
+    published_depth.texture = b.depth_samples[0];
+    published_depth.framebuffer = id;
+    published_depth.width = b.width;
+    published_depth.height = b.height;
+}
 void SetShaderCache(const ShaderCacheOps* operations) {
     if (operations)
         shader_cache_ops = *operations;
     else {
         shader_cache_ops.load = NULL;
         shader_cache_ops.store = NULL;
+        shader_cache_ops.program = NULL;
     }
 }
+void SetDetailedTimingEnabled(bool enabled) {
+    detailed_timing_enabled = enabled;
+    if (!enabled) tiling_space_probe.active = false;
+}
 void SetTimingEnabled(bool enabled) {
+#if !SHIPYARD_XENOS_DIAGNOSTICS
+    // The normal XEX contains no hot-path diagnostic writes or timing reads.
+    // An explicitly instrumented build defines SHIPYARD_XENOS_DIAGNOSTICS=1.
+    (void)enabled;
+    timing_enabled = false;
+    return;
+#else
     if (enabled == timing_enabled)
         return;
     memset(&timing_counts, 0, sizeof(timing_counts));
@@ -2028,13 +2443,18 @@ void SetTimingEnabled(bool enabled) {
         QueryPerformanceFrequency(&frequency);
         timing_frequency = (uint64_t)frequency.QuadPart;
     }
+#endif
 }
 void SetTilingGuardTrialEnabled(bool enabled) {
+    if (!SHIPYARD_XENOS_TILING_TRIALS && enabled)
+        Shipyard_Fatal("tiling trials excluded from this build", E_NOTIMPL);
     if (tiling_guard_trial_enabled == enabled) return;
     tiling_guard_trial_enabled = enabled;
     if (!enabled) tiling_guard_trial_window.Close();
 }
 void SetTile1PredicationTrialEnabled(bool enabled) {
+    if (!SHIPYARD_XENOS_TILING_TRIALS && enabled)
+        Shipyard_Fatal("tiling trials excluded from this build", E_NOTIMPL);
     tile1_predication_trial_enabled = enabled;
 }
 void CaptureAndResetTimingCounters(NativeTimingCounters* counters) {
@@ -2070,6 +2490,8 @@ void CaptureAndResetCounters(NativeCounters* counters) {
     if (!counters)
         return;
     memset(counters, 0, sizeof(*counters));
+    alpha_histogram.CopyAndReset(counters->alphaDraws, counters->alphaTriangles,
+                                 counters->alphaVertices);
     counters->samplerAttempted = native_state_counts.sampler_attempted;
     counters->samplerWritten = native_state_counts.sampler_written;
     counters->samplerSuppressed = native_state_counts.sampler_suppressed;
@@ -2273,6 +2695,12 @@ void CopyFramebuffer(int destination, int source, int sourceX0, int sourceY0, in
 }
 void ClearFramebuffer(bool color, bool depth) {
     ::Fast::Clear(color, depth);
+}
+void BeginGameFramebufferDepthClear() {
+    ::Fast::BeginGameDepthClear();
+}
+bool TryDiscardGameFramebufferColor() {
+    return ::Fast::TryDiscardGameColor();
 }
 void SetColorWriteMask(bool enabled) {
     color_writes = enabled;

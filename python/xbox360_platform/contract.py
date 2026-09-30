@@ -10,8 +10,7 @@ from pathlib import Path
 def _git_output(base: Path, *args: str) -> str:
     try:
         result = subprocess.run(
-            ['git', '-c', 'safe.directory=' + str(base), '-c',
-             'safe.directory=' + str(base.parent.parent if base.parent.name == 'selections' else base),
+            ['git', '-c', 'safe.directory=' + str(base),
              '-C', str(base), *args],
             check=True,
             capture_output=True,
@@ -31,15 +30,10 @@ def verify(base: Path, lock: Path) -> dict:
     if not isinstance(revision, str) or not re.fullmatch(r'[0-9a-fA-F]{7,64}', revision):
         raise ValueError('Xbox platform lock has an invalid Git revision')
     checkout = Path(_git_output(base, 'rev-parse', '--show-toplevel')).resolve()
-    selection = expected.get('selection')
-    if selection is None:
-        selected_root = checkout
-    elif selection in ('3Shipsty', '2Ship'):
-        selected_root = checkout / 'selections' / selection
-    else:
-        raise ValueError('Xbox platform lock has an invalid selection')
-    if base != selected_root.resolve():
-        raise ValueError('Xbox platform base is not the Git checkout root or locked selection: ' + str(base))
+    if 'selection' in expected:
+        raise ValueError('Xbox platform selections are retired; pin the shared checkout root')
+    if base != checkout:
+        raise ValueError('Xbox platform base is not the Git checkout root: ' + str(base))
     head = _git_output(base, 'rev-parse', '--verify', 'HEAD')
     if not head.lower().startswith(revision.lower()):
         raise ValueError('Xbox platform Git revision drift: ' + str(base))
