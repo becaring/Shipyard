@@ -1,4 +1,5 @@
 """Execute nested container construction and pair binding semantics."""
+
 import os
 from pathlib import Path
 import subprocess
@@ -17,15 +18,22 @@ class ContainerTests(unittest.TestCase):
         self.parser = Parser(Language(tree_sitter_cpp.language()))
 
     def initializer(self, text):
-        tree = self.parser.parse(('void f(){target='+text+';}').encode())
-        return next(n for n in walk(tree.root_node) if n.type == 'initializer_list')
+        tree = self.parser.parse(("void f(){target=" + text + ";}").encode())
+        return next(n for n in walk(tree.root_node) if n.type == "initializer_list")
 
     def test_runtime_nested_maps_and_binding_ownership(self):
-        declarations, result = materialize('std::map<int, std::vector<std::pair<int, int>>>',
-            self.initializer('{{1,{{2,3},{4,5}}},{1,{{9,9}}},{2,{}}}'), prefix='value')
-        tuples, tuple_result = materialize('std::map<std::tuple<short,int,int>,std::tuple<int,int>>',
-            self.initializer('{{{1,2,3},{4,5}},{{1,2,3},{9,9}},{{1,2,4},{6,7}}}'), prefix='tuples')
-        source = '''#include <map>
+        declarations, result = materialize(
+            "std::map<int, std::vector<std::pair<int, int>>>",
+            self.initializer("{{1,{{2,3},{4,5}}},{1,{{9,9}}},{2,{}}}"),
+            prefix="value",
+        )
+        tuples, tuple_result = materialize(
+            "std::map<std::tuple<short,int,int>,std::tuple<int,int>>",
+            self.initializer("{{{1,2,3},{4,5}},{{1,2,3},{9,9}},{{1,2,4},{6,7}}}"),
+            prefix="tuples",
+        )
+        source = (
+            """#include <map>
 #include <vector>
 #include <utility>
 #include <iterator>
@@ -39,7 +47,17 @@ struct Registration {
 Registration registered(1, {2, 2, 3});
 int main(){
 assert(registered.values.size()==2 && registered.values.count(3)==1);
-''' + tuples+'\nassert('+tuple_result+'.size()==2);\nassert(std::get<0>('+tuple_result+'.find({1,2,3})->second)==4);\n'+declarations + '\nauto& values = '+result+''';
+"""
+            + tuples
+            + "\nassert("
+            + tuple_result
+            + ".size()==2);\nassert(std::get<0>("
+            + tuple_result
+            + ".find({1,2,3})->second)==4);\n"
+            + declarations
+            + "\nauto& values = "
+            + result
+            + """;
 assert(values.size()==2 && values[1].size()==2 && values[1][0].second==3);
 for(auto [key, rows] : values) { rows.clear(); }
 assert(values[1].size()==2);
@@ -50,37 +68,62 @@ assert(inserted && position->first==3);
 const auto& [key, rows] = *values.begin();
 assert(key==1 && rows.size()==2);
 }
-'''
+"""
+        )
         source = lower_pairs(source, self.parser, walk, expected=5)
-        source = lower_lookup_keys(source, self.parser, walk,
-            {tuple_result+'.find': ('std::tuple<short,int,int>', 1)})
-        source = lower_constructor_arguments(source, self.parser, walk, constructor='Registration',
-            argument=1, type_name='std::set<int>', expected=1)
-        source = lower_ranges(source.encode(), self.parser, 'std::begin', 'std::end').decode()
-        vswhere = Path(os.environ['ProgramFiles(x86)'])/'Microsoft Visual Studio/Installer/vswhere.exe'
-        installation = subprocess.check_output([str(vswhere), '-latest', '-products', '*', '-requires',
-            'Microsoft.VisualStudio.Component.VC.Tools.x86.x64', '-property', 'installationPath'], text=True).strip()
+        source = lower_lookup_keys(
+            source, self.parser, walk, {tuple_result + ".find": ("std::tuple<short,int,int>", 1)}
+        )
+        source = lower_constructor_arguments(
+            source, self.parser, walk, constructor="Registration", argument=1, type_name="std::set<int>", expected=1
+        )
+        source = lower_ranges(source.encode(), self.parser, "std::begin", "std::end").decode()
+        vswhere = Path(os.environ["ProgramFiles(x86)"]) / "Microsoft Visual Studio/Installer/vswhere.exe"
+        installation = subprocess.check_output(
+            [
+                str(vswhere),
+                "-latest",
+                "-products",
+                "*",
+                "-requires",
+                "Microsoft.VisualStudio.Component.VC.Tools.x86.x64",
+                "-property",
+                "installationPath",
+            ],
+            text=True,
+        ).strip()
         with tempfile.TemporaryDirectory() as folder:
             out = Path(folder)
-            (out/'case.cpp').write_text(source, encoding='utf-8')
-            batch = out/'compile.cmd'
-            batch.write_text('@echo off\ncall "'+installation+'/VC/Auxiliary/Build/vcvars64.bat" >nul\n'
-                'if errorlevel 1 exit /b 1\ncl /nologo /EHsc /MT case.cpp /Fe:case.exe\nexit /b %errorlevel%\n')
-            built = subprocess.run([os.environ['ComSpec'], '/d', '/c', str(batch)], cwd=out, capture_output=True, text=True)
-            self.assertEqual(built.returncode, 0, built.stdout+built.stderr+'\n'+source)
-            self.assertEqual(subprocess.run([str(out/'case.exe')]).returncode, 0)
+            (out / "case.cpp").write_text(source, encoding="utf-8")
+            batch = out / "compile.cmd"
+            batch.write_text(
+                '@echo off\ncall "' + installation + '/VC/Auxiliary/Build/vcvars64.bat" >nul\n'
+                "if errorlevel 1 exit /b 1\ncl /nologo /EHsc /MT case.cpp /Fe:case.exe\nexit /b %errorlevel%\n"
+            )
+            built = subprocess.run(
+                [os.environ["ComSpec"], "/d", "/c", str(batch)], cwd=out, capture_output=True, text=True
+            )
+            self.assertEqual(built.returncode, 0, built.stdout + built.stderr + "\n" + source)
+            self.assertEqual(subprocess.run([str(out / "case.exe")]).returncode, 0)
 
     def test_unsupported_forms_fail(self):
         with self.assertRaises(ValueError):
-            materialize('Unknown', self.initializer('{1,2}'), prefix='x')
+            materialize("Unknown", self.initializer("{1,2}"), prefix="x")
         with self.assertRaises(ValueError):
-            materialize('std::pair<int,int>', self.initializer('{1}'), prefix='x')
+            materialize("std::pair<int,int>", self.initializer("{1}"), prefix="x")
         with self.assertRaises(ValueError):
-            materialize('std::tuple<int,int,int>', self.initializer('{1,2}'), prefix='x')
-        for source in ('void f(){auto [x,y,z]=v;}', 'void f(){auto&& [x,y]=v;}', 'void f(){}'):
+            materialize("std::tuple<int,int,int>", self.initializer("{1,2}"), prefix="x")
+        for source in ("void f(){auto [x,y,z]=v;}", "void f(){auto&& [x,y]=v;}", "void f(){}"):
             with self.assertRaises(ValueError):
                 lower_pairs(source, self.parser, walk, expected=1)
-        for source in ('void f(){Registration value(1, {2});}', 'Registration value(1, values);'):
+        for source in ("void f(){Registration value(1, {2});}", "Registration value(1, values);"):
             with self.assertRaises(ValueError):
-                lower_constructor_arguments(source, self.parser, walk, constructor='Registration',
-                    argument=1, type_name='std::set<int>', expected=1)
+                lower_constructor_arguments(
+                    source,
+                    self.parser,
+                    walk,
+                    constructor="Registration",
+                    argument=1,
+                    type_name="std::set<int>",
+                    expected=1,
+                )

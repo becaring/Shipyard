@@ -48,17 +48,19 @@ def _project(source):
             elif source[end] == "}":
                 depth -= 1
             end += 1
-        if source[end:end + 1] == ";":
+        if source[end : end + 1] == ";":
             end += 1
         return source[start:end], source.count("\n", 0, start) + 1
 
     def lower(body):
-        return (body.replace("[[nodiscard]] ", "")
-                .replace("std::scoped_lock", "Shipyard::Async::lock_guard<Shipyard::Async::mutex>")
-                .replace("std::unique_lock", "Shipyard::Async::unique_lock<Shipyard::Async::mutex>")
-                .replace("std::future<", "Shipyard::Async::future<")
-                .replace("std::promise<", "Shipyard::Async::promise<")
-                .replace("std::thread::hardware_concurrency()", "Shipyard::Async::hardware_concurrency()"))
+        return (
+            body.replace("[[nodiscard]] ", "")
+            .replace("std::scoped_lock", "Shipyard::Async::lock_guard<Shipyard::Async::mutex>")
+            .replace("std::unique_lock", "Shipyard::Async::unique_lock<Shipyard::Async::mutex>")
+            .replace("std::future<", "Shipyard::Async::future<")
+            .replace("std::promise<", "Shipyard::Async::promise<")
+            .replace("std::thread::hardware_concurrency()", "Shipyard::Async::hardware_concurrency()")
+        )
 
     def method(marker, transform=None):
         body, line = extract(marker)
@@ -66,7 +68,9 @@ def _project(source):
             body = transform(body)
         emit(lower(body), line, marker.strip())
 
-    emit("\n".join(source.splitlines()[:12]) + '''
+    emit(
+        "\n".join(source.splitlines()[:12])
+        + """
 #include "thread-pool/native_support.h"
 #include <queue>
 #include <vector>
@@ -95,61 +99,97 @@ namespace pr {
 }
 class thread_pool {
 public:
-''', operation="bounded include/API/configuration projection")
+""",
+        operation="bounded include/API/configuration projection",
+    )
 
     # VC2010 has neither delegating constructors nor in-class initializers.
-    init = "paused(false), tasks_running(0), thread_count(determine_thread_count(NUM)), threads(new Shipyard::Async::joining_thread[thread_count]), waiting(false), workers_running(false)"
+    init = """\
+paused(false), tasks_running(0), thread_count(determine_thread_count(NUM)), \
+threads(new Shipyard::Async::joining_thread[thread_count]), waiting(false), workers_running(false)"""
     for signature, count, task, line in [
         ("thread_pool()", "0", "[] {}", 301),
         ("explicit thread_pool(const concurrency_t num_threads)", "num_threads", "[] {}", 308),
         ("explicit thread_pool(const std::function<void()>& init_task)", "0", "init_task", 315),
-        ("thread_pool(const concurrency_t num_threads, const std::function<void()>& init_task)", "num_threads", "init_task", 320),
+        (
+            "thread_pool(const concurrency_t num_threads, const std::function<void()>& init_task)",
+            "num_threads",
+            "init_task",
+            320,
+        ),
     ]:
-        emit(f"    {signature} : {init.replace('NUM', count)} {{ create_threads({task}); }}",
-             line, "delegating constructor and member initialization lowering")
+        emit(
+            f"    {signature} : {init.replace('NUM', count)} {{ create_threads({task}); }}",
+            line,
+            "delegating constructor and member initialization lowering",
+        )
 
     for marker in [
-        "    ~thread_pool()", "    [[nodiscard]] size_t get_tasks_queued()",
-        "    [[nodiscard]] size_t get_tasks_running()", "    [[nodiscard]] size_t get_tasks_total()",
-        "    [[nodiscard]] concurrency_t get_thread_count()", "    [[nodiscard]] bool is_paused()",
-        "    void pause()", "    void purge()",
+        "    ~thread_pool()",
+        "    [[nodiscard]] size_t get_tasks_queued()",
+        "    [[nodiscard]] size_t get_tasks_running()",
+        "    [[nodiscard]] size_t get_tasks_total()",
+        "    [[nodiscard]] concurrency_t get_thread_count()",
+        "    [[nodiscard]] bool is_paused()",
+        "    void pause()",
+        "    void purge()",
     ]:
         method(marker)
 
-    method("    template <typename F>\n    void detach_task", lambda body: _replace_once(
-        body, "tasks.emplace(std::forward<F>(task) BS_THREAD_POOL_PRIORITY_OUTPUT);",
-        "tasks.push(pr_task(std::forward<F>(task) BS_THREAD_POOL_PRIORITY_OUTPUT));"))
+    method(
+        "    template <typename F>\n    void detach_task",
+        lambda body: _replace_once(
+            body,
+            "tasks.emplace(std::forward<F>(task) BS_THREAD_POOL_PRIORITY_OUTPUT);",
+            "tasks.push(pr_task(std::forward<F>(task) BS_THREAD_POOL_PRIORITY_OUTPUT));",
+        ),
+    )
 
     def lower_submit(body):
-        body = _replace_once(body,
-            "template <typename F, typename R = std::invoke_result_t<std::decay_t<F>>>",
-            "template <typename F>")
-        body = _replace_once(body, "std::future<R> submit_task",
-            "std::future<typename Shipyard::Async::invoke_result<F>::type> submit_task")
-        body = _replace_once(body, "        const std::shared_ptr<std::promise<R>>",
+        body = _replace_once(
+            body, "template <typename F, typename R = std::invoke_result_t<std::decay_t<F>>>", "template <typename F>"
+        )
+        body = _replace_once(
+            body,
+            "std::future<R> submit_task",
+            "std::future<typename Shipyard::Async::invoke_result<F>::type> submit_task",
+        )
+        body = _replace_once(
+            body,
+            "        const std::shared_ptr<std::promise<R>>",
             "        typedef typename Shipyard::Async::invoke_result<F>::type R;\n"
             "        const typename std::decay<F>::type task_copy(std::forward<F>(task));\n"
-            "        const std::shared_ptr<std::promise<R>>")
-        body = _replace_once(body, "[task = std::forward<F>(task), task_promise]",
-            "[task_copy, task_promise]")
+            "        const std::shared_ptr<std::promise<R>>",
+        )
+        body = _replace_once(body, "[task = std::forward<F>(task), task_promise]", "[task_copy, task_promise]")
         begin = body.index("                    if constexpr")
         end = body.index("#ifndef BS_THREAD_POOL_DISABLE_EXCEPTION_HANDLING", begin)
-        return (body[:begin] +
-                "                    Shipyard::Async::complete_promise<R>::run(task_copy, task_promise);\n" +
-                body[end:])
+        return (
+            body[:begin]
+            + "                    Shipyard::Async::complete_promise<R>::run(task_copy, task_promise);\n"
+            + body[end:]
+        )
 
-    method("    template <typename F, typename R = std::invoke_result_t<std::decay_t<F>>>\n    [[nodiscard]] std::future<R> submit_task", lower_submit)
+    method(
+        "    template <typename F, typename R = std::invoke_result_t<std::decay_t<F>>>\n    [[nodiscard]] std::future<R> submit_task",
+        lower_submit,
+    )
     method("    void unpause()")
     method("    void wait()\n")
-    emit("private:\n    thread_pool(const thread_pool&);\n    thread_pool& operator=(const thread_pool&);",
-         327, "deleted special members lowered to inaccessible declarations")
+    emit(
+        "private:\n    thread_pool(const thread_pool&);\n    thread_pool& operator=(const thread_pool&);",
+        327,
+        "deleted special members lowered to inaccessible declarations",
+    )
 
     def lower_create(body):
-        body = _replace_once(body,
+        body = _replace_once(
+            body,
             "threads[i] = std::thread(&thread_pool::worker, this, i, init_task);",
-            "threads[i] = Shipyard::Async::make_thread(std::bind(&thread_pool::worker, this, i, init_task));")
+            "threads[i] = Shipyard::Async::make_thread(std::bind(&thread_pool::worker, this, i, init_task));",
+        )
         begin = body.index("        for (concurrency_t i")
-        loop = body[begin:body.rfind("    }")]
+        loop = body[begin : body.rfind("    }")]
         return body[:begin] + "        try {\n" + loop + "        } catch (...) { destroy_threads(); throw; }\n    }"
 
     method("    void create_threads(", lower_create)
@@ -158,26 +198,37 @@ public:
 
     def lower_worker(body):
         body = _replace_once(body, "while (true)", "for (;;)")
-        body = _replace_once(body, "        this_thread::get_index.index = idx;",
-            "        (void)idx; // Optional BS thread-info APIs are outside this projection.")
+        body = _replace_once(
+            body,
+            "        this_thread::get_index.index = idx;",
+            "        (void)idx; // Optional BS thread-info APIs are outside this projection.",
+        )
         body = _replace_once(body, "        this_thread::get_pool.pool = this;\n", "")
         body = _replace_once(body, "        this_thread::get_index.index = std::nullopt;\n", "")
         body = _replace_once(body, "        this_thread::get_pool.pool = std::nullopt;\n", "")
-        body = _replace_once(body, """            tasks_lock.unlock();
+        body = _replace_once(
+            body,
+            """            tasks_lock.unlock();
             if (waiting && (tasks_running == 0) && BS_THREAD_POOL_PAUSED_OR_EMPTY)
                 tasks_done_cv.notify_all();
-            tasks_lock.lock();""", """            // Keep the completion predicate under tasks_mutex.
+            tasks_lock.lock();""",
+            """            // Keep the completion predicate under tasks_mutex.
             if (waiting && (tasks_running == 0) && BS_THREAD_POOL_PAUSED_OR_EMPTY)
-                tasks_done_cv.notify_all();""")
-        return _replace_once(body, "std::remove_const_t<pr_task&>(tasks.top())",
-            "const_cast<pr_task&>(tasks.top())")
+                tasks_done_cv.notify_all();""",
+        )
+        return _replace_once(body, "std::remove_const_t<pr_task&>(tasks.top())", "const_cast<pr_task&>(tasks.top())")
 
     method("    void worker(", lower_worker)
-    method("    class [[nodiscard]] pr_task", lambda body:
-        _replace_once(_replace_once(body, "std::function<void()> task = {};",
-                                    "std::function<void()> task;"),
-                      "priority_t priority = 0;", "priority_t priority;"))
-    emit('''
+    method(
+        "    class [[nodiscard]] pr_task",
+        lambda body: _replace_once(
+            _replace_once(body, "std::function<void()> task = {};", "std::function<void()> task;"),
+            "priority_t priority = 0;",
+            "priority_t priority;",
+        ),
+    )
+    emit(
+        """
     bool paused;
     Shipyard::Async::condition_variable task_available_cv;
     Shipyard::Async::condition_variable tasks_done_cv;
@@ -191,7 +242,10 @@ public:
 };
 } // namespace BS
 #endif
-''', 1098, "member types and constructor initialization lowering")
+""",
+        1098,
+        "member types and constructor initialization lowering",
+    )
     return "\n".join(chunks), mappings
 
 
@@ -216,14 +270,18 @@ def generate(source_path, output_dir):
             "failed worker creation signals stop and joins created workers before rethrow",
         ],
         "unsupported": [
-            "reset", "pool timed waits", "multi_future", "block/loop/sequence helpers",
-            "this_thread optional TLS queries", "native handle/id queries", "wait deadlock-check option",
+            "reset",
+            "pool timed waits",
+            "multi_future",
+            "block/loop/sequence helpers",
+            "this_thread optional TLS queries",
+            "native handle/id queries",
+            "wait deadlock-check option",
         ],
     }
     output_dir.mkdir(parents=True, exist_ok=True)
     (output_dir / SOURCE_LABEL).write_text(generated, encoding="utf-8", newline="\n")
-    (output_dir / "provenance.json").write_text(
-        json.dumps(manifest, indent=2) + "\n", encoding="utf-8", newline="\n")
+    (output_dir / "provenance.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8", newline="\n")
     return manifest
 
 

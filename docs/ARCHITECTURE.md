@@ -1,41 +1,73 @@
 # Architecture
 
-Consumers compile only the Shipyard components they select. Native services and
-generic lowering belong here; application lifecycle, game data, pinned upstream
-layout and version-specific formulas belong in consumer adapters. Generated
-sources are outputs, not the maintained owners of a correction.
+Shipyard owns reusable Xbox platform services and compiler projections. A game
+owns its lifecycle, data formats, save policy, upstream version, and adapter
+interfaces. Generated sources are outputs; fixes belong in their projector or
+maintained source.
 
-The [package boundary](../BASELINE.md) defines what the manifest covers.
+## Package layout
 
+- `sources/`: native services and compatibility headers.
+- `python/xbox360_platform/`: source transformations and package checks.
+- `tests/`: Python tests, host C++ harnesses, and PowerPC compile checks.
+- `third_party/` and `provenance/`: pinned inputs and their source notices.
 
-Only select files required by the consumer's project. Include paths such as
-`services.h`, `shader_provider.h`, and `xenos_backend.h` in the renderer are
-consumer contracts, not missing Shipyard files.
+`baseline.json` hashes every file under `python/`, `sources/`, and `third_party/`.
+Consumers verify that manifest before generating or compiling sources.
 
-| Shipyard owns | Required input | Consumer owns |
+## Service boundaries
+
+| Shared component | Input from the game | Policy owned by the game |
 | --- | --- | --- |
-| `sources/xenos/` renderer, resource lifetimes and native counters; `sources/graphics/` shader lowering | Xbox SDK and pinned Fast3D shader types through `shader_provider.h` | `services.h` logging, fatal handling, reuse verification and file writes; `xenos_backend.h` device boundary; shader feature decoding, display lifecycle and optional cache location |
-| `sources/imgui/` native renderer and gamepad bindings | Xbox SDK and pinned `imgui.h` | Functions declared in `shipyard_imgui_xenos.h`, GUI lifecycle and input policy |
-| `sources/audio/` XAudio2 sink and PCM pool | Xbox SDK and pinned `ship/audio/AudioChannelsSetting.h` | `ShipyardAudioLog`/`ShipyardAudioFatal`, audio producer and allowed channel layouts |
-| `sources/diagnostics/` bounded record queue and worker | Xbox SDK synchronization primitives | Queue `Config` callbacks and context, sink, formatting, worker placement and shutdown timing |
-| `sources/environment/`, `sources/storage/`, `sources/network/` | Xbox SDK filesystem, storage and socket APIs | Launch-file path and absence policy; title identity, mount/socket lifetime and failure policy |
-| `sources/async/`, `sources/thread-pool/`, `sources/clock/`, `sources/libultra/` | Xbox SDK synchronization and timing APIs; pinned BS thread-pool projection where selected | Worker admission, task ownership, callback context and application shutdown order |
-| `sources/json/`, `sources/libzip/`, `sources/crt/` | Pinned nlohmann/libzip inputs and XDK CRT behavior | Selected archives, serializers, generated output staging and game data policy |
-| `sources/fast3d/` numeric, cache and lowering mechanisms | Pinned interpreter types and selected source anchors | Version-specific layout, formulas, capacity, observation and generated staging |
-| `python/xbox360_platform/` source-locked projectors | Pinned BS, JSON, libzip, spdlog and Prism inputs as required by the selected generator | Dependency acquisition, parser where required, project generation, application policy and source-lock integration |
+| Xenos renderer, framebuffers, shader cache, and shader lowering | Xbox SDK, pinned Fast3D types, `shader_provider.h`, `services.h`, and `xenos_backend.h` | Device lifecycle, feature decoding, logging, failure handling, and optional shader-cache location |
+| ImGui renderer and XInput | Xbox SDK, pinned ImGui types, and the functions in `shipyard_imgui_xenos.h` | GUI lifecycle, menus, and input mappings |
+| XAudio2 sink and PCM pool | Audio channel definitions and producer callbacks | Channel layouts and producer lifetime |
+| Diagnostics queue | Synchronization APIs, sink callbacks, and caller context | Formatting, worker placement, and shutdown timing |
+| Storage, environment, network, and atomic file operations | Title identity, mount names, paths, and sockets | Serialization, lifetime, and failure handling |
+| Async tasks, thread pool, clock, and libultra timer | Pinned thread-pool input and Xbox synchronization APIs | Task admission, ownership, and shutdown order |
+| JSON, libzip, CRT, value types, and compiler projections | Locked upstream sources and parser dependencies | Version adaptation, serializers, archives, and generated-file staging |
+| Fast3D math, caches, and vertex helpers | Pinned interpreter types and source anchors | Layout, capacity, formulas, and observation points |
 
-`sources/xenos/metrics.h` holds renderer counters accumulated on the graphics
-thread. Smash reads and resets their public snapshot through
-`ShipyardXenos::CaptureAndResetCounters`; Modern currently does not read it.
-The counters are maintained operational diagnostics, not a separate profiler;
-their integer increments occur in normal renderer builds even when a consumer
-does not request a snapshot.
-Native state and texture readback verification are opt-in through the
-consumer's `Shipyard_VerifyFast3DReuse` callback: Smash binds it to
-`SMASH360_VERIFY_NATIVE_REUSE=1`; Modern's setter is present but has no active
-caller, so its default is disabled. `Shipyard_Log` and `Shipyard_Fatal` are
-required operational hooks. Smash's full frame profiler is consumer-owned and
-has its own build and runtime switches.
+Shared JSON vector conversion reserves destination storage before copying
+elements. It preserves element order, type checks, and allocation-failure order.
+Normal-batch helpers leave empty output untouched; a singleton uses its own
+normal without populating the lookup table.
 
-[NOTICE.md](../NOTICE.md) records the known source lineage and licensing status.
+## Renderer capabilities
 
+Adapters choose the following definitions when compiling `sources/xenos/core.cpp`.
+All names below have the prefix `SHIPYARD_XENOS_`.
+
+| Definition | Default / Warwing | 3Shipsty | 2Ship3Shipsty |
+| --- | --- | --- | --- |
+| `SHADER_ABI` | 3 | 2 | 3 |
+| `SHADER_PACK` | 0 | 1 | 0 |
+| `DEFERRED_FRAMEBUFFERS` | 0 | 1 | 0 |
+| `BINDING_REUSE` | 0 | 1 | 0 |
+| `TILING_BUDGET` | 0 | 1 | 0 |
+| `DIAGNOSTICS` | 1 | 0, or 1 for instrumented builds | 1 |
+| `DETAILED_TIMING` | 1 | 1 | 0 |
+| `ALPHA_HISTOGRAM` | 0 | 1, active in instrumented builds | 0 |
+| `TILING_TRIALS` | 1 | 1 | 0 |
+
+Shader ABI 3 supplies primitive depth and logical raster state. ABI 2 uses the
+shader-pack format selected by 3Shipsty. Runtime shader lowering and pack
+generation must pass the same ABI to `Shipyard_LowerShader`; its default is 3.
+A pack consumer supplies `Shipyard_DecodeFast3DFeatures` and a program callback.
+
+Deferred framebuffers preserve published depth, defer clears, and keep resolved
+images until a draw. HiZ is enabled only with fresh depth. Binding reuse avoids
+repeating upload bindings, filtering changes, and noise-scale updates. Tiling
+budget selects the reservation policy; tiling trials remain a separate option.
+
+Renderer counters live in `sources/xenos/metrics.h`. Warwing reads and resets
+them with `ShipyardXenos::CaptureAndResetCounters`. 3Shipsty can compile them out.
+Native-state checks are opt-in through `Shipyard_VerifyFast3DReuse`; Warwing uses
+`SMASH360_VERIFY_NATIVE_REUSE=1`, and 3Shipsty defaults to disabled.
+
+## Projector options
+
+Opcode lowering accepts `composed_dispatch=True`. Resource lookup supports the
+selected load signatures, optional owned-rvalue construction, and task draining.
+Logging generation accepts `normalize_file_paths=False` when the adapter retains
+its path handling. Version choices stay explicit in the adapter.
