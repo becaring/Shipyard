@@ -572,8 +572,12 @@ void ReleaseTexture(IDirect3DTexture9* texture) {
     UINT base = 0, mips = 0;
     XGGetTextureLayout(texture, NULL, &base, NULL, NULL, 0, NULL, &mips, NULL, NULL, 0);
     size_t bytes = XGNextMultiple(base, 4096) + XGNextMultiple(mips, 4096);
-    const size_t budget = 8 * 1024 * 1024;
-    if (bytes > budget || pending_texture_releases.size() >= 128 ||
+    // Sized for a full texture-cache rebuild in one frame (an ocarina text
+    // box clears the cache; a new area imports hundreds of textures): below
+    // it, replaced images wait for the next frame's non-blocking collection
+    // instead of draining the GPU mid-frame.
+    const size_t budget = 16 * 1024 * 1024;
+    if (bytes > budget || pending_texture_releases.size() >= 1024 ||
         pending_texture_bytes + bytes > budget) {
         FinishFramebuffer();
         CollectTextures(true);

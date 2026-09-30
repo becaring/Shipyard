@@ -89,7 +89,9 @@ int ShipyardSpeechFixupData(void* memory, size_t size, const char* name, const c
         if (size < 8 || strlen(directory) + 20 >= sizeof(path)) {
             return 0;
         }
-        sprintf(path, "%s/phondata-manifest", directory);
+        // The console file system accepts only backslashes in a native
+        // "game:" path; keep the directory's own separator.
+        sprintf(path, "%s%cphondata-manifest", directory, strchr(directory, '\\') ? '\\' : '/');
         file = fopen(path, "rb");
         if (!file) {
             return 0;
