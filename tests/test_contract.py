@@ -77,5 +77,26 @@ class ContractTests(unittest.TestCase):
             verify(nested, self.lock)
 
 
+    def test_named_selection_verifies_and_detects_drift(self):
+        nested = self.base / 'selections' / '3Shipsty'
+        (nested / 'sources').mkdir(parents=True)
+        (nested / 'sources/probe.cpp').write_bytes(self.source.read_bytes())
+        (nested / 'baseline.json').write_bytes(self.manifest.read_bytes())
+        self.git('add', 'selections')
+        self.git('-c', 'user.name=Test', '-c', 'user.email=test@example.invalid',
+                 'commit', '-qm', 'selection')
+        self.write_lock(self.git('rev-parse', 'HEAD'))
+        lock = json.loads(self.lock.read_text())
+        lock['selection'] = '3Shipsty'
+        self.lock.write_text(json.dumps(lock) + '\n', encoding='utf-8')
+        self.assertEqual(verify(nested, self.lock)['api_version'], 1)
+        (nested / 'sources/probe.cpp').write_bytes(b'int probe = 2;\n')
+        with self.assertRaisesRegex(ValueError, 'file drift'):
+            verify(nested, self.lock)
+        with self.assertRaisesRegex(ValueError, 'not the Git checkout root'):
+            verify(self.base, self.lock)
+
+
+
 if __name__ == '__main__':
     unittest.main()
