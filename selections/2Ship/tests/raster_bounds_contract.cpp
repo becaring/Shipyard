@@ -57,7 +57,10 @@ struct NativeTimingScope { NativeTimingScope(unsigned&,unsigned&){} };
 void InvalidateNativeState(){}
 void TilingSpaceBegin(){} void TilingSpaceSetup(){} void TilingSpaceBeforeResolve(){} void TilingSpaceBeforeEnd(){}
 void ClearFramebufferTargets(DWORD){} void SetTileConstants(){} void StopTileConstants(){}
-void RestoreQuad(void*,void*,unsigned,unsigned,DWORD){}
+// Restore shader/sample behavior is covered by test_restore_batch.py.
+bool BeginRestoreQuad(unsigned,unsigned,bool){return false;}
+void DrawRestoreQuadSample(void*,void*,DWORD,const float*,bool){}
+void EndRestoreQuad(bool){}
 void RebindSampledTextures(){} void SetNativeTexture(int,void*){}
 #include "transitions.inc"
 void CheckBounds(const D3DVIEWPORT9& vp,const RECT& clip){

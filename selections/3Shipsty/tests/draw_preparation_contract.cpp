@@ -25,8 +25,10 @@ std::vector<Texture> textures;
 std::vector<Framebuffer> buffers(2);
 uint32_t selected[6]={}; int selected_fb[6]={-1,-1,-1,-1,-1,-1};
 int upload_tile,active_fb;
-float shader_frame_number=1,noise_scale=1;
+float shader_frame_number=1,noise_scale=1,noise_scale_input=1;
 bool draw_state_prepared=false;
+#include "xenos/sampler_certificate.h"
+Fast::ShipyardXenos::SamplerCertificate sampler_certificate;
 unsigned draw_sampler_mask=0;
 struct NativeState { unsigned sampler[6][5];float constants[12],binding_constants[24];
     bool sampler_valid[6],constants_valid,alpha_valid,binding_constants_valid;void *vertex,*pixel,*declaration;

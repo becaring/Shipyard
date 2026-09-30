@@ -22,6 +22,8 @@ class NativeTimingTests(unittest.TestCase):
 #include <assert.h>
 #include <vector>
 #define NULL 0
+// Exercise the opt-in diagnostic implementation; production defaults remain off.
+#define SHIPYARD_XENOS_DIAGNOSTICS 1
 struct LARGE_INTEGER { long long QuadPart; };
 unsigned clocks, frequencies;
 void QueryPerformanceCounter(LARGE_INTEGER* p) { p->QuadPart = ++clocks * 10; }

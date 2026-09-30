@@ -46,7 +46,7 @@ class DrawPreparationTests(unittest.TestCase):
             (out/'production.inc').write_text(methods)
             batch = out/'compile.cmd'
             batch.write_text('@echo off\ncall "'+installation+'/VC/Auxiliary/Build/vcvars32.bat" >nul\n'
-                'if errorlevel 1 exit /b 1\ncl /nologo /EHsc /MT /I"'+str(out)+'" /I"'+str(ROOT/'tests')+'" "'+
+                'if errorlevel 1 exit /b 1\ncl /nologo /EHsc /MT /I"'+str(out)+'" /I"'+str(ROOT/'tests')+'" /I"'+str(ROOT/'sources')+'" "'+
                 str(ROOT/'tests/draw_preparation_contract.cpp')+'" /Fe"'+str(out/'contract.exe')+'"\nexit /b %errorlevel%\n')
             built = subprocess.run([os.environ['ComSpec'], '/d', '/c', str(batch)], cwd=out, capture_output=True, text=True)
             self.assertEqual(built.returncode, 0, built.stdout+built.stderr)
@@ -56,7 +56,7 @@ class DrawPreparationTests(unittest.TestCase):
 
     def test_complete_mutation_and_external_boundaries(self):
         source = (ROOT/'sources/xenos/core.cpp').read_text()
-        for signature in ['void InvalidateNativeState()', 'void ApplySampler(int tile,',
+        for signature in ['void InvalidateNativeState()', 'void ApplySamplerSlot(',
                           'uint32_t NewTexture()', 'void SelectTexture(int tile,',
                           'void RebindSampledTextures()', 'void DeleteTexture(uint32_t id)',
                           'void LoadShader(ShaderProgram* shader)', 'void Filter(FilteringMode mode)',
@@ -64,8 +64,14 @@ class DrawPreparationTests(unittest.TestCase):
             self.assertIn('draw_state_prepared = false;', function(source, signature), signature)
         for signature in ['void UpdateFramebuffer(', 'void DestroyFramebufferNative(',
                           'void Start()', 'void Init()', 'void Shipyard_ShutdownGraphics()',
-                          'void RestoreQuad(', 'void FinishFramebuffer(bool preserveDepth, bool preserveColor)', 'void InvalidateGuiState()']:
+                          'bool BeginRestoreQuad(', 'void EndRestoreQuad(', 'void FinishFramebuffer(bool preserveDepth, bool preserveColor)', 'void InvalidateGuiState()']:
             self.assertIn('InvalidateNativeState();', function(source, signature), signature)
+        dispatch = function(source, 'void ApplySampler(int tile,')
+        for slot in range(6):
+            self.assertIn('ApplySamplerSlot<' + str(slot) + '>(sampler);', dispatch)
+        restore = function(source, 'void RestoreQuad(')
+        self.assertIn('BeginRestoreQuad(width, height, depth != NULL);', restore)
+        self.assertIn('EndRestoreQuad(restore_constants);', restore)
         upload = function(source, 'void Upload(const uint8_t* bytes,')
         self.assertEqual(upload.count('RebindSampledTextures();'), 2)
         self.assertIn('ApplySampler(0, buffers[id].sampler);', function(source, 'void SelectFramebuffer('))

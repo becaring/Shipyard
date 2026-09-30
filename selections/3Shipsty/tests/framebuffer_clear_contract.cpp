@@ -48,7 +48,11 @@ int main() {
     reset(true, true, true, 1, false); Clear(true, false);
     if (native_clear_requests != 1 || !buffers[0].stored || !buffers[0].depth_stored) return 4;
     reset(true, true, true, 1, false); Clear(false, true);
-    if (native_clear_requests != 2 || !buffers[0].stored || buffers[0].depth_stored) return 5;
+    if (native_clear_requests != 1 || !buffers[0].stored || buffers[0].depth_stored ||
+        framebuffer_depth_restore_avoided != 4) return 5;
+    reset(true, true, true, 2, false); Clear(false, true);
+    if (native_clear_requests != 0 || tiling_begins != 1 || !buffers[0].stored ||
+        buffers[0].depth_stored || framebuffer_depth_restore_avoided != 4) return 9;
     reset(true, false, false, 2, false); Clear(true, true);
     if (native_clear_requests != 1 || tiling_begins != 1) return 6;
     reset(false, false, false, 1, false); Clear(true, true);

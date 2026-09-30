@@ -15,7 +15,7 @@ class FramebufferClearTests(unittest.TestCase):
         method = source[start:end]
         self.assertEqual(method.count('BeginFramebuffer();'), 1)
         self.assertEqual(method.count('ClearFramebufferTargets(flags);'), 1)
-        self.assertIn('if (begin_clears_both)\n        return;', method)
+        self.assertIn('if (begin_clears_depth || begin_clears_both)\n        return;', method)
 
         vswhere = Path(os.environ['ProgramFiles(x86)'])/'Microsoft Visual Studio/Installer/vswhere.exe'
         installation = subprocess.check_output([

@@ -27,6 +27,8 @@ uint32_t selected[6]={}; int selected_fb[6]={-1,-1,-1,-1,-1,-1};
 int upload_tile,active_fb;
 float shader_frame_number=1,noise_scale=1;
 bool draw_state_prepared=false;
+#include "xenos/sampler_certificate.h"
+Fast::ShipyardXenos::SamplerCertificate sampler_certificate;
 struct { void Invalidate() {} } depth_clip; // Depth clipping has its own contract test.
 bool primitive_depth_enabled=false, primitive_depth_valid=false;
 float primitive_depth=0, uploaded_depth=0;

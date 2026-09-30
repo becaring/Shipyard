@@ -68,7 +68,7 @@ int main() {
         checked = draw.index('Shipyard_Check(drawResult, "Shipyard DrawPrimitiveUP");')
         recorded = draw.index('alpha_histogram.Record(')
         self.assertLess(checked, recorded)
-        self.assertIn('if (timing_enabled)\n        alpha_histogram.Record(', draw[checked:recorded + 60])
+        self.assertIn('if (timing_enabled)\n        SHIPYARD_DIAGNOSTIC(alpha_histogram.Record(', draw[checked:recorded + 60])
         capture = source[source.index('void CaptureAndResetCounters(NativeCounters* counters) {'):]
         self.assertIn('alpha_histogram.CopyAndReset(counters->alphaDraws, counters->alphaTriangles,',
                       capture)

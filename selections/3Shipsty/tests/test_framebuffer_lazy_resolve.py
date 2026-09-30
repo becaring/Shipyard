@@ -15,7 +15,7 @@ class FramebufferLazyResolveTests(unittest.TestCase):
     def test_end_preserves_resolved_image_without_an_extra_restore(self):
         source = (ROOT / 'sources/xenos/core.cpp').read_text()
         end = source.split('void End() {', 1)[1].split('\n}', 1)[0]
-        self.assertIn('if (live_framebuffer || !buffers[active_fb].stored)', end)
+        self.assertIn('if (live_framebuffer || pending_game_depth_clear == active_fb || !buffers[active_fb].stored)', end)
         self.assertIn('if (active_fb != 0)', end)
         self.assertIn('active_fb = 0;', end)
         self.assertIn('BeginFramebuffer();\n        FinishFramebuffer(!discardPresentationDepth', end)
