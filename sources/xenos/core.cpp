@@ -28,6 +28,9 @@
 #define SHIPYARD_DIAGNOSTIC(statement) do { } while (0)
 #endif
 
+// The feature decode Shipyard_BuildFast3DShader runs first (shader_provider).
+void Shipyard_DecodeFast3DFeatures(const Fast::ShaderProgramKey&, CCFeatures*);
+
 namespace Fast {
 // The graphics device is created during display initialization and released by Shutdown().
 IDirect3DDevice9* xenos_device;
@@ -42,7 +45,7 @@ struct ShaderProgram {
 namespace {
 // Consumer callbacks may load/store shader bytecode. Shipyard owns the compiled
 // D3D objects and their lifetime regardless of the bytecode cache policy.
-ShipyardXenos::ShaderCacheOps shader_cache_ops = {NULL, NULL};
+ShipyardXenos::ShaderCacheOps shader_cache_ops = {NULL, NULL, NULL};
 ShipyardXenos::NativeTimingCounters timing_counts;
 bool timing_enabled;
 uint64_t timing_frequency;
@@ -496,32 +499,46 @@ std::map<std::string, IDirect3DVertexDeclaration9*> vertex_declarations;
 ShaderProgram* CreateShader(const ShaderProgramKey& key) {
     ShaderProgram* shader = new ShaderProgram();
     shader->key = key;
-    std::string source, hlsl, error;
-    if (!Shipyard_BuildFast3DShader(key, shader->features, shader->floats, hlsl, error) ||
-        !Shipyard_LowerShader(hlsl, source, error)) {
-        Shipyard_Log("Fast3D shader generation/lowering failed: %s", error.c_str());
-        delete shader;
-        Shipyard_Fatal(error.c_str(), E_FAIL);
+    // A prebuilt program supplies both microcode blobs and the float count the
+    // builder would produce; the feature decode is the builder's own first step.
+    ShipyardXenos::ShaderProgramCode code = {NULL, 0, NULL, 0, 0};
+    ID3DXBuffer* vertex_code = NULL;
+    ID3DXBuffer* pixel_code = NULL;
+    if (shader_cache_ops.program && shader_cache_ops.program(key, &code)) {
+        Shipyard_DecodeFast3DFeatures(key, &shader->features);
+        shader->floats = code.floats;
+    } else {
+        std::string source, hlsl, error;
+        if (!Shipyard_BuildFast3DShader(key, shader->features, shader->floats, hlsl, error) ||
+            !Shipyard_LowerShader(hlsl, source, error)) {
+            Shipyard_Log("Fast3D shader generation/lowering failed: %s", error.c_str());
+            delete shader;
+            Shipyard_Fatal(error.c_str(), E_FAIL);
+        }
+        vertex_code = Compile(source, "VSMain", "vs_3_0");
+        pixel_code = Compile(source, "PSMain", "ps_3_0");
+        code.vertex = (const DWORD*)vertex_code->GetBufferPointer();
+        code.vertexBytes = vertex_code->GetBufferSize();
+        code.pixel = (const DWORD*)pixel_code->GetBufferPointer();
+        code.pixelBytes = pixel_code->GetBufferSize();
     }
-    ID3DXBuffer* code = Compile(source, "VSMain", "vs_3_0");
-    const std::string vertex_key((const char*)code->GetBufferPointer(), code->GetBufferSize());
+    const std::string vertex_key((const char*)code.vertex, code.vertexBytes);
     std::map<std::string, IDirect3DVertexShader9*>::iterator existing_vertex =
         vertex_programs.find(vertex_key);
     if (existing_vertex != vertex_programs.end()) {
         shader->vertex = existing_vertex->second;
         shader->vertex->AddRef();
     } else {
-        Shipyard_Check(
-            xenos_device->CreateVertexShader((DWORD*)code->GetBufferPointer(), &shader->vertex),
-            "CreateVertexShader");
+        Shipyard_Check(xenos_device->CreateVertexShader(code.vertex, &shader->vertex),
+                       "CreateVertexShader");
         vertex_programs.insert(std::make_pair(vertex_key, shader->vertex));
     }
-    code->Release();
-    code = Compile(source, "PSMain", "ps_3_0");
-    Shipyard_Check(
-        xenos_device->CreatePixelShader((DWORD*)code->GetBufferPointer(), &shader->pixel),
-        "CreatePixelShader");
-    code->Release();
+    Shipyard_Check(xenos_device->CreatePixelShader(code.pixel, &shader->pixel),
+                   "CreatePixelShader");
+    if (vertex_code)
+        vertex_code->Release();
+    if (pixel_code)
+        pixel_code->Release();
     std::vector<D3DVERTEXELEMENT9> elements;
     WORD offset = 0;
     Element(elements, offset, 4, D3DDECLUSAGE_POSITION, 0);
@@ -2161,6 +2178,7 @@ void SetShaderCache(const ShaderCacheOps* operations) {
     else {
         shader_cache_ops.load = NULL;
         shader_cache_ops.store = NULL;
+        shader_cache_ops.program = NULL;
     }
 }
 void SetTimingEnabled(bool enabled) {
