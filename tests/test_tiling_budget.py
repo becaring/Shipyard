@@ -1,4 +1,5 @@
 import os
+import re
 from pathlib import Path
 import subprocess
 import tempfile
@@ -18,16 +19,29 @@ class TilingBudgetTests(unittest.TestCase):
         ], text=True).strip()
         with tempfile.TemporaryDirectory(prefix='shipyard-tiling-budget-') as folder:
             out = Path(folder)
+            draw = function((ROOT / 'sources/xenos/core.cpp').read_text(),
+                            'void Draw(float* vertices, size_t count, size_t triangles) {')
+            guards = re.findall(r'tiling_draw_bytes \+ count \* sizeof\(float\) \+ 8192 > [^)]*', draw)
+            self.assertEqual(len(guards), 2)
+            self.assertEqual(guards[0], guards[1])
+            (out / 'tiling_precheck.inc').write_text(
+                'bool TilingPrecheck(size_t tiling_draw_bytes, size_t count) { return ' +
+                guards[0] + '; }\n')
             batch = out / 'compile.cmd'
             batch.write_text('@echo off\ncall "' + installation + '/VC/Auxiliary/Build/vcvars32.bat" >nul\n'
                              'if errorlevel 1 exit /b 1\ncl /nologo /EHsc /MT /I"' +
-                             str(ROOT / 'sources/xenos') + '" "' +
-                             str(ROOT / 'tests/tiling_budget_contract.cpp') + '" /Feprobe.exe\nexit /b %errorlevel%\n')
-            built = subprocess.run([os.environ['ComSpec'], '/d', '/c', str(batch)], cwd=out,
-                                   capture_output=True, text=True)
-            self.assertEqual(built.returncode, 0, built.stdout + built.stderr)
-            run = subprocess.run([str(out / 'probe.exe')], cwd=out, capture_output=True, text=True)
-            self.assertEqual(run.returncode, 0, run.stdout + run.stderr)
+                             str(ROOT / 'sources/xenos') + '" ' +
+                             '/I"' + str(out) + '" "' + str(ROOT / 'tests/tiling_budget_contract.cpp') + '" /Feprobe.exe\nexit /b %errorlevel%\n')
+            original = batch.read_text()
+            for enabled in (0, 1):
+                with self.subTest(tiling_budget=enabled):
+                    batch.write_text(original.replace(
+                        'cl /nologo', f'cl /DSHIPYARD_XENOS_TILING_BUDGET={enabled} /nologo'))
+                    built = subprocess.run([os.environ['ComSpec'], '/d', '/c', str(batch)], cwd=out,
+                                           capture_output=True, text=True)
+                    self.assertEqual(built.returncode, 0, built.stdout + built.stderr)
+                    run = subprocess.run([str(out / 'probe.exe')], cwd=out, capture_output=True, text=True)
+                    self.assertEqual(run.returncode, 0, run.stdout + run.stderr)
 
     def test_lifetime_and_viewport_boundary_integration(self):
         source = (ROOT / 'sources/xenos/core.cpp').read_text()

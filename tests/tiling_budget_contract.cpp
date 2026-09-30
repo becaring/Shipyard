@@ -1,10 +1,39 @@
 #include <assert.h>
 #include "tiling_budget.h"
 using Fast::ShipyardXenos::TilingBudget;
+namespace ShipyardXenos = Fast::ShipyardXenos;
+#include "tiling_precheck.inc"
 
 int main() {
-    const unsigned capacity = 8 * 1024 * 1024;
+    const unsigned capacity = TilingBudget::ExpectedCapacity;
     const uintptr_t cursor = 0x100000, end = 0x110000;
+#if SHIPYARD_XENOS_TILING_BUDGET
+    assert(capacity == 16 * 1024 * 1024);
+    assert(TilingBudget::Limit == 4 * 1024 * 1024);
+    TilingBudget dense;
+    const unsigned used = 2 * 1024 * 1024 - TilingBudget::SegmentReserve;
+    dense.Begin(used, capacity - used);
+    size_t denseEstimate = 2 * 1024 * 1024;
+    const unsigned incoming = 1024;
+    unsigned draws = 0, queryCalls = 0;
+    while (!TilingPrecheck(denseEstimate, incoming / sizeof(float))) {
+        dense.ChargeVertices(incoming);
+        denseEstimate += incoming + TilingBudget::StateAllowance;
+        ++draws;
+    }
+    assert(draws > 200 && queryCalls == 0);
+    assert(TilingPrecheck(denseEstimate, incoming / sizeof(float)));
+    ++queryCalls;
+    assert(dense.BeforeDraw(used, capacity - used, cursor, end, incoming, &denseEstimate));
+    assert(denseEstimate + incoming + TilingBudget::StateAllowance < TilingBudget::Limit);
+    dense.ChargeVertices(incoming);
+    ++queryCalls;
+    assert(dense.AfterDraw(used + 64, capacity - used - 64, cursor, end));
+    assert(queryCalls == 2);
+#else
+    assert(capacity == 8 * 1024 * 1024);
+    assert(TilingBudget::Limit == 2 * 1024 * 1024);
+#endif
     for (unsigned incoming = 0; incoming <= TilingBudget::MaximumInput; incoming += 1024) {
         TilingBudget b;
         b.Begin(0, capacity);

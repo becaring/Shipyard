@@ -2,6 +2,7 @@
 
 #include <stdint.h>
 #include <string.h>
+#include "ring_limits.h"
 
 namespace Fast {
 namespace ShipyardXenos {
@@ -29,12 +30,12 @@ struct TilingGuardTrialStats {
 
 // Opt-in diagnostic policy. QueryBufferSpace is authoritative for current
 // occupancy, but the SDK does not document an upper bound for the next Draw or
-// EndTiling; keep half of the 8 MiB command buffer in reserve for this trial.
+// EndTiling; keep half of the command buffer in reserve for this trial.
 struct TilingGuardTrialWindow {
     enum {
-        ExpectedCapacity = 8 * 1024 * 1024,
+        ExpectedCapacity = RingSecondaryBytes,
         CapacityTolerance = 64 * 1024,
-        MinimumRemaining = 4 * 1024 * 1024 + 64 * 1024,
+        MinimumRemaining = ExpectedCapacity / 2 + CapacityTolerance,
         MaximumInputBytes = 256 * 1024
     };
     TilingGuardTrialStats stats;

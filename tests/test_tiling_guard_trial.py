@@ -22,8 +22,8 @@ class TilingGuardTrialTests(unittest.TestCase):
 using namespace Fast::ShipyardXenos;
 int main() {
     TilingGuardTrialWindow w;
-    const unsigned capacity = 8*1024*1024 - 4;
-    const unsigned reserve = 4*1024*1024 + 64*1024;
+    const unsigned capacity = RingSecondaryBytes - 4;
+    const unsigned reserve = RingSecondaryBytes / 2 + TilingGuardTrialWindow::CapacityTolerance;
     w.Begin(264, capacity-264);
     assert(w.active);
     assert(w.BeforeDraw(100000, capacity-100000, 65536) == GuardTrialContinue);
@@ -78,16 +78,21 @@ int main() {
             batch.write_text('@echo off\ncall "' + installation + '/VC/Auxiliary/Build/vcvars32.bat" >nul\n'
                              'if errorlevel 1 exit /b 1\ncl /nologo /EHsc /MT /I"' +
                              str(ROOT / 'sources/xenos') + '" probe.cpp /Feprobe.exe\nexit /b %errorlevel%\n')
-            built = subprocess.run([os.environ['ComSpec'], '/d', '/c', str(batch)], cwd=out,
-                                   capture_output=True, text=True)
-            self.assertEqual(built.returncode, 0, built.stdout + built.stderr)
-            run = subprocess.run([str(out / 'probe.exe')], cwd=out, capture_output=True, text=True)
-            self.assertEqual(run.returncode, 0, run.stdout + run.stderr)
+            original = batch.read_text()
+            for enabled in (0, 1):
+                with self.subTest(tiling_budget=enabled):
+                    batch.write_text(original.replace(
+                        'cl /nologo', f'cl /DSHIPYARD_XENOS_TILING_BUDGET={enabled} /nologo'))
+                    built = subprocess.run([os.environ['ComSpec'], '/d', '/c', str(batch)], cwd=out,
+                                           capture_output=True, text=True)
+                    self.assertEqual(built.returncode, 0, built.stdout + built.stderr)
+                    run = subprocess.run([str(out / 'probe.exe')], cwd=out, capture_output=True, text=True)
+                    self.assertEqual(run.returncode, 0, run.stdout + run.stderr)
 
     def test_trial_is_opt_in_and_keeps_original_guard_and_endtiling(self):
         source = (ROOT / 'sources/xenos/core.cpp').read_text()
         draw = function(source, 'void Draw(float* vertices, size_t count, size_t triangles) {')
-        self.assertIn('tiling_draw_bytes + count * sizeof(float) + 8192 > 2 * 1024 * 1024', draw)
+        self.assertIn('tiling_draw_bytes + count * sizeof(float) + 8192 > ShipyardXenos::TilingPassLimit', draw)
         self.assertLess(draw.index('GuardTrialBeforeDraw('), draw.index('PrepareDrawState();'))
         self.assertLess(draw.index('SubmitTile1PredicatedDraw('), draw.index('GuardTrialAfterDraw('))
         self.assertIn('FinishFramebuffer();', draw)

@@ -46,12 +46,12 @@ struct NativeCounters {
     unsigned uploadRequests, uploadReused, uploadSavedBytes;
     unsigned clears, restoresAvoided, depthRestoresAvoided;
     unsigned depthResolves, depthResolvesSkipped, earlyDepthFences;
-    unsigned tilingDrawRestarts, tilingPeakBytes;
+    unsigned tilingDrawRestarts, tilingPeakBytes, tilingPassLimit;
     unsigned tiling1080Batches, tiling1080Tile1Batches;
     unsigned tiling1080Vertices, tiling1080Tile1Vertices;
     unsigned tiling1080OversizeBatches;
     unsigned ringSameSegmentDraws, ringAmbiguousDraws, ringSegmentChangedDraws;
-    unsigned ringMaxSameSegmentBytes;
+    unsigned ringMaxSameSegmentBytes, ringSegmentBytes;
     uint64_t ringSameSegmentBytes, ringSameSegmentEstimatedBytes;
     TilingSpaceSummary tilingSpace;
     TilingGuardTrialStats tilingGuardTrial;

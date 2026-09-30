@@ -80,7 +80,7 @@ int main() {
         self.assertLess(finish.index('TilingSpaceBeforeResolve('), finish.index('Resolve('))
         self.assertLess(finish.index('SetPredication(0);'), finish.index('TilingSpaceBeforeEnd('))
         self.assertLess(finish.index('TilingSpaceBeforeEnd('), finish.index('EndTiling('))
-        self.assertIn('tiling_draw_bytes + count * sizeof(float) + 8192 > 2 * 1024 * 1024', draw)
+        self.assertIn('tiling_draw_bytes + count * sizeof(float) + 8192 > ShipyardXenos::TilingPassLimit', draw)
 
 
 if __name__ == '__main__':

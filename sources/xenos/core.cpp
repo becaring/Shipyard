@@ -10,6 +10,7 @@
 #include "tile_coverage.h"
 #include "tile1_predication_draw.h"
 #include "ring_probe.h"
+#include "ring_limits.h"
 #include "tiling_budget.h"
 #include "sampler_certificate.h"
 
@@ -1011,7 +1012,7 @@ void Draw(float* vertices, size_t count, size_t triangles) {
     bool restoreGuardViewport = false;
     D3DVIEWPORT9 guardViewport;
     if (live_framebuffer && buffers[active_fb].tiles.size() > 1 &&
-        tiling_draw_bytes + count * sizeof(float) + 8192 > 2 * 1024 * 1024) {
+        tiling_draw_bytes + count * sizeof(float) + 8192 > ShipyardXenos::TilingPassLimit) {
         budgetContinued = ContinueTilingBeforeDraw(uint64_t(count) * sizeof(float));
         trialContinued = budgetContinued || GuardTrialBeforeDraw(uint64_t(count) * sizeof(float));
         if (!trialContinued) {
@@ -1027,7 +1028,7 @@ void Draw(float* vertices, size_t count, size_t triangles) {
     }
 #else
     if (live_framebuffer && buffers[active_fb].tiles.size() > 1 &&
-        tiling_draw_bytes + count * sizeof(float) + 8192 > 2 * 1024 * 1024) {
+        tiling_draw_bytes + count * sizeof(float) + 8192 > ShipyardXenos::TilingPassLimit) {
         ++tiling_draw_restarts;
         tiling_guard_restart_pending = timing_enabled;
         FinishFramebuffer();
@@ -1130,7 +1131,7 @@ void Draw(float* vertices, size_t count, size_t triangles) {
             (uintptr_t)xenos_device->m_pRing, (uintptr_t)xenos_device->m_pRingLimit);
         size_t observedBytes;
         if (ShipyardXenos::SameRingSegmentDelta(ringBefore, ringAfter,
-                                                8 * 1024 * 1024 / 32, &observedBytes)) {
+                                                ShipyardXenos::RingSegmentBytes, &observedBytes)) {
             ++ring_same_segment_draws;
             ring_same_segment_bytes += observedBytes;
             ring_same_segment_estimated_bytes += count * sizeof(float) + 8192;
@@ -2034,7 +2035,7 @@ void InitializeDisplay() {
     pp.PresentationInterval = D3DPRESENT_INTERVAL_ONE;
     // The XDK owns this ring; two bounded tiling brackets can coexist while the
     // CPU records the next one.
-    pp.RingBufferParameters.SecondarySize = 8 * 1024 * 1024;
+    pp.RingBufferParameters.SecondarySize = ShipyardXenos::RingSecondaryBytes;
     // Presentation owns its front buffers and swaps asynchronously; see
     // presentation/xenos_swap_chain.h. The device keeps its EDRAM back buffer.
     pp.DisableAutoFrontBuffer = TRUE;
@@ -2512,6 +2513,7 @@ void CaptureAndResetCounters(NativeCounters* counters) {
     counters->earlyDepthFences = framebuffer_early_depth_fences;
     counters->tilingDrawRestarts = tiling_draw_restarts;
     counters->tilingPeakBytes = tiling_peak_bytes;
+    counters->tilingPassLimit = ShipyardXenos::TilingPassLimit;
     counters->tiling1080Batches = tiling_1080_batches;
     counters->tiling1080Tile1Batches = tiling_1080_tile1_batches;
     counters->tiling1080Vertices = tiling_1080_vertices;
@@ -2521,6 +2523,7 @@ void CaptureAndResetCounters(NativeCounters* counters) {
     counters->ringAmbiguousDraws = ring_ambiguous_draws;
     counters->ringSegmentChangedDraws = ring_segment_changed_draws;
     counters->ringMaxSameSegmentBytes = ring_max_same_segment_bytes;
+    counters->ringSegmentBytes = ShipyardXenos::RingSegmentBytes;
     counters->ringSameSegmentBytes = ring_same_segment_bytes;
     counters->ringSameSegmentEstimatedBytes = ring_same_segment_estimated_bytes;
     counters->tilingSpace = tiling_space_probe.summary;

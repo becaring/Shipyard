@@ -2,6 +2,7 @@
 
 #include <stdint.h>
 #include <stddef.h>
+#include "ring_limits.h"
 
 namespace Fast { namespace ShipyardXenos {
 
@@ -9,8 +10,8 @@ namespace Fast { namespace ShipyardXenos {
 // allocated separately by the SDK, so retain its bytes until EndTiling too.
 struct TilingBudget {
     enum {
-        Limit = 2 * 1024 * 1024,
-        ExpectedCapacity = 8 * 1024 * 1024,
+        Limit = TilingPassLimit,
+        ExpectedCapacity = RingSecondaryBytes,
         CapacityTolerance = 64 * 1024,
         MaximumInput = 256 * 1024,
         // D3DRING_BUFFER_PARAMETERS permits segments up to 512 KiB. Include
