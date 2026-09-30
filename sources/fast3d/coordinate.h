@@ -5,8 +5,8 @@
 namespace Shipyard {
 namespace Fast3D {
 
-// Shared UV arithmetic for the two pinned Fast3D interpreters. The caller
-// selects the tile, half-texel policy, destination and any later FB transform.
+// Shared UV arithmetic. The caller selects the tile and half-texel policy,
+// and applies any framebuffer transform after normalization.
 // shift is a tile shift in [0, 15]; dimension is the caller's texture extent.
 __forceinline float Coordinate(float raw, int shift, float start, bool half, float dimension) {
     float value = raw / 32.0f;
@@ -39,14 +39,11 @@ __declspec(align(128)) static const float kCoordinateInverse[32] = {
     1.0f / 16777216.0f, 1.0f / 33554432.0f, 1.0f / 67108864.0f, 1.0f / 134217728.0f,
     1.0f / 268435456.0f, 1.0f / 536870912.0f, 1.0f / 1073741824.0f, 1.0f / 2147483648.0f};
 
-// Coordinate for one tile axis, prepared when the tile/extent state is
-// reconciled and applied to each vertex. It returns Coordinate's exact bits:
-// raw / 32, the tile shift, start / 4 and a power-of-two dimension are exact
-// power-of-two scalings, and multiplying by 2^-k rounds the same real value as
-// dividing by 2^k. The subtraction, half texel addition and any
-// non-power-of-two division keep their order. Per vertex this removes the
-// extent's and shift's integer-to-float conversions (Xenon load-hit-store
-// round trips) and, for power-of-two textures, the division.
+// Prepare tile-dependent arithmetic once to avoid repeated Xenon integer-to-
+// float conversions during packing. Keep raw / 32 and the tile shift separate,
+// preserving Coordinate's intermediate rounding and subtraction/addition order.
+// Reciprocal multiplication is limited to nonzero power-of-two extents;
+// other extents retain division. The half-texel policy is supplied per vertex.
 struct CoordinateAxis {
     float scale, start, dimension, reciprocal;
     float rawStart;

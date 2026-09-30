@@ -76,12 +76,9 @@ struct XboxTrianglePipelineKey {
     };
     uint32_t loaded[2][4];
     uint8_t sampler[2][3];
-    // Reload restoration (consumer trait RestoresReloadedTextures): both TMEM
-    // entries and the consumer's palette identity (PaletteIdentity) at
-    // capture. Imports may fall back to the other TMEM entry, so both are kept.
-    // A texture command sequence that reloads exactly this material leaves
-    // every import key, and so the bound cache node, unchanged; the SoH 4.0.5
-    // Xbox renderer restored its pipeline instead of rebuilding it.
+    // Reload restoration is opt-in through RestoresReloadedTextures. Capture
+    // both TMEM entries because imports may fall back to the other entry, and
+    // use PaletteIdentity for the consumer's actual palette import key.
     union {
         uint32_t imageAlignment;
         unsigned char images[2][sizeof(((RDP*)0)->loaded_texture[0])];

@@ -149,11 +149,9 @@ template <typename Texture, size_t Capacity = 256> class TextureHashCache {
 
   public:
 
-    // Once per interpolation batch: a moved lookup generation already makes
-    // every entry miss, so release their owners together instead of keeping
-    // unloaded textures alive until each slot is reused. An unchanged
-    // generation keeps the resolutions, as the pointer-patched display lists
-    // of the SoH 4.0.5 Xbox renderer did.
+    // Call once per interpolation batch. A generation change invalidates
+    // every entry, so release its owners now rather than retaining unloaded
+    // resources until slot reuse. Otherwise keep entries for subsequent hits.
     void Retire(unsigned generation) {
         if (generation == mRetiredGeneration)
             return;

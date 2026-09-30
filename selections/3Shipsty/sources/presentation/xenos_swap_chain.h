@@ -6,24 +6,10 @@
 #endif
 
 namespace Shipyard {
-// Title-owned front buffers presented with asynchronous swaps, following the
-// XDK AsyncSwaps sample (end-of-frame CPU throttle, no GPU vblank stall).
-//
-// Synchronous Present stalls the GPU at a vblank before it may resolve into
-// the single automatic front buffer, so the GPU cannot start the next frame
-// until that vblank, and it throttles the CPU so a frame's Present returns
-// only after the previous frame is on screen. D3DRS_BUFFER2FRAMES only moves
-// that CPU stall to the end of the frame; it never allows a third frame.
-// Interpolated presentation puts the whole game update in front of lane 0,
-// so lane 0 has to fit the update, its recording and its GPU work into two
-// vblanks after lane 1 is shown. When it does not, it slips exactly one
-// vblank and the three lanes take four vblanks: 3/4 of refresh, ~45 Hz.
-//
-// With three front buffers the GPU renders each frame as soon as it is
-// kicked, and up to two finished frames may wait for their vblanks, so the
-// short lanes bank the time the long lane needs. Every swap still honours
-// D3DRS_PRESENTINTERVAL, so frames are shown in submission order, one
-// presentation interval each; interpolation cadence is unchanged.
+// Title-owned front buffers, following the XDK AsyncSwaps sample. Three
+// buffers allow rendering ahead of scanout; the submitting CPU waits before
+// reusing a busy buffer. Swaps retain the device's presentation interval and
+// submission order. Buffering does not guarantee that a workload meets refresh.
 class XenosSwapChain {
   public:
     enum { FrontBuffers = 3 };
@@ -85,10 +71,8 @@ class XenosSwapChain {
     }
 
   private:
-    // EnqueuedCount swaps are pending and one more front buffer is being
-    // scanned out. The next buffer is free once fewer than FrontBuffers are
-    // busy; the GPU is never stalled, only this thread, and only when two
-    // finished frames are already waiting for their vblanks.
+    // EnqueuedCount excludes the buffer being scanned out. Wait on the CPU
+    // until pending swaps plus scanout leave one of our front buffers free.
     void WaitForFrontBuffer() {
         D3DSWAP_STATUS status;
         device->QuerySwapStatus(&status);
