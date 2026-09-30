@@ -135,9 +135,27 @@ ShipyardTextureUploadCounts upload_counts;
 struct PendingTextureRelease {
     IDirect3DTexture9* texture;
     size_t bytes;
-    PendingTextureRelease(IDirect3DTexture9* value, size_t size) : texture(value), bytes(size) {
+    // Upload images are owned here alone; they return to the free pool.
+    bool recyclable;
+    PendingTextureRelease(IDirect3DTexture9* value, size_t size, bool reuse)
+        : texture(value), bytes(size), recyclable(reuse) {
     }
 };
+// Retired upload images the GPU no longer reads, kept for the next upload of
+// the same dimensions. Creating a Xenos texture allocates physical memory, and
+// an area's first frames or a texture-cache rebuild (an ocarina text box)
+// replace hundreds of images, mostly at a few common sizes.
+struct FreeTexture {
+    IDirect3DTexture9* texture;
+    uint32_t width;
+    uint32_t height;
+    size_t bytes;
+    FreeTexture(IDirect3DTexture9* value, uint32_t w, uint32_t h, size_t size)
+        : texture(value), width(w), height(h), bytes(size) {
+    }
+};
+std::vector<FreeTexture> free_textures;
+size_t free_texture_bytes;
 std::vector<PendingTextureRelease> pending_texture_releases;
 size_t pending_texture_bytes;
 std::vector<Framebuffer> buffers;
@@ -594,11 +612,45 @@ uint32_t NewTexture() {
     textures.push_back(Texture());
     return (uint32_t)textures.size() - 1;
 }
+void RecycleTexture(IDirect3DTexture9* texture, size_t bytes) {
+    const size_t budget = 8 * 1024 * 1024;
+    D3DSURFACE_DESC description;
+    if (free_textures.size() >= 512 || free_texture_bytes + bytes > budget ||
+        FAILED(texture->GetLevelDesc(0, &description)) || description.Format != D3DFMT_LIN_A8R8G8B8) {
+        texture->Release();
+        return;
+    }
+    free_textures.push_back(FreeTexture(texture, description.Width, description.Height, bytes));
+    free_texture_bytes += bytes;
+}
+IDirect3DTexture9* TakeFreeTexture(uint32_t width, uint32_t height) {
+    for (size_t i = free_textures.size(); i-- > 0;) {
+        if (free_textures[i].width == width && free_textures[i].height == height) {
+            IDirect3DTexture9* texture = free_textures[i].texture;
+            free_texture_bytes -= free_textures[i].bytes;
+            free_textures[i] = free_textures.back();
+            free_textures.pop_back();
+            return texture;
+        }
+    }
+    return NULL;
+}
+void ReleaseFreeTextures() {
+    for (size_t i = 0; i < free_textures.size(); ++i)
+        free_textures[i].texture->Release();
+    free_textures.clear();
+    free_texture_bytes = 0;
+}
 void CollectTextures(bool wait) {
     for (size_t i = 0; i < pending_texture_releases.size();) {
         PendingTextureRelease& pending = pending_texture_releases[i];
-        if (wait || !pending.texture->IsBusy()) {
-            pending.texture->Release();
+        const bool busy = pending.texture->IsBusy();
+        if (wait || !busy) {
+            // Only an image the GPU has finished with may be written again.
+            if (!busy && pending.recyclable)
+                RecycleTexture(pending.texture, pending.bytes);
+            else
+                pending.texture->Release();
             pending_texture_bytes -= pending.bytes;
             pending_texture_releases[i] = pending_texture_releases.back();
             pending_texture_releases.pop_back();
@@ -607,7 +659,7 @@ void CollectTextures(bool wait) {
         }
     }
 }
-void ReleaseTexture(IDirect3DTexture9* texture) {
+void ReleaseTexture(IDirect3DTexture9* texture, bool recyclable = false) {
     // XDK Release waits for the GPU when dropping the last reference. Keep the
     // replaced immutable image alive until the SDK reports it unused, so a
     // small texture upload doesn't drain the GPU halfway through a frame.
@@ -630,7 +682,7 @@ void ReleaseTexture(IDirect3DTexture9* texture) {
             return;
         }
     }
-    pending_texture_releases.push_back(PendingTextureRelease(texture, bytes));
+    pending_texture_releases.push_back(PendingTextureRelease(texture, bytes, recyclable));
     pending_texture_bytes += bytes;
 }
 void SelectTexture(int tile, uint32_t id) {
@@ -713,15 +765,32 @@ void Upload(const uint8_t* bytes, uint32_t width, uint32_t height) {
             native_state.sampler_valid[i] = false;
         }
     if (tex.native) {
-        ReleaseTexture(tex.native);
+        ReleaseTexture(tex.native, true);
     }
-    Shipyard_Check(xenos_device->CreateTexture(width, height, 1, 0, D3DFMT_LIN_A8R8G8B8,
-                                               D3DPOOL_DEFAULT, &tex.native, NULL),
-                   "CreateTexture");
+    tex.native = TakeFreeTexture(width, height);
+    if (!tex.native)
+        Shipyard_Check(xenos_device->CreateTexture(width, height, 1, 0, D3DFMT_LIN_A8R8G8B8,
+                                                   D3DPOOL_DEFAULT, &tex.native, NULL),
+                       "CreateTexture");
     D3DLOCKED_RECT lock;
     Shipyard_Check(tex.native->LockRect(0, &lock, NULL, 0), "texture LockRect");
+#if defined(_M_PPC)
+    // Big-endian: an RGBA byte quad read as one word is 0xRRGGBBAA, and a
+    // right rotation by 8 is the ARGB texel.
+    const bool words = (((size_t)bytes) & 3) == 0;
+#else
+    const bool words = false;
+#endif
     for (uint32_t y = 0; y < height; ++y) {
         DWORD* out = (DWORD*)((BYTE*)lock.pBits + y * lock.Pitch);
+        if (words) {
+            const DWORD* in = (const DWORD*)(bytes + y * width * 4);
+            for (uint32_t x = 0; x < width; ++x) {
+                const DWORD rgba = in[x];
+                out[x] = (rgba >> 8) | (rgba << 24);
+            }
+            continue;
+        }
         for (uint32_t x = 0; x < width; ++x) {
             const BYTE* p = bytes + (y * width + x) * 4;
             out[x] = ((DWORD)p[3] << 24) | ((DWORD)p[0] << 16) | ((DWORD)p[1] << 8) | p[2];
@@ -1778,7 +1847,7 @@ void DeleteTexture(uint32_t id) {
         for (int i = 0; i < 6; ++i)
             if (selected_fb[i] < 0 && selected[i] == id)
                 SetNativeTexture(i, NULL);
-        ReleaseTexture(textures[id].native);
+        ReleaseTexture(textures[id].native, true);
         textures[id] = Texture();
     }
 }
@@ -1934,6 +2003,7 @@ void Shipyard_ShutdownGraphics() {
     xenos_device->SetDepthStencilSurface(NULL);
     xenos_device->BlockUntilIdle();
     CollectTextures(true);
+    ReleaseFreeTextures();
     if (published_framebuffer_image) {
         published_framebuffer_image->Release();
         published_framebuffer_image = NULL;

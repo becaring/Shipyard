@@ -132,7 +132,7 @@
     "sources/value_types/xbox_compat/optional.h": "c2f636d3b098706146580922f2129b898308bc33e297052d9357b30180132785",
     "sources/value_types/xbox_compat/variant.h": "8828863c5dff94277aaa42b3abce42a3a9024f24ac97155537b3f3b9ad11058c",
     "sources/xenos/alpha_mode_histogram.h": "95186408566d8082b489ebdfa598fe718d39881e318022f56f53d79dd51120d6",
-    "sources/xenos/core.cpp": "2b89329384b657588036d619ae60e9af2e4c509be2220edb93e4d4b8329b6ab9",
+    "sources/xenos/core.cpp": "6b232f97b73d67766313af24b8605e4e212c8cdfb2565c4457b857d1d338e986",
     "sources/xenos/core.h": "21067d84ebbe79fd54ecccbb32e31e0ff662b763916422df35a83cd314ec84d6",
     "sources/xenos/depth_discard.h": "d27a548e2b1ac80e50365cfef0fa82b9b5f07714cdbf1b632e05de3ba653c10b",
     "sources/xenos/metrics.h": "cd7d2e383c323a500478d17ded095602f3184d7a6fdbee14bbf4135982b9f60a",

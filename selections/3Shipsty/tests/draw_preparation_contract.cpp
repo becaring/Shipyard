@@ -44,7 +44,7 @@ struct UploadSnapshot { uint32_t id;void* native; } upload_snapshots[UPLOAD_SNAP
 struct Device { int SetVertexDeclaration(void*){return 0;} int SetVertexShader(void*){return 0;}int SetPixelShader(void*){return 0;} } device;
 Device* xenos_device=&device;
 int SetNativeTexture(int,void*) { return 0; }
-void ReleaseTexture(void*) {}
+void ReleaseTexture(void*, bool = false) {}
 void FinishFramebuffer() {}
 void Resolve(int) {}
 void ValidateFramebuffer(int id) { require(id>=0 && size_t(id)<buffers.size(),"valid framebuffer"); }
