@@ -30,6 +30,12 @@
 #define SHIPYARD_DIAGNOSTIC(statement) do { } while (0)
 #endif
 
+#define SHIPYARD_DETAIL(statement, kind, count) \
+    do { \
+        SHIPYARD_DIAGNOSTIC(statement); \
+        details_counts.Add(ShipyardXenos::kind, (unsigned)(count)); \
+    } while (0)
+
 // The feature decode Shipyard_BuildFast3DShader runs first (shader_provider).
 #if SHIPYARD_XENOS_SHADER_PACK
 void Shipyard_DecodeFast3DFeatures(const Fast::ShaderProgramKey&, CCFeatures*);
@@ -52,6 +58,7 @@ namespace {
 ShipyardXenos::ShaderCacheOps shader_cache_ops = {NULL, NULL, NULL};
 ShipyardXenos::NativeTimingCounters timing_counts;
 bool timing_enabled;
+ShipyardXenos::DetailsCounts details_counts;
 bool detailed_timing_enabled = SHIPYARD_XENOS_DETAILED_TIMING != 0;
 uint64_t timing_frequency;
 #if SHIPYARD_XENOS_DIAGNOSTICS
@@ -335,11 +342,11 @@ __forceinline bool SameNativeConstants(const float* constants) {
     return (condition & 0x80) != 0; // XDK XM_CRMASK_CR6TRUE: all lanes equal.
 }
 void SetNativeConstants(const float* constants) {
-    SHIPYARD_DIAGNOSTIC(++native_state_counts.constants_attempted);
+    SHIPYARD_DETAIL(++native_state_counts.constants_attempted, DetailsConstantsAttempted, 1);
     if (native_state.constants_valid && SameNativeConstants(constants)) {
         if (Shipyard_VerifyFast3DReuse())
             VerifyNativeConstants(constants);
-        SHIPYARD_DIAGNOSTIC(++native_state_counts.constants_suppressed);
+        SHIPYARD_DETAIL(++native_state_counts.constants_suppressed, DetailsConstantsSuppressed, 1);
         return;
     }
     // One small upload is cheaper than scalar range scans and split SDK calls.
@@ -349,7 +356,7 @@ void SetNativeConstants(const float* constants) {
     __stvx(__lvx(constants, 16), native_state.constants, 16);
     __stvx(__lvx(constants, 32), native_state.constants, 32);
     native_state.constants_valid = true;
-    SHIPYARD_DIAGNOSTIC(++native_state_counts.constants_written);
+    SHIPYARD_DETAIL(++native_state_counts.constants_written, DetailsConstantsWritten, 1);
 }
 
 __declspec(noinline) void VerifyNativeBindingConstants(const float* values) {
@@ -361,7 +368,7 @@ __declspec(noinline) void VerifyNativeBindingConstants(const float* values) {
 }
 
 void SetNativeBindingConstants(const float* values) {
-    SHIPYARD_DIAGNOSTIC(++binding_attempted);
+    SHIPYARD_DETAIL(++binding_attempted, DetailsBindingAttempted, 1);
     float* cached = native_state.binding_constants;
     typedef char
         BindingConstantsAligned[(offsetof(NativeStateCache, binding_constants) % 16 == 0) ? 1 : -1];
@@ -378,7 +385,7 @@ void SetNativeBindingConstants(const float* values) {
         if ((condition & 0x80) != 0) {
             if (Shipyard_VerifyFast3DReuse())
                 VerifyNativeBindingConstants(values);
-            SHIPYARD_DIAGNOSTIC(++binding_suppressed);
+            SHIPYARD_DETAIL(++binding_suppressed, DetailsBindingSuppressed, 1);
             return;
         }
     }
@@ -390,7 +397,7 @@ void SetNativeBindingConstants(const float* values) {
     __stvx(__lvx(values, 64), cached, 64);
     __stvx(__lvx(values, 80), cached, 80);
     native_state.binding_constants_valid = true;
-    SHIPYARD_DIAGNOSTIC(++binding_written);
+    SHIPYARD_DETAIL(++binding_written, DetailsBindingWritten, 1);
 }
 
 template <int tile> void ApplySamplerSlot(const TextureSampler& sampler) {
@@ -400,8 +407,8 @@ template <int tile> void ApplySamplerSlot(const TextureSampler& sampler) {
         draw_state_prepared = false;
     const unsigned key = sampler.key | filtering_key;
     if (native_state.sampler_valid[tile] && native_state.sampler_key[tile] == key) {
-        SHIPYARD_DIAGNOSTIC(native_state_counts.sampler_attempted += 5);
-        SHIPYARD_DIAGNOSTIC(native_state_counts.sampler_suppressed += 5);
+        SHIPYARD_DETAIL(native_state_counts.sampler_attempted += 5, DetailsSamplerAttempted, 5);
+        SHIPYARD_DETAIL(native_state_counts.sampler_suppressed += 5, DetailsSamplerSuppressed, 5);
         if (Shipyard_VerifyFast3DReuse())
             VerifyNativeSampler(tile, native_state.sampler[tile]);
         return;
@@ -416,22 +423,22 @@ template <int tile> void ApplySamplerSlot(const TextureSampler& sampler) {
                             : (sampler.t & 1) ? D3DTADDRESS_MIRROR
                                               : D3DTADDRESS_WRAP;
     DWORD* cached = native_state.sampler[tile];
-    SHIPYARD_DIAGNOSTIC(native_state_counts.sampler_attempted += 5);
+    SHIPYARD_DETAIL(native_state_counts.sampler_attempted += 5, DetailsSamplerAttempted, 5);
     if (native_state.sampler_valid[tile] && cached[0] == filter && cached[1] == filter &&
         cached[2] == D3DTEXF_NONE && cached[3] == address_u && cached[4] == address_v) {
         if (Shipyard_VerifyFast3DReuse())
             VerifyNativeSampler(tile, cached);
-        SHIPYARD_DIAGNOSTIC(native_state_counts.sampler_suppressed += 5);
+        SHIPYARD_DETAIL(native_state_counts.sampler_suppressed += 5, DetailsSamplerSuppressed, 5);
         return;
     }
     // A real change must not rewrite the other four independent fields.
-#define SHIPYARD_SAMPLER_FIELD(index, field, value)                                                \
-    if (!native_state.sampler_valid[tile] || cached[index] != (DWORD)(value)) {                    \
-        xenos_device->SetSamplerState(tile, field, value);                                         \
-        cached[index] = (DWORD)(value);                                                            \
-        SHIPYARD_DIAGNOSTIC(++native_state_counts.sampler_written);                                \
-    } else                                                                                         \
-        SHIPYARD_DIAGNOSTIC(++native_state_counts.sampler_suppressed)
+#define SHIPYARD_SAMPLER_FIELD(index, field, value) \
+    if (!native_state.sampler_valid[tile] || cached[index] != (DWORD)(value)) { \
+        xenos_device->SetSamplerState(tile, field, value); \
+        cached[index] = (DWORD)(value); \
+        SHIPYARD_DETAIL(++native_state_counts.sampler_written, DetailsSamplerWritten, 1); \
+    } else \
+        SHIPYARD_DETAIL(++native_state_counts.sampler_suppressed, DetailsSamplerSuppressed, 1)
     SHIPYARD_SAMPLER_FIELD(0, D3DSAMP_MINFILTER, filter);
     SHIPYARD_SAMPLER_FIELD(1, D3DSAMP_MAGFILTER, filter);
     SHIPYARD_SAMPLER_FIELD(2, D3DSAMP_MIPFILTER, D3DTEXF_NONE);
@@ -746,7 +753,7 @@ void Upload(const uint8_t* bytes, uint32_t width, uint32_t height) {
     Texture& tex = textures[id];
     if (!width || !height || width > 4096 || height > 4096)
         Shipyard_Fatal("texture dimensions", E_INVALIDARG);
-    SHIPYARD_DIAGNOSTIC(++upload_counts.requests);
+    SHIPYARD_DETAIL(++upload_counts.requests, DetailsUploadRequests, 1);
     const size_t size = width * height * 4;
     if (timing_enabled)
         timing_counts.uploadBytes += size;
@@ -757,8 +764,8 @@ void Upload(const uint8_t* bytes, uint32_t width, uint32_t height) {
         const bool verify_reuse = Shipyard_VerifyFast3DReuse();
         if (verify_reuse)
             VerifyTextureUpload(tex, bytes);
-        SHIPYARD_DIAGNOSTIC(++upload_counts.reused);
-        SHIPYARD_DIAGNOSTIC(upload_counts.bytes_saved += size);
+        SHIPYARD_DETAIL(++upload_counts.reused, DetailsUploadReused, 1);
+        SHIPYARD_DETAIL(upload_counts.bytes_saved += size, DetailsUploadSavedBytes, size);
         const bool framebuffer_transition = selected_fb[upload_tile] >= 0;
         selected_fb[upload_tile] = -1;
 #if SHIPYARD_XENOS_BINDING_REUSE
@@ -927,6 +934,20 @@ void VerifyPreparedDrawState() {
         if (draw_sampler_mask & (1u << slot))
             VerifyNativeSampler(slot, native_state.sampler[slot]);
 }
+// Texture selection already applies most samplers. Rebuilding constants need
+// not dispatch the same six sampler checks again. A key change through either
+// texture alias, filtering edit or external-state invalidation takes the original
+// apply path; verification still checks native fields on an unchanged key.
+__forceinline void ApplyPreparedSampler(int tile, const TextureSampler& sampler) {
+    if (native_state.sampler_valid[tile] &&
+        native_state.sampler_key[tile] == (sampler.key | filtering_key)) {
+        if (Shipyard_VerifyFast3DReuse())
+            VerifyNativeSampler(tile, native_state.sampler[tile]);
+        return;
+    }
+    ApplySampler(tile, sampler);
+}
+
 __declspec(noinline) void RebuildDrawState() {
     if (timing_enabled)
         ++timing_counts.preparationRebuilt;
@@ -953,7 +974,7 @@ __declspec(noinline) void RebuildDrawState() {
             if (sampler) {
                 // The same cached texture may occupy both slots. A sampler update
                 // through either slot applies to that texture, as in D3D11/GL.
-                ApplySampler(i, *sampler);
+                ApplyPreparedSampler(i, *sampler);
                 draw_sampler_mask |= 1u << i;
                 constants[6 + i * 4] =
                     filtering == FILTER_THREE_POINT && sampler->linear ? 1.0f : 0.0f;
@@ -980,7 +1001,7 @@ __declspec(noinline) void RebuildDrawState() {
         }
         const TextureSampler* sampler = base_samplers[binding % 2];
         if (sampler) {
-            ApplySampler(binding, *sampler);
+            ApplyPreparedSampler(binding, *sampler);
             draw_sampler_mask |= 1u << binding;
         }
     }
@@ -1120,6 +1141,8 @@ void Draw(float* vertices, size_t count, size_t triangles) {
     tiling_budget.ChargeVertices(uint64_t(count) * sizeof(float));
 #endif
     Shipyard_Check(drawResult, "Shipyard DrawPrimitiveUP");
+    details_counts.Add(ShipyardXenos::DetailsDraws);
+    details_counts.Add(ShipyardXenos::DetailsTriangles, (unsigned)triangles);
     if (SHIPYARD_XENOS_ALPHA_HISTOGRAM && timing_enabled)
         SHIPYARD_DIAGNOSTIC(alpha_histogram.Record(native_state.alpha_mode, (unsigned)triangles));
 #if SHIPYARD_XENOS_TILING_TRIALS || SHIPYARD_XENOS_TILING_BUDGET
@@ -2422,6 +2445,14 @@ void SetShaderCache(const ShaderCacheOps* operations) {
         shader_cache_ops.program = NULL;
     }
 }
+void SetDetailsCountsEnabled(bool enabled) {
+    if (details_counts.enabled != enabled) details_counts.Begin(enabled);
+}
+void CaptureAndResetDetailsCounts(DetailsCounts* counts) {
+    if (!counts) return;
+    *counts = details_counts;
+    details_counts.Reset();
+}
 void SetDetailedTimingEnabled(bool enabled) {
     detailed_timing_enabled = enabled;
     if (!enabled) tiling_space_probe.active = false;
@@ -2658,6 +2689,9 @@ void BeginGuiDraw() {
 }
 void InvalidateGuiState() {
     ::Fast::InvalidateNativeState();
+}
+void RetireExternalTexture(IDirect3DTexture9* texture) {
+    if (texture) ::Fast::ReleaseTexture(texture);
 }
 void Init() {
     ::Fast::Init();

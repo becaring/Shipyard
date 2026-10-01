@@ -25,12 +25,13 @@ class NativeTimingTests(unittest.TestCase):
 #include <string.h>
 #include <assert.h>
 #include <vector>
+#include "D:/Projects/becaring/shipyard/sources/xenos/details_counts.h"
 #define NULL 0
 struct LARGE_INTEGER { long long QuadPart; };
 unsigned clocks, frequencies;
 void QueryPerformanceCounter(LARGE_INTEGER* p) { p->QuadPart = ++clocks * 10; }
 void QueryPerformanceFrequency(LARGE_INTEGER* p) { ++frequencies; p->QuadPart = 1000; }
-namespace ShipyardXenos { struct TilingSpaceSummary {}; HEADER }
+namespace ShipyardXenos { using Fast::ShipyardXenos::DetailsCounts; struct TilingSpaceSummary {}; HEADER }
 struct { bool active; } tiling_space_probe;
 IMPLEMENTATION
 using ShipyardXenos::NativeTimingCounters;

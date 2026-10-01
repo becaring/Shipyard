@@ -15,9 +15,13 @@ class XenosDiagnosticsTests(unittest.TestCase):
             '++binding_attempted',
             'native_state_counts.sampler_attempted += 5',
             '++upload_counts.requests',
-            'alpha_histogram.Record(',
         ):
-            self.assertIn('SHIPYARD_DIAGNOSTIC(' + statement, source)
+            self.assertIn('SHIPYARD_DETAIL(' + statement, source)
+        self.assertIn('SHIPYARD_DIAGNOSTIC(statement);', source)
+        self.assertIn('SHIPYARD_DIAGNOSTIC(alpha_histogram.Record(', source)
+        details = (ROOT / 'sources/xenos/details_counts.h').read_text()
+        self.assertIn('DetailsCounts() : enabled(false)', details)
+        self.assertIn('if (enabled) values[kind] += count;', details)
 
 
 if __name__ == '__main__':

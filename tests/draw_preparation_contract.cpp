@@ -67,7 +67,7 @@ float primitive_depth = 0, uploaded_depth = 0;
 unsigned depthCalls = 0;
 unsigned draw_sampler_mask = 0;
 struct NativeState {
-    unsigned sampler[6][5];
+    unsigned sampler[6][5], sampler_key[6];
     float constants[12], binding_constants[24];
     bool sampler_valid[6], constants_valid, alpha_valid, binding_constants_valid;
     void *vertex, *pixel, *declaration;
@@ -153,6 +153,7 @@ void ApplySampler(int slot, const TextureSampler& s) {
     ++samplerCalls;
     SamplerValues(native_state.sampler[slot], s);
     native_state.sampler_valid[slot] = true;
+    native_state.sampler_key[slot] = s.key | filtering_key;
 }
 void SetNativeConstants(const float* values) {
     productionOrder.push_back(10);
@@ -192,8 +193,17 @@ void compare() {
     referenceOrder.clear();
     PrepareDrawState();
     Oracle::ReferencePrepareDrawState();
-    if (rebuilt)
-        require(productionOrder == referenceOrder, "native preparation order differs");
+    if (rebuilt) {
+        std::vector<int> expectedOrder;
+        for (size_t i = 0; i < referenceOrder.size(); ++i) {
+            const int call = referenceOrder[i];
+            bool called = call >= 10;
+            for (size_t j = 0; j < productionOrder.size(); ++j)
+                if (productionOrder[j] == call) called = true;
+            if (called) expectedOrder.push_back(call);
+        }
+        require(productionOrder == expectedOrder, "native preparation order differs");
+    }
     require(!std::memcmp(native_state.constants, Oracle::constants, sizeof(Oracle::constants)),
             "original constants differ");
     require(
@@ -227,8 +237,20 @@ int main() {
     constantCalls = bindingCalls = samplerCalls = 0;
     for (unsigned i = 0; i < 100; ++i)
         compare();
-    require(constantCalls == 1 && bindingCalls == 1 && samplerCalls == 6,
-            "100 stable draws must prepare constants/bindings once and samplers six times");
+    require(constantCalls == 1 && bindingCalls == 1 && samplerCalls == 0,
+            "100 stable draws must prepare constants/bindings once and reuse already applied samplers");
+    SelectTexture(0, 1);
+    const unsigned afterTextureSelection = samplerCalls;
+    compare();
+    require(samplerCalls == afterTextureSelection,
+            "constant rebuild must skip already applied sampler keys");
+    SelectTexture(0, 0);
+    compare();
+    InvalidateNativeState();
+    const unsigned beforeInvalidatedRebuild = samplerCalls;
+    compare();
+    require(samplerCalls == beforeInvalidatedRebuild + 6,
+            "external invalidation must reapply all six samplers");
     verifyReuse = true;
     verifyCalls = 0;
     compare();

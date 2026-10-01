@@ -6,6 +6,14 @@
 #include <limits.h>
 
 namespace Ship {
+// Selected before engine creation; other consumers retain the SDK default.
+static volatile LONG engineProcessor = XAUDIO2_DEFAULT_PROCESSOR;
+extern "C" void ShipyardAudioSetProcessor(unsigned processorMask) {
+    if (processorMask == 0 || (processorMask & ~0x3fu) != 0)
+        ShipyardAudioFatal("XAudio2 processor mask", E_INVALIDARG);
+    InterlockedExchange(&engineProcessor, static_cast<LONG>(processorMask));
+}
+
 static_assert(ShipyardAudio::PcmMinimumRate == XAUDIO2_MIN_SAMPLE_RATE &&
                   ShipyardAudio::PcmMaximumRate == XAUDIO2_MAX_SAMPLE_RATE,
               "PCM validation bounds must match the installed XAudio2 SDK");
@@ -71,7 +79,8 @@ bool XAudio2AudioPlayer::DoInit() {
         DoClose();
         return false;
     }
-    HRESULT result = XAudio2Create(&engine_);
+    HRESULT result = XAudio2Create(&engine_, 0, static_cast<XAUDIO2_PROCESSOR>(
+        InterlockedCompareExchange(&engineProcessor, 0, 0)));
     if (SUCCEEDED(result))
         result = engine_->CreateMasteringVoice(&master_);
     WAVEFORMATEXTENSIBLE format = {0};

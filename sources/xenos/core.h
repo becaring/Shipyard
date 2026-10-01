@@ -15,6 +15,7 @@
 #include "tiling_guard_trial.h"
 #include "tile1_predication_trial.h"
 #include "alpha_mode_histogram.h"
+#include "details_counts.h"
 
 namespace Fast {
 struct ShaderProgram;
@@ -110,6 +111,8 @@ void InitializeDisplay();
 HRESULT PresentStartupUI();
 void BeginGuiDraw();
 void InvalidateGuiState();
+// Render owner transfers one retained reference to the GPU retirement queue.
+void RetireExternalTexture(IDirect3DTexture9* texture);
 void Init();
 void Resize();
 void StartFrame();

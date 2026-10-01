@@ -30,6 +30,7 @@ class DrawPreparationTests(unittest.TestCase):
                 function(source, "void RebuildDrawState() {") + "\n" + function(source, "void PrepareDrawState() {")
             )
             methods = function(source, "void VerifyPreparedDrawState() {") + "\n" + methods
+            methods = function(source, "void ApplyPreparedSampler(") + "\n" + methods
         else:
             start = source.index("    __declspec(align(16)) float constants[12] =", source.index("void Draw("))
             end = source.index("    ApplyAlpha();", start)
