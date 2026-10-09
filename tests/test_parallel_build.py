@@ -71,7 +71,8 @@ for item in root.findall('.//'+ns+'ClCompile[@Include]'):
     source=pathlib.Path(item.attrib['Include'].replace('$(ProjectDir)',str(project.parent)+'\\\\'))
     obj=pathlib.Path(item.find(ns+'ObjectFileName').text)
     obj.parent.mkdir(parents=True,exist_ok=True)
-    obj.write_bytes(struct.pack('<H',0x1f2)+b'PPC-OBJECT')
+    if not obj.exists():
+        obj.write_bytes(struct.pack('<H',0x1f2)+b'PPC-OBJECT'+pathlib.Path(sys.argv[-1]).read_bytes())
     lines.extend(['^'+str(source),sys.argv[-1]])
 (folder/'CL.read.1.tlog').write_text('\\n'.join(lines)+'\\n',encoding='utf-16')
 ''', encoding='utf-8')
@@ -135,6 +136,45 @@ for item in root.findall('.//'+ns+'ClCompile[@Include]'):
             with self.assertRaisesRegex(ValueError, 'shard project changed'):
                 verify_receipt(build, receipt)
             build.shards[0].project.write_bytes(build.shards[0].contents)
+        finally:
+            remove_shards(build)
+
+    def test_generated_header_missing_from_tlog_invalidates_cached_objects(self):
+        generated = self.project_dir / 'scratch' / 'generated headers'
+        generated.mkdir(parents=True)
+        header = generated / 'interpreter.h'
+        header.write_text('struct Interpreter { int fields[2]; };\n', encoding='utf-8')
+        root = ET.parse(self.project).getroot()
+        ET.SubElement(root.find(N + 'PropertyGroup'), N + 'GeneratedRoot').text = (
+            '$(MSBuildThisFileDirectory)scratch/generated headers')
+        for item in root.findall('.//' + N + 'ClCompile[@Include]'):
+            item.find(N + 'AdditionalOptions').text += ' /I"$(GeneratedRoot)"'
+        self.project.write_bytes(ET.tostring(root, encoding='utf-8', xml_declaration=True))
+        build = self.build()
+        # The fake compiler retains objects and omits this generated header from
+        # its tlog, reproducing dependency tracking that missed an ABI change.
+        fake = self.fake.read_text().replace("sys.argv[-1]])", "str(source.parent/'shared.h')])")
+        self.fake.write_text(fake)
+        try:
+            def compile():
+                return run(build, [sys.executable, str(self.fake)],
+                           arguments=[str(header)], owned_roots=[self.root])
+            first = compile()
+            self.assertEqual(first['build_exit'], 0, '\n'.join(Path(row['log']).read_text() for row in first['builds']))
+            obj = build.sources[0].object
+            original = obj.read_bytes()
+            self.assertIn(str(header.resolve()), first['headers'])
+            self.assertEqual(compile()['invalidated_objects'], 0)
+            header.write_text('struct Interpreter { int fields[8]; };\n', encoding='utf-8')
+            changed = compile()
+            self.assertEqual(changed['invalidated_objects'], len(build.sources))
+            self.assertNotEqual(obj.read_bytes(), original)
+            self.assertIn(b'fields[8]', obj.read_bytes())
+            verify_receipt(build, changed)
+            old = dict(changed)
+            old.pop('header_inventory_version')
+            (build.output / 'compile-receipt.json').write_text(json.dumps(old))
+            self.assertEqual(compile()['invalidated_objects'], len(build.sources))
         finally:
             remove_shards(build)
 

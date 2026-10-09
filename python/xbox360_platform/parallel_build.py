@@ -3,9 +3,11 @@
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from copy import deepcopy
 from dataclasses import dataclass
+from functools import lru_cache
 import hashlib
 import json
 import os
+import re
 from pathlib import Path
 import signal
 import struct
@@ -238,6 +240,135 @@ def _header_closure(build, roots):
     return dict(sorted(headers.items()))
 
 
+def _selected_headers(build, roots):
+    """Hash selected include trees even when MSBuild omits generated dependencies."""
+    allowed = tuple(Path(root).resolve() for root in roots)
+    root = ET.parse(build.project).getroot()
+    ns, items, _, definitions = _xml_parts(root)
+    properties = {key.casefold(): value for key, value in os.environ.items()}
+    properties.update(projectdir=str(build.project.parent) + '/',
+                      msbuildthisfiledirectory=str(build.project.parent) + '/')
+    for group in root.findall(ns + 'PropertyGroup'):
+        for item in group:
+            if item.text:
+                properties[item.tag.removeprefix(ns).casefold()] = item.text
+
+    def expand(value):
+        for _ in range(32):
+            result = re.sub(r'\$\(([^)]+)\)',
+                            lambda match: properties.get(match[1].casefold(), match[0]), value)
+            if result == value:
+                return result
+            value = result
+        raise ValueError('Cyclic project property in include path: ' + value)
+
+    @lru_cache(maxsize=None)
+    def owned_path(value):
+        value = expand(value.strip().strip('"'))
+        if not value or '$(' in value or '%(' in value:
+            return None
+        path = Path(value.replace('\\', '/'))
+        if not path.is_absolute():
+            path = build.project.parent / path
+        path = path.resolve()
+        return path if any(path.is_relative_to(base) for base in allowed) else None
+
+    def options(element):
+        include, forced = [], []
+        for name, target in [('AdditionalIncludeDirectories', include), ('ForcedIncludeFiles', forced)]:
+            for node in element.findall(ns + name):
+                target.extend((node.text or '').split(';'))
+        for node in element.findall(ns + 'AdditionalOptions'):
+            tokens = iter(re.findall(r'(?:[^\s"]+|"[^"]*")+', node.text or ''))
+            for token in tokens:
+                token = token.replace('"', '')
+                match = re.match(r'^[-/](FI|I)(.*)$', token)
+                if match:
+                    value = match[2] or next(tokens, '')
+                    (forced if match[1] == 'FI' else include).append(value)
+        return ([path for value in include if (path := owned_path(value))],
+                [path for value in forced if (path := owned_path(value))])
+
+    base_dirs, base_forced = options(definitions)
+    sources = {_key(row.include): row.source for row in build.sources}
+    selected = []
+    directories = set()
+    headers = set()
+    for item in items:
+        local_dirs, local_forced = options(item)
+        dirs = tuple(dict.fromkeys(local_dirs + base_dirs))
+        directories.update(dirs)
+        forced = local_forced + base_forced
+        headers.update(path for path in forced if path.is_file())
+        selected.append((sources[_key(item.attrib['Include'])], dirs, forced))
+
+    # Broad repository roots allow qualified includes; follow those from sources
+    # instead of pulling unrelated scratch builds into this compile's inventory.
+    trees = sorted(directories - set(allowed), key=lambda path: len(path.parts))
+    scanned = []
+    for directory in trees:
+        if not directory.is_dir() or any(directory.is_relative_to(parent) for parent in scanned):
+            continue
+        scanned.append(directory)
+        for folder, children, names in os.walk(directory):
+            children[:] = [name for name in children if name != '.git']
+            for name in names:
+                if Path(name).suffix.lower() in ('.h', '.hpp', '.hxx', '.inl', '.inc'):
+                    headers.add((Path(folder) / name).resolve())
+
+    includes = re.compile(r'^\s*#\s*include\s*[<"]([^">]+)[">]', re.MULTILINE)
+    @lru_cache(maxsize=None)
+    def include_target(directory, name):
+        target = directory / name.replace('\\', '/')
+        if target in headers:
+            return target
+        if not target.is_file():
+            return None
+        target = target.resolve()
+        return target if any(target.is_relative_to(base) for base in allowed) else None
+
+    parsed = {}
+    visited = set()
+    pending = [(path, dirs) for source, dirs, forced in selected for path in [source, *forced]]
+    while pending:
+        path, dirs = pending.pop()
+        key = (path, dirs)
+        if key in visited or not path.is_file():
+            continue
+        visited.add(key)
+        if path not in parsed:
+            parsed[path] = includes.findall(path.read_text(encoding='utf-8', errors='replace'))
+        for name in parsed[path]:
+            for directory in (path.parent, *dirs):
+                target = include_target(directory, name)
+                if target is not None:
+                    headers.add(target)
+                    pending.append((target, dirs))
+                    break
+    return {str(path): _sha(path) for path in sorted(headers)}
+
+
+def _invalidate_header_changes(build, headers):
+    previous_path = build.output / 'compile-receipt.json'
+    try:
+        previous = json.loads(previous_path.read_text(encoding='utf-8'))
+    except (OSError, ValueError):
+        previous = {}
+    if (previous.get('header_inventory_version') == 1
+            and previous.get('selected_headers') == headers
+            and previous.get('build_exit') == 0
+            and previous.get('layout_sha256') == build.layout_sha256
+            and all(Path(name).is_file() and _sha(name) == digest
+                    for name, digest in previous.get('headers', {}).items())):
+        return 0
+    removed = 0
+    for row in build.sources:
+        if row.object.exists():
+            row.object.unlink()
+            removed += 1
+    return removed
+
+
 def run(build, command_prefix, arguments=(), owned_roots=(), timeout=7200):
     if not command_prefix:
         raise ValueError('Compiler command prefix is empty')
@@ -248,6 +379,9 @@ def run(build, command_prefix, arguments=(), owned_roots=(), timeout=7200):
     for row in build.sources:
         if _sha(row.source) != row.sha256:
             raise ValueError('Source changed before compilation: ' + str(row.source))
+    headers_before = _selected_headers(build, owned_roots)
+    invalidated = _invalidate_header_changes(build, headers_before)
+    (build.output / 'compile-receipt.json').unlink(missing_ok=True)
     write_shards(build)
     with ThreadPoolExecutor(max_workers=len(build.shards)) as pool:
         futures = {pool.submit(_invoke, shard, tuple(command_prefix), tuple(arguments), timeout): index
@@ -261,6 +395,8 @@ def run(build, command_prefix, arguments=(), owned_roots=(), timeout=7200):
         'builds': results,
         'build_exit': next((row['exit'] for row in results if row['exit']), 0),
         'sources': [], 'headers': {},
+        'header_inventory_version': 1, 'selected_headers': headers_before,
+        'invalidated_objects': invalidated,
     }
     if receipt['build_exit'] == 0:
         if _sha(build.project) != build.project_sha256:
@@ -276,7 +412,9 @@ def run(build, command_prefix, arguments=(), owned_roots=(), timeout=7200):
                 'source': str(row.source), 'source_sha256': row.sha256,
                 'object': str(row.object), 'object_sha256': hashlib.sha256(data).hexdigest(),
             })
-        receipt['headers'] = _header_closure(build, owned_roots)
+        if _selected_headers(build, owned_roots) != headers_before:
+            raise ValueError('Selected headers changed during compilation')
+        receipt['headers'] = dict(headers_before, **_header_closure(build, owned_roots))
         if owned_roots and not receipt['headers']:
             raise ValueError('Actual owned compiler header closure is absent')
     build.output.mkdir(parents=True, exist_ok=True)
@@ -285,6 +423,8 @@ def run(build, command_prefix, arguments=(), owned_roots=(), timeout=7200):
 
 
 def verify_receipt(build, receipt):
+    if receipt.get('header_inventory_version') != 1:
+        raise ValueError('Selected header inventory is absent; rebuild required')
     if receipt['build_exit'] or receipt['project_sha256'] != _sha(build.project):
         raise ValueError('Successful current compile receipt required')
     if receipt['manifest_sha256'] != build.manifest_sha256:

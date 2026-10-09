@@ -49,7 +49,7 @@
     "python/xbox360_platform/logging_queue.py": "e8a300dc6b0b9baea18d8f8fc3ae132f123c6257fdf8f4bde3b5cb0d36b00da3",
     "python/xbox360_platform/logging_syntax.py": "2d3824f24e12d654b85e9bb56fd6dff2612667c5c6644ba7287ed34b8ed82f5c",
     "python/xbox360_platform/matrix_product.py": "d72c8e04e2cdb479943a7e5a32dc253a1e1e933809a7c1189cefd18091754323",
-    "python/xbox360_platform/parallel_build.py": "4803c8a14e7453f5e8623346f96d355692577ea02f83cfc2af0b21e633a62038",
+    "python/xbox360_platform/parallel_build.py": "a62dad0caa84b9b1f02a21c0cf8abf661faf574fcd0687190a66201f930d715f",
     "python/xbox360_platform/png.py": "9df26f1df5b591869633ef11173b4c226c46e693d43caaa51b9f8396c9b61876",
     "python/xbox360_platform/prism.py": "dfb10f09f6528130edbef0eed9c36ee4ed8633c281daffc340b3d16b7c500aca",
     "python/xbox360_platform/resource_lookup.py": "88baa4f80abf93ad29d1629a579193789e8f4113a33a8c2abb7604a25760c1fc",
