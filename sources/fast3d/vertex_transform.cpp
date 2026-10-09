@@ -83,5 +83,53 @@ bool TransformPositionsProfiled(const void* vertices, size_t count, const float 
     return true;
 }
 
+template <bool Profiled> static __forceinline bool TransformPositionsUnalignedImpl(const void* vertices, size_t count, const float matrix[4][4], void* output,
+                        bool normalAspect, size_t outputStride, const TransformPhaseHook* phaseHook) {
+    // VMX flushes subnormals. Integer inputs and bounded coefficients keep
+    // nonzero products normal and four-term sums finite; all other matrices
+    // retain the scalar path. normalAspect tightens the lower bound.
+    static const __declspec(align(16)) uint32_t limits[4][4] = {
+        {0x80000000u, 0x80000000u, 0x80000000u, 0x80000000u},
+        {0x0c000000u, 0x0c000000u, 0x0c000000u, 0x0c000000u},
+        {0x75ffffffu, 0x75ffffffu, 0x75ffffffu, 0x75ffffffu},
+        {0x12800000u, 0x12800000u, 0x12800000u, 0x12800000u}};
+    const __vector4 sign = __lvx(limits, 0), lower = __lvx(limits, normalAspect ? 48 : 16),
+                    upper = __lvx(limits, 32), zero = __vspltisw(0);
+    const __vector4 m0 = Detail::LoadUnaligned(matrix[0]), m1 = Detail::LoadUnaligned(matrix[1]);
+    const __vector4 m2 = Detail::LoadUnaligned(matrix[2]), m3 = Detail::LoadUnaligned(matrix[3]);
+    const __vector4 invalid = __vor(__vor(TransformInvalid(m0, sign, lower, upper, zero),
+                                          TransformInvalid(m1, sign, lower, upper, zero)),
+                                    __vor(TransformInvalid(m2, sign, lower, upper, zero),
+                                          TransformInvalid(m3, sign, lower, upper, zero)));
+    unsigned condition;
+    __vcmpequwR(invalid, zero, &condition);
+    if (!(condition & 0x80))
+        return false;
+    if (Profiled) phaseHook->enterVertices(phaseHook->context);
+    for (size_t i = 0; i < count; ++i) {
+        const __vector4 position =
+            __vcfsx(__vupkhsh(Detail::LoadUnaligned((const unsigned char*)vertices + i * 16)), 0);
+        const __vector4 x = __vmulfp(__vspltw(position, 0), m0);
+        const __vector4 y = __vmulfp(__vspltw(position, 1), m1);
+        const __vector4 z = __vmulfp(__vspltw(position, 2), m2);
+        const __vector4 result = __vaddfp(__vaddfp(__vaddfp(x, y), z), m3);
+        unsigned char* destination = (unsigned char*)output + i * outputStride;
+        // Partial stores touch exactly destination[0..15], preserving attributes.
+        __stvlx(result, destination, 0);
+        __stvrx(result, destination, 16);
+    }
+    return true;
+}
+
+bool TransformPositionsUnaligned(const void* vertices, size_t count, const float matrix[4][4], void* output,
+                                 bool normalAspect, size_t outputStride) {
+    return TransformPositionsUnalignedImpl<false>(vertices, count, matrix, output, normalAspect, outputStride, NULL);
+}
+
+bool TransformPositionsUnalignedProfiled(const void* vertices, size_t count, const float matrix[4][4], void* output,
+                                         bool normalAspect, size_t outputStride, const TransformPhaseHook* phaseHook) {
+    return TransformPositionsUnalignedImpl<true>(vertices, count, matrix, output, normalAspect, outputStride, phaseHook);
+}
+
 } // namespace Fast3D
 } // namespace Shipyard

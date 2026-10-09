@@ -44,4 +44,12 @@ bool TransformPositionsProfiled(const void* vertices,size_t count,const float ma
                                 void* output,bool normalAspect,size_t outputStride,
                                 const TransformPhaseHook* phaseHook);
 
+// Unaligned output writes exactly 16 bytes per row, with the same arithmetic
+// and rejection behavior. The caller keeps source and destination disjoint.
+bool TransformPositionsUnaligned(const void* vertices,size_t count,const float matrix[4][4],
+                                 void* output,bool normalAspect=false,size_t outputStride=16);
+bool TransformPositionsUnalignedProfiled(const void* vertices,size_t count,const float matrix[4][4],
+                                         void* output,bool normalAspect,size_t outputStride,
+                                         const TransformPhaseHook* phaseHook);
+
 } }

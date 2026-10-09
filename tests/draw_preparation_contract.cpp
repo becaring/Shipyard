@@ -36,13 +36,14 @@ struct Framebuffer {
     }
 };
 struct Features {
-    bool usedTextures[2];
+    bool usedTextures[2], used_masks[2], used_blend[2];
 };
 struct ShaderProgram {
     Features features;
     void* declaration;
     void* vertex;
     void* pixel;
+    struct { uint32_t shaderId1; } key;
 };
 enum FilteringMode { FILTER_POINT, FILTER_LINEAR, FILTER_THREE_POINT };
 FilteringMode filtering = FILTER_THREE_POINT;
@@ -163,6 +164,7 @@ void SetNativeConstants(const float* values) {
 void SetNativeBindingConstants(const float* values) {
     productionOrder.push_back(11);
     ++bindingCalls;
+    native_state.binding_constants_valid = true;
     std::memcpy(native_state.binding_constants, values, sizeof(native_state.binding_constants));
 }
 namespace Oracle {
@@ -189,6 +191,9 @@ struct {
 #include "production.inc"
 void compare() {
     bool rebuilt = !draw_state_prepared;
+    const bool auxiliary = current_shader->features.used_masks[0] ||
+        current_shader->features.used_masks[1] || current_shader->features.used_blend[0] ||
+        current_shader->features.used_blend[1] || (current_shader->key.shaderId1 & (1u << 16));
     productionOrder.clear();
     referenceOrder.clear();
     PrepareDrawState();
@@ -197,7 +202,7 @@ void compare() {
         std::vector<int> expectedOrder;
         for (size_t i = 0; i < referenceOrder.size(); ++i) {
             const int call = referenceOrder[i];
-            bool called = call >= 10;
+            bool called = call == 10 || (call == 11 && auxiliary);
             for (size_t j = 0; j < productionOrder.size(); ++j)
                 if (productionOrder[j] == call) called = true;
             if (called) expectedOrder.push_back(call);
@@ -206,14 +211,14 @@ void compare() {
     }
     require(!std::memcmp(native_state.constants, Oracle::constants, sizeof(Oracle::constants)),
             "original constants differ");
-    require(
-        !std::memcmp(native_state.binding_constants, Oracle::bindings, sizeof(Oracle::bindings)),
-        "original bindings differ");
+    if (auxiliary)
+        require(!std::memcmp(native_state.binding_constants, Oracle::bindings, sizeof(Oracle::bindings)),
+                "live original bindings differ");
     // Only slots written by original preparation are authoritative for this draw.
     for (int slot = 0; slot < 6; ++slot) {
         int base = slot < 2 ? slot : slot % 2;
         bool available = selected_fb[base] >= 0 || selected[base] < textures.size();
-        if (available && (slot >= 2 || current_shader->features.usedTextures[slot]))
+        if (available && (slot >= 2 ? auxiliary : current_shader->features.usedTextures[slot]))
             require(!std::memcmp(native_state.sampler[slot], Oracle::samplers[slot],
                                  sizeof(Oracle::samplers[slot])),
                     "original sampler differs");
@@ -225,6 +230,8 @@ void repeated() {
 }
 int main() {
     require(sizeof(void*) == 4, "ILP32 fixture");
+    shaders[0].key.shaderId1 = 1u << 16; // custom shaders retain all bindings
+    shaders[1].features.used_masks[1] = true;
     NewTexture();
     NewTexture();
     for (unsigned i = 0; i < 2; ++i) {
@@ -256,6 +263,12 @@ int main() {
     compare();
     require(verifyCalls == 8, "reuse verification must cover both blocks and six samplers");
     verifyReuse = false;
+    shaders[0].key.shaderId1 = 0;
+    InvalidateNativeState();
+    const unsigned plainBindings = bindingCalls, plainSamplers = samplerCalls;
+    compare();
+    require(bindingCalls == plainBindings && samplerCalls == plainSamplers + 2,
+            "ordinary shader must skip auxiliary constants and four samplers");
     Sampler(1, true, 1, 2);
     repeated();
     SelectTexture(0, 1);

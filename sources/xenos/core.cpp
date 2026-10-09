@@ -930,7 +930,8 @@ void Alpha(bool enable) {
 
 void VerifyPreparedDrawState() {
     VerifyNativeConstants(native_state.constants);
-    VerifyNativeBindingConstants(native_state.binding_constants);
+    if (native_state.binding_constants_valid)
+        VerifyNativeBindingConstants(native_state.binding_constants);
     for (int slot = 0; slot < 6; ++slot)
         if (draw_sampler_mask & (1u << slot))
             VerifyNativeSampler(slot, native_state.sampler[slot]);
@@ -954,24 +955,24 @@ __declspec(noinline) void RebuildDrawState() {
         ++timing_counts.preparationRebuilt;
     draw_sampler_mask = 0;
     __declspec(align(16)) float constants[12] = {shader_frame_number, noise_scale, 0, 0};
-    __declspec(align(16)) float binding_info[24] = {0};
     const TextureSampler* base_samplers[2] = {NULL, NULL};
     for (int i = 0; i < 2; ++i) {
+        float width = 0, height = 0;
         if (selected_fb[i] >= 0) {
             const Framebuffer& b = buffers[selected_fb[i]];
-            binding_info[i * 4] = b.shader_width;
-            binding_info[i * 4 + 1] = b.shader_height;
+            width = b.shader_width;
+            height = b.shader_height;
             base_samplers[i] = &b.sampler;
         } else if (selected[i] < textures.size()) {
             const Texture& t = textures[selected[i]];
-            binding_info[i * 4] = t.shader_width;
-            binding_info[i * 4 + 1] = t.shader_height;
+            width = t.shader_width;
+            height = t.shader_height;
             base_samplers[i] = &t.sampler;
         }
         if (current_shader->features.usedTextures[i]) {
             const TextureSampler* sampler = base_samplers[i];
-            constants[4 + i * 4] = binding_info[i * 4];
-            constants[5 + i * 4] = binding_info[i * 4 + 1];
+            constants[4 + i * 4] = width;
+            constants[5 + i * 4] = height;
             if (sampler) {
                 // The same cached texture may occupy both slots. A sampler update
                 // through either slot applies to that texture, as in D3D11/GL.
@@ -990,23 +991,32 @@ __declspec(noinline) void RebuildDrawState() {
         primitive_depth_valid = true;
     }
 #endif
-    for (int binding = 2; binding < 6; ++binding) {
-        if (selected_fb[binding] >= 0) {
-            const Framebuffer& b = buffers[selected_fb[binding]];
-            binding_info[binding * 4] = b.shader_width;
-            binding_info[binding * 4 + 1] = b.shader_height;
-        } else if (selected[binding] < textures.size()) {
-            const Texture& t = textures[selected[binding]];
-            binding_info[binding * 4] = t.shader_width;
-            binding_info[binding * 4 + 1] = t.shader_height;
+    // Ordinary shaders read c0-c2 and samplers 0/1 only. Mask dimensions
+    // use c8-c13; masks/replacements use samplers 2-5. Keep the full legacy
+    // binding path for these features and USE_SHADER (shader option bit 16).
+    const bool auxiliaryBindings = current_shader->features.used_masks[0] ||
+        current_shader->features.used_masks[1] || current_shader->features.used_blend[0] ||
+        current_shader->features.used_blend[1] || (current_shader->key.shaderId1 & (1u << 16));
+    if (auxiliaryBindings) {
+        __declspec(align(16)) float binding_info[24] = {0};
+        for (int binding = 0; binding < 6; ++binding) {
+            if (selected_fb[binding] >= 0) {
+                const Framebuffer& b = buffers[selected_fb[binding]];
+                binding_info[binding * 4] = b.shader_width;
+                binding_info[binding * 4 + 1] = b.shader_height;
+            } else if (selected[binding] < textures.size()) {
+                const Texture& t = textures[selected[binding]];
+                binding_info[binding * 4] = t.shader_width;
+                binding_info[binding * 4 + 1] = t.shader_height;
+            }
+            const TextureSampler* sampler = base_samplers[binding % 2];
+            if (binding >= 2 && sampler) {
+                ApplyPreparedSampler(binding, *sampler);
+                draw_sampler_mask |= 1u << binding;
+            }
         }
-        const TextureSampler* sampler = base_samplers[binding % 2];
-        if (sampler) {
-            ApplyPreparedSampler(binding, *sampler);
-            draw_sampler_mask |= 1u << binding;
-        }
+        SetNativeBindingConstants(binding_info);
     }
-    SetNativeBindingConstants(binding_info);
     draw_state_prepared = true;
 }
 
