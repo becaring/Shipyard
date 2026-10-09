@@ -1,4 +1,5 @@
 #pragma once
+#define SHIPYARD_XENOS_INDEXED_TRIANGLES 1
 
 #include <xtl.h>
 #include <d3dx9.h>
@@ -107,6 +108,8 @@ void SetViewport(int x, int y, int width, int height);
 void SetScissor(int x, int y, int width, int height);
 void SetUseAlpha(bool alpha);
 void DrawTriangles(float* vertices, size_t count, size_t triangles);
+void DrawIndexedTriangles(const float* vertices, size_t floatCount, size_t vertexCount,
+                          const uint16_t* indices, size_t triangleCount);
 void InitializeDisplay();
 HRESULT PresentStartupUI();
 void BeginGuiDraw();

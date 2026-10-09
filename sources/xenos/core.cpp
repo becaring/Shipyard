@@ -1,5 +1,6 @@
 #include "configuration.h"
 #include "core.h"
+#include "indexed_draw.h"
 #include "services.h"
 #if SHIPYARD_XENOS_SHADER_ABI >= 3
 #include "raster_bounds.h"
@@ -1020,10 +1021,16 @@ __forceinline void PrepareDrawState() {
     }
 }
 
-void Draw(float* vertices, size_t count, size_t triangles) {
+void Draw(float* vertices, size_t count, size_t triangles,
+          const uint16_t* indices = NULL, size_t indexedVertexCount = 0) {
     NativeTimingScope timing(timing_counts.drawTicks, timing_counts.drawCalls);
-    if (!current_shader || count != triangles * 3 * current_shader->floats)
+    if (!current_shader ||
+        (indices ? !ShipyardXenos::ValidIndexedTriangleInput(
+                       vertices, count, indexedVertexCount, indices, triangles, current_shader->floats)
+                 : count != triangles * 3 * current_shader->floats))
         Shipyard_Fatal("Shipyard vertex buffer size", E_INVALIDARG);
+    const uint64_t inputBytes = uint64_t(count) * sizeof(float) +
+        (indices ? uint64_t(triangles) * 3 * sizeof(uint16_t) + 31 : 0);
     // EndTiling cannot submit a partially filled SDK ring. Retain the target and
     // restart the native bracket before it consumes its reserved command space.
     // The allowance includes state-command space for each Fast3D batch.
@@ -1033,9 +1040,9 @@ void Draw(float* vertices, size_t count, size_t triangles) {
     bool restoreGuardViewport = false;
     D3DVIEWPORT9 guardViewport;
     if (live_framebuffer && buffers[active_fb].tiles.size() > 1 &&
-        tiling_draw_bytes + count * sizeof(float) + 8192 > ShipyardXenos::TilingPassLimit) {
-        budgetContinued = ContinueTilingBeforeDraw(uint64_t(count) * sizeof(float));
-        trialContinued = budgetContinued || GuardTrialBeforeDraw(uint64_t(count) * sizeof(float));
+        tiling_draw_bytes + inputBytes + 8192 > ShipyardXenos::TilingPassLimit) {
+        budgetContinued = ContinueTilingBeforeDraw(inputBytes);
+        trialContinued = budgetContinued || GuardTrialBeforeDraw(inputBytes);
         if (!trialContinued) {
 #if SHIPYARD_XENOS_DEFERRED_FRAMEBUFFERS
             xenos_device->GetViewport(&guardViewport);
@@ -1049,7 +1056,7 @@ void Draw(float* vertices, size_t count, size_t triangles) {
     }
 #else
     if (live_framebuffer && buffers[active_fb].tiles.size() > 1 &&
-        tiling_draw_bytes + count * sizeof(float) + 8192 > ShipyardXenos::TilingPassLimit) {
+        tiling_draw_bytes + inputBytes + 8192 > ShipyardXenos::TilingPassLimit) {
         ++tiling_draw_restarts;
         tiling_guard_restart_pending = timing_enabled;
         FinishFramebuffer();
@@ -1127,20 +1134,26 @@ void Draw(float* vertices, size_t count, size_t triangles) {
 #endif
     ApplyAlpha(); // Also handles shader-only changes and external state restoration.
 #if SHIPYARD_XENOS_TILING_TRIALS
-    const HRESULT drawResult = tile1Only
-        ? ShipyardXenos::SubmitTile1PredicatedDraw(
+    const HRESULT drawResult = indices
+        ? ShipyardXenos::SubmitTile1PredicatedIndexedDraw(
+              xenos_device, tile1Only, (UINT)triangles, vertices, (UINT)indexedVertexCount,
+              indices, (UINT)(current_shader->floats * 4), &tile1_predication_trial_counts)
+        : tile1Only ? ShipyardXenos::SubmitTile1PredicatedDraw(
               xenos_device, true, (UINT)triangles, vertices,
               (UINT)(current_shader->floats * 4), &tile1_predication_trial_counts)
         : xenos_device->DrawPrimitiveUP(D3DPT_TRIANGLELIST, (UINT)triangles, vertices,
                                        (UINT)(current_shader->floats * 4));
 #else
-    const HRESULT drawResult = xenos_device->DrawPrimitiveUP(
-        D3DPT_TRIANGLELIST, (UINT)triangles, vertices, (UINT)(current_shader->floats * 4));
+    const HRESULT drawResult = indices
+        ? xenos_device->DrawIndexedPrimitiveUP(D3DPT_TRIANGLELIST, 0, (UINT)indexedVertexCount,
+              (UINT)triangles, indices, D3DFMT_INDEX16, vertices, (UINT)(current_shader->floats * 4))
+        : xenos_device->DrawPrimitiveUP(
+              D3DPT_TRIANGLELIST, (UINT)triangles, vertices, (UINT)(current_shader->floats * 4));
 #endif
 #if SHIPYARD_XENOS_TILING_BUDGET
-    tiling_budget.ChargeVertices(uint64_t(count) * sizeof(float));
+    tiling_budget.ChargeVertices(inputBytes);
 #endif
-    Shipyard_Check(drawResult, "Shipyard DrawPrimitiveUP");
+    Shipyard_Check(drawResult, indices ? "Shipyard DrawIndexedPrimitiveUP" : "Shipyard DrawPrimitiveUP");
     details_counts.Add(ShipyardXenos::DetailsDraws);
     details_counts.Add(ShipyardXenos::DetailsTriangles, (unsigned)triangles);
     if (SHIPYARD_XENOS_ALPHA_HISTOGRAM && timing_enabled)
@@ -1157,7 +1170,7 @@ void Draw(float* vertices, size_t count, size_t triangles) {
                                                 ShipyardXenos::RingSegmentBytes, &observedBytes)) {
             ++ring_same_segment_draws;
             ring_same_segment_bytes += observedBytes;
-            ring_same_segment_estimated_bytes += count * sizeof(float) + 8192;
+            ring_same_segment_estimated_bytes += inputBytes + 8192;
             ring_max_same_segment_bytes = std::max(ring_max_same_segment_bytes,
                                                    (unsigned)observedBytes);
         } else {
@@ -1166,7 +1179,7 @@ void Draw(float* vertices, size_t count, size_t triangles) {
                 ++ring_segment_changed_draws;
         }
     }
-    tiling_draw_bytes += count * sizeof(float) + 8192;
+    tiling_draw_bytes += inputBytes + 8192;
     if (buffers[active_fb].tiles.size() > 1 && tiling_draw_bytes > tiling_peak_bytes)
         tiling_peak_bytes = (unsigned)tiling_draw_bytes;
 #if SHIPYARD_XENOS_TILING_TRIALS || SHIPYARD_XENOS_TILING_BUDGET
@@ -2673,6 +2686,12 @@ void SetUseAlpha(bool alpha) {
 }
 void DrawTriangles(float* vertices, size_t count, size_t triangles) {
     ::Fast::Draw(vertices, count, triangles);
+}
+void DrawIndexedTriangles(const float* vertices, size_t floatCount, size_t vertexCount,
+                          const uint16_t* indices, size_t triangleCount) {
+    if (!indices)
+        Shipyard_Fatal("Shipyard index buffer", E_INVALIDARG);
+    ::Fast::Draw(const_cast<float*>(vertices), floatCount, triangleCount, indices, vertexCount);
 }
 void InitializeDisplay() {
     ::Fast::InitializeDisplay();

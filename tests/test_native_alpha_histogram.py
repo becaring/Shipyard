@@ -63,9 +63,9 @@ int main() {
 
     def test_profile_only_submitted_draw_accounting(self):
         source = (ROOT / 'sources/xenos/core.cpp').read_text()
-        draw = source[source.index('void Draw(float* vertices, size_t count, size_t triangles) {'):]
+        draw = source[source.index('void Draw(float* vertices,'):]
         draw = draw[:draw.index('\nvoid ', 1)]
-        checked = draw.index('Shipyard_Check(drawResult, "Shipyard DrawPrimitiveUP");')
+        checked = draw.index('Shipyard_Check(drawResult, indices ? "Shipyard DrawIndexedPrimitiveUP" : "Shipyard DrawPrimitiveUP");')
         recorded = draw.index('alpha_histogram.Record(')
         self.assertLess(checked, recorded)
         self.assertIn('if (SHIPYARD_XENOS_ALPHA_HISTOGRAM && timing_enabled)\n        SHIPYARD_DIAGNOSTIC(alpha_histogram.Record(', draw[checked:recorded + 60])

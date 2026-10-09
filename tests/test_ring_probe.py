@@ -57,7 +57,7 @@ int main() {
 
     def test_recording_is_profile_only_and_includes_draw_preparation(self):
         source = (ROOT / 'sources/xenos/core.cpp').read_text()
-        draw = function(source, 'void Draw(float* vertices, size_t count, size_t triangles) {')
+        draw = function(source, 'void Draw(float* vertices,')
         self.assertLess(draw.index('probeRing = timing_enabled'), draw.index('RingCursor ringBefore'))
         self.assertLess(draw.index('RingCursor ringBefore'), draw.index('PrepareDrawState();'))
         self.assertLess(draw.index('ApplyAlpha();'), draw.index('SubmitTile1PredicatedDraw('))

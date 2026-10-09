@@ -91,8 +91,8 @@ int main() {
 
     def test_trial_is_opt_in_and_keeps_original_guard_and_endtiling(self):
         source = (ROOT / 'sources/xenos/core.cpp').read_text()
-        draw = function(source, 'void Draw(float* vertices, size_t count, size_t triangles) {')
-        self.assertIn('tiling_draw_bytes + count * sizeof(float) + 8192 > ShipyardXenos::TilingPassLimit', draw)
+        draw = function(source, 'void Draw(float* vertices,')
+        self.assertIn('tiling_draw_bytes + inputBytes + 8192 > ShipyardXenos::TilingPassLimit', draw)
         self.assertLess(draw.index('GuardTrialBeforeDraw('), draw.index('PrepareDrawState();'))
         self.assertLess(draw.index('SubmitTile1PredicatedDraw('), draw.index('GuardTrialAfterDraw('))
         self.assertIn('FinishFramebuffer();', draw)

@@ -20,12 +20,12 @@ class TilingBudgetTests(unittest.TestCase):
         with tempfile.TemporaryDirectory(prefix='shipyard-tiling-budget-') as folder:
             out = Path(folder)
             draw = function((ROOT / 'sources/xenos/core.cpp').read_text(),
-                            'void Draw(float* vertices, size_t count, size_t triangles) {')
-            guards = re.findall(r'tiling_draw_bytes \+ count \* sizeof\(float\) \+ 8192 > [^)]*', draw)
+                            'void Draw(float* vertices,')
+            guards = re.findall(r'tiling_draw_bytes \+ inputBytes \+ 8192 > [^)]*', draw)
             self.assertEqual(len(guards), 2)
             self.assertEqual(guards[0], guards[1])
             (out / 'tiling_precheck.inc').write_text(
-                'bool TilingPrecheck(size_t tiling_draw_bytes, size_t count) { return ' +
+                'bool TilingPrecheck(size_t tiling_draw_bytes, size_t count) { const uint64_t inputBytes = uint64_t(count) * sizeof(float); return ' +
                 guards[0] + '; }\n')
             batch = out / 'compile.cmd'
             batch.write_text('@echo off\ncall "' + installation + '/VC/Auxiliary/Build/vcvars32.bat" >nul\n'
@@ -47,7 +47,7 @@ class TilingBudgetTests(unittest.TestCase):
         source = (ROOT / 'sources/xenos/core.cpp').read_text()
         begin = function(source, 'void BeginFramebuffer() {')
         finish = function(source, 'void FinishFramebuffer(bool preserveDepth, bool preserveColor) {')
-        draw = function(source, 'void Draw(float* vertices, size_t count, size_t triangles) {')
+        draw = function(source, 'void Draw(float* vertices,')
         restore = function(source, 'void DrawRestoreQuadSample(')
         self.assertLess(begin.index('TilingSpaceBegin();'), begin.index('DrawRestoreQuadSample('))
         self.assertLess(draw.index('GetViewport(&guardViewport)'), draw.index('FinishFramebuffer();'))

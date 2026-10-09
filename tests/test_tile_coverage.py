@@ -129,7 +129,7 @@ int main() {
 
     def test_probe_is_profile_only_unless_trial_is_enabled(self):
         source = (ROOT / 'sources/xenos/core.cpp').read_text()
-        draw = function(source, 'void Draw(float* vertices, size_t count, size_t triangles) {')
+        draw = function(source, 'void Draw(float* vertices,')
         self.assertLess(draw.index('if ((timing_enabled && detailed_timing_enabled) || (SHIPYARD_XENOS_TILING_TRIALS && tile1_predication_trial_enabled))'),
                         draw.index('BatchInsideSecondTile('))
         self.assertLess(draw.index('BatchInsideSecondTile('), draw.index('SubmitTile1PredicatedDraw('))

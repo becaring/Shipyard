@@ -73,14 +73,14 @@ int main() {
         source = (ROOT / 'sources/xenos/core.cpp').read_text()
         begin = function(source, 'void BeginFramebuffer() {')
         finish = function(source, 'void FinishFramebuffer(bool preserveDepth, bool preserveColor) {')
-        draw = function(source, 'void Draw(float* vertices, size_t count, size_t triangles) {')
+        draw = function(source, 'void Draw(float* vertices,')
         self.assertLess(begin.index('BeginTiling('), begin.index('TilingSpaceBegin('))
         self.assertLess(begin.index('TilingSpaceBegin('), begin.index('RestoreQuad('))
         self.assertLess(begin.index('SetTileConstants();'), begin.index('TilingSpaceSetup('))
         self.assertLess(finish.index('TilingSpaceBeforeResolve('), finish.index('Resolve('))
         self.assertLess(finish.index('SetPredication(0);'), finish.index('TilingSpaceBeforeEnd('))
         self.assertLess(finish.index('TilingSpaceBeforeEnd('), finish.index('EndTiling('))
-        self.assertIn('tiling_draw_bytes + count * sizeof(float) + 8192 > ShipyardXenos::TilingPassLimit', draw)
+        self.assertIn('tiling_draw_bytes + inputBytes + 8192 > ShipyardXenos::TilingPassLimit', draw)
 
 
 if __name__ == '__main__':

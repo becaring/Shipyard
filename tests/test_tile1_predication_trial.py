@@ -45,6 +45,7 @@ class Tile1PredicationTrialTests(unittest.TestCase):
 #include <vector>
 typedef long HRESULT;
 #define D3DPT_TRIANGLELIST 4
+#define D3DFMT_INDEX16 101
 #define D3DPRED_TILE(i) (1u << (i))
 #include "tile1_predication_trial.h"
 #include "tile1_predication_draw.h"
@@ -133,12 +134,12 @@ int main() {
 
     def test_predication_wraps_draw_only_and_is_default_off(self):
         source = (ROOT / 'sources/xenos/core.cpp').read_text()
-        draw = function(source, 'void Draw(float* vertices, size_t count, size_t triangles) {')
+        draw = function(source, 'void Draw(float* vertices,')
         self.assertLess(draw.index('PrepareDrawState();'), draw.index('SubmitTile1PredicatedDraw('))
         self.assertLess(draw.index('ApplyAlpha();'), draw.index('SubmitTile1PredicatedDraw('))
         self.assertIn('if ((timing_enabled && detailed_timing_enabled) || (SHIPYARD_XENOS_TILING_TRIALS && tile1_predication_trial_enabled))', draw)
         self.assertIn('ClassifyTile1Predication(', draw)
-        self.assertIn('Shipyard_Check(drawResult, "Shipyard DrawPrimitiveUP")', draw)
+        self.assertIn('Shipyard_Check(drawResult, indices ? "Shipyard DrawIndexedPrimitiveUP" : "Shipyard DrawPrimitiveUP")', draw)
         self.assertNotIn('SetPredication(', draw)
 
 
