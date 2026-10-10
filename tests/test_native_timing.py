@@ -124,7 +124,7 @@ int main() {
 
     def test_depth_busy_probe_is_profile_only_and_precedes_lock(self):
         source = core_source(DETAILED_TIMING=0)
-        body = function(source, 'PixelDepth(int id, const std::set<std::pair<float, float> >& coords) {')
+        body = function(source, 'ReadPixelDepth(int id, Range& coords) {')
         probe = body.index('depth_texture->IsBusy()')
         guard = body.rfind('if (timing_enabled && detailed_timing_enabled)', 0, probe)
         lock = body.index('depth_texture->LockRect(')

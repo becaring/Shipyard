@@ -12,6 +12,7 @@
 #include <vector>
 #include "shader_provider.h"
 #include "depth_discard.h"
+#include "depth_samples.h"
 #include "tiling_space_probe.h"
 #include "tiling_guard_trial.h"
 #include "tile1_predication_trial.h"

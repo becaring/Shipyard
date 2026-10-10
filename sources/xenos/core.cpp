@@ -1,3 +1,4 @@
+#include "depth_samples.h"
 #include "configuration.h"
 #include "core.h"
 #include "indexed_draw.h"
@@ -1925,15 +1926,37 @@ void ResolveMSAA(int dst, int src) {
     active_fb = previous;
     BeginFramebuffer();
 }
-std::unordered_map<std::pair<float, float>, uint16_t, hash_pair_ff>
-PixelDepth(int id, const std::set<std::pair<float, float> >& coords) {
+struct DepthArrayRange {
+    typedef ShipyardXenos::DepthSample* Iterator;
+    Iterator samples;
+    size_t count;
+    bool Empty() const { return count == 0; }
+    size_t Size() const { return count; }
+    Iterator Begin() const { return samples; }
+    Iterator End() const { return count ? samples + count : samples; }
+    float X(Iterator it) const { return it->x; }
+    float Y(Iterator it) const { return it->y; }
+    void Set(Iterator it, uint16_t depth) { it->depth = depth; }
+};
+struct DepthMapRange {
+    typedef std::set<std::pair<float, float> >::const_iterator Iterator;
+    const std::set<std::pair<float, float> >& coordinates;
+    std::unordered_map<std::pair<float, float>, uint16_t, hash_pair_ff>& result;
+    bool Empty() const { return coordinates.empty(); }
+    size_t Size() const { return coordinates.size(); }
+    Iterator Begin() const { return coordinates.begin(); }
+    Iterator End() const { return coordinates.end(); }
+    float X(Iterator it) const { return it->first; }
+    float Y(Iterator it) const { return it->second; }
+    void Set(Iterator it, uint16_t depth) { result[*it] = depth; }
+};
+template<class Range> void ReadPixelDepth(int id, Range& coords) {
     ValidateFramebuffer(id);
-    std::unordered_map<std::pair<float, float>, uint16_t, hash_pair_ff> result;
-    if (coords.empty())
-        return result;
+    if (coords.Empty())
+        return;
     NativeTimingScope depthReading(timing_counts.depthReadTicks, timing_counts.depthReadCalls);
     if (timing_enabled)
-        timing_counts.depthSamples += (unsigned)coords.size();
+        timing_counts.depthSamples += (unsigned)coords.Size();
     bool resume = false;
     IDirect3DTexture9* depth_texture;
     uint32_t width, height;
@@ -1993,11 +2016,10 @@ PixelDepth(int id, const std::set<std::pair<float, float> >& coords) {
     // The caller asks for individual occlusion samples. Let the SDK address
     // those texels directly instead of untiling an entire framebuffer.
     // The source rectangle retains texture packing and the bottom-left contract.
-    for (std::set<std::pair<float, float> >::const_iterator it = coords.begin(); it != coords.end();
-         ++it) {
-        int x = (int)it->first, y = (int)it->second;
+    for (typename Range::Iterator it = coords.Begin(); it != coords.End(); ++it) {
+        int x = (int)coords.X(it), y = (int)coords.Y(it);
         if (x < 0 || y < 0 || x >= (int)width || y >= (int)height) {
-            result[*it] = 65532;
+            coords.Set(it, 65532);
             continue;
         }
         DWORD value;
@@ -2006,11 +2028,22 @@ PixelDepth(int id, const std::set<std::pair<float, float> >& coords) {
         XGUntileTextureLevel(width, height, 0, XGGetGpuFormat(desc.Format), 0, &value,
                              sizeof(value), &destination, lock.pBits, &source);
         // Match the Fast3D D3D11 backend's sample-zero read for multisampled depth.
-        result[*it] = (uint16_t)(((value >> 8) / 16777215.0) * 65532.0);
+        coords.Set(it, (uint16_t)(((value >> 8) / 16777215.0) * 65532.0));
     }
     depth_texture->UnlockRect(0);
     if (resume)
         BeginFramebuffer();
+    return;
+}
+void PixelDepthSamples(int id, ShipyardXenos::DepthSample* samples, size_t count) {
+    DepthArrayRange coordinates = {samples, count};
+    ReadPixelDepth(id, coordinates);
+}
+std::unordered_map<std::pair<float, float>, uint16_t, hash_pair_ff>
+PixelDepth(int id, const std::set<std::pair<float, float> >& coords) {
+    std::unordered_map<std::pair<float, float>, uint16_t, hash_pair_ff> result;
+    DepthMapRange coordinates = {coords, result};
+    ReadPixelDepth(id, coordinates);
     return result;
 }
 void* FramebufferImage(int id) {
@@ -2785,6 +2818,9 @@ void ResolveMSAAColorBuffer(int destination, int source) {
 std::unordered_map<std::pair<float, float>, uint16_t, hash_pair_ff>
 GetPixelDepth(int id, const std::set<std::pair<float, float> >& coordinates) {
     return ::Fast::PixelDepth(id, coordinates);
+}
+void GetPixelDepthSamples(int id, DepthSample* samples, size_t count) {
+    ::Fast::PixelDepthSamples(id, samples, count);
 }
 void* GetFramebufferTextureId(int id) {
     return ::Fast::FramebufferImage(id);
