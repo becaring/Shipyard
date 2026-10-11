@@ -2,8 +2,10 @@
 
 Upstream F3DEX2 dispatch leaves the handler as a stub that never culls. The
 handler rejects a list only when every vertex in the encoded range shares an
-outside clip plane; near stays conservative. Vertex loads must write clip_rej
-for every loaded vertex, and handlers must already use XboxDispatchInterpreter.
+outside clip plane; near stays conservative. A culled list ends through the
+game's gfx_end_dl_handler_common because command stacks differ per consumer.
+Vertex loads must write clip_rej for every loaded vertex, and handlers must
+already use XboxDispatchInterpreter.
 """
 
 ORIGINAL = '''bool gfx_cull_dl_handler_f3dex2(F3DGfx** cmd) {
@@ -11,9 +13,11 @@ ORIGINAL = '''bool gfx_cull_dl_handler_f3dex2(F3DGfx** cmd) {
     return false;
 }'''
 
-MARKER = '// MODERN DISPLAY LIST CULL BEGIN'
+MARKER = '// SHIPYARD DISPLAY LIST CULL BEGIN'
 
-HANDLER = '''// MODERN DISPLAY LIST CULL BEGIN
+HANDLER = '''// SHIPYARD DISPLAY LIST CULL BEGIN
+bool gfx_end_dl_handler_common(F3DGfx** cmd0);
+
 bool gfx_cull_dl_handler_f3dex2(F3DGfx** cmd0) {
     const F3DGfx* cmd = *cmd0;
     const uint32_t encodedFirst = uint32_t(cmd->words.w0) & 0xffffu;
@@ -38,20 +42,18 @@ bool gfx_cull_dl_handler_f3dex2(F3DGfx** cmd0) {
     if (first > last || last >= MAX_VERTICES) return false;
 
     Interpreter* gfx = XboxDispatchInterpreter();
-    // Both eager and deferred loads have already transformed positions and
-    // written these flags. Rejection must not materialize unused RGB/UV data.
+    // Every vertex load writes these flags with its position. Rejection must
+    // not materialize color or texture coordinates that a deferred load skipped.
     unsigned outside = 0x2fu; // left, right, bottom, top, far; near stays conservative
     for (unsigned i = first; i <= last; ++i) {
         outside &= gfx->mRsp->loaded_vertices[i].clip_rej;
         if (!outside) return false;
     }
 
-    // Identical to ENDDL: retain the caller's continuation and branch markers.
-    gfx->mMarkerOn = false;
-    *cmd0 = g_exec_stack.ret();
-    return true;
+    // The game's ENDDL owns its stack's return semantics and branch markers.
+    return gfx_end_dl_handler_common(cmd0);
 }
-// MODERN DISPLAY LIST CULL END'''
+// SHIPYARD DISPLAY LIST CULL END'''
 
 
 def transform(source):

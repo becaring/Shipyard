@@ -15,7 +15,8 @@ class DisplayListCullTests(unittest.TestCase):
         self.assertNotIn('// TODO:', result)
         self.assertEqual(result.count(MARKER), 1)
         self.assertIn('outside &= gfx->mRsp->loaded_vertices[i].clip_rej;', result)
-        self.assertIn('*cmd0 = g_exec_stack.ret();', result)
+        self.assertIn('return gfx_end_dl_handler_common(cmd0);', result)
+        self.assertNotIn('g_exec_stack', result)
         self.assertTrue(result.endswith('\nbool next() {}\n'))
         self.assertEqual(transform(result), result)
 
