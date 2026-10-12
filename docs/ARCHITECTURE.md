@@ -24,6 +24,7 @@ Consumers verify that manifest before generating or compiling sources.
 | XAudio2 sink and PCM pool | Audio channel definitions and producer callbacks | Channel layouts and producer lifetime |
 | Diagnostics queue | Synchronization APIs, sink callbacks, and caller context | Formatting, worker placement, and shutdown timing |
 | Storage, environment, network, and atomic file operations | Title identity, mount names, paths, and sockets | Serialization, lifetime, and failure handling |
+| ROM intake: discovery, byte order, CRC32C, and SHA-1 | ROM folder and accepted sizes | Version tables, header fixes, archive selection, and extraction |
 | Async tasks, thread pool, clock, and libultra timer | Pinned thread-pool input and Xbox synchronization APIs | Task admission, ownership, and shutdown order |
 | JSON, libzip, CRT, value types, and compiler projections | Locked upstream sources and parser dependencies | Version adaptation, serializers, archives, and generated-file staging |
 | Fast3D math, caches, and vertex helpers | Pinned interpreter types and source anchors | Layout, capacity, formulas, and observation points |

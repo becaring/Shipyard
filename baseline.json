@@ -167,6 +167,8 @@
     "sources/resources/path_hash.h": "5d50046fd4a263dbbc12ff08d999f0b78f00fc257a10862dd2af47e73f8c18c8",
     "sources/resources/path_span.h": "3b82b80b171bccadbb7830eb28ae70599ce9e819fe677e950d39f3cffa886749",
     "sources/resources/texture_hash_cache.h": "4e7d72591a2b1577b6c1d41b77864323c490a5ce874adee4b78ce5b03ea640dd",
+    "sources/rom/rom.cpp": "1e768eec29ab7d4bf313e2ad11dc1662dc85ea5d4f76d10793e7344318728e1e",
+    "sources/rom/rom.h": "4f9d56c7571c3938651c80ffbab9bd4acc3f722977a9beb81c3d8646a2cfd7eb",
     "sources/speech/SpeechQueue.h": "ccc3e6669525b7fb2d954f68f469b29e1a3b8cfb1432f2a4caec2f4be8292b74",
     "sources/speech/data_boundary.c": "57e277fa8c66440fb7e53ebb75f32d336a05bc7ca179f79dab1f213e1ca330a2",
     "sources/speech/data_boundary.h": "cfc1e69db43f07b868c1e97a33f6c45b2b7c6024679abb1c5c5fca0e0a6cce17",
