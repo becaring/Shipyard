@@ -36,6 +36,18 @@ typedef struct {
 typedef void (*ShipyardOverlapDepthPrepare)(float, float, void*);
 typedef uint16_t (*ShipyardOverlapDepthRead)(float, float, void*);
 
+// Game hooks fill requests here; some games already own a boolean field of the same name.
+static __inline void Shipyard_OverlapSetLight(ShipyardOverlapLightRequest* light, uint32_t slot,
+                                            uint64_t incarnation, int eligible, float x, float y,
+                                            int32_t projectedZ) {
+    light->slot = slot;
+    light->incarnation = incarnation;
+    light->eligible = eligible != 0;
+    light->x = x;
+    light->y = y;
+    light->projectedZ = projectedZ;
+}
+
 static __inline int Shipyard_OverlapDepthReady(const ShipyardOverlapDepthResult* result,
                                              uint64_t buildGeneration) {
     return result->active && buildGeneration >= result->generation &&
