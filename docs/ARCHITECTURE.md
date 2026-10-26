@@ -27,6 +27,7 @@ Consumers verify that manifest before generating or compiling sources.
 | ROM intake: discovery, byte order, CRC32C, and SHA-1 | ROM folder and accepted sizes | Version tables, header fixes, archive selection, and extraction |
 | Stored O2R writer: streamed entries, repeat handling, and sorted directory | Entry names and bytes | Archive name, entry naming, and when to finish |
 | Async tasks, thread pool, clock, and libultra timer | Pinned thread-pool input and Xbox synchronization APIs | Task admission, ownership, and shutdown order |
+| Game/render overlap: frame channel, frame worker, deferred storage, writable spans, replay cadence, and light depth sampling | Packet type, game frame callback, producer hardware thread, and depth read callbacks | Game hooks, packet contents, GUI and audio synchronization, and shutdown order |
 | JSON, libzip, CRT, value types, and compiler projections | Locked upstream sources and parser dependencies | Version adaptation, serializers, archives, and generated-file staging |
 | Fast3D math, caches, and vertex helpers | Pinned interpreter types and source anchors | Layout, capacity, formulas, and observation points |
 
