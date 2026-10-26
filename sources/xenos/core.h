@@ -112,6 +112,8 @@ void DrawTriangles(float* vertices, size_t count, size_t triangles);
 void DrawIndexedTriangles(const float* vertices, size_t floatCount, size_t vertexCount,
                           const uint16_t* indices, size_t triangleCount);
 void InitializeDisplay();
+// Square-pixel render size for the console's output mode; SD widens to its aspect.
+void GetDisplaySize(uint32_t* width, uint32_t* height);
 HRESULT PresentStartupUI();
 void BeginGuiDraw();
 void InvalidateGuiState();

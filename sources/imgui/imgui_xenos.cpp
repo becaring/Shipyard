@@ -166,6 +166,20 @@ void Shipyard_ImGuiRender(ImDrawData* data) {
     IDirect3DDevice9* const device = Shipyard_ImGuiDevice();
     Shipyard_ImGuiBeginNativeDraw();
     saved_state->Capture();
+    // ImGui lays out square pixels; an anamorphic SD back buffer is narrower.
+    // Framebuffer surfaces are EDRAM-padded or one tile pass, so only the back
+    // buffer's description is its real size.
+    IDirect3DSurface9 *target, *back;
+    Shipyard_ImGuiCheck(device->GetRenderTarget(0, &target), "ImGui target");
+    Shipyard_ImGuiCheck(device->GetBackBuffer(0, 0, D3DBACKBUFFER_TYPE_MONO, &back), "ImGui back buffer");
+    data->FramebufferScale = ImVec2(1, 1);
+    if (target == back) {
+        D3DSURFACE_DESC desc;
+        back->GetDesc(&desc);
+        data->FramebufferScale = ImVec2(desc.Width / data->DisplaySize.x, desc.Height / data->DisplaySize.y);
+    }
+    target->Release();
+    back->Release();
     Setup(data);
     for (int listIndex = 0; listIndex < data->CmdListsCount; ++listIndex) {
         const ImDrawList* list = data->CmdLists[listIndex];

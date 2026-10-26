@@ -121,6 +121,7 @@ struct Framebuffer {
     float shader_width, shader_height;
     TextureSampler sampler;
     bool stored, depth_stored, render_target, hiz_capable;
+    std::vector<D3DRECT> depth_regions; // Resolved depth blocks; empty means all of it.
     Framebuffer()
         : color(NULL), depth(NULL), image(NULL), width(0), height(0), samples(1), shader_width(0),
           shader_height(0), sampler(true), stored(false), depth_stored(false),
@@ -185,7 +186,16 @@ struct PublishedDepth {
     IDirect3DTexture9* spare;   // Owned; a retired texture kept for the next copy.
     int framebuffer;
     uint32_t width, height, spare_width, spare_height;
+    std::vector<D3DRECT> regions;
 } published_depth = {NULL, NULL, -1, 0, 0, 0, 0};
+// Depth texels read since the framebuffer's last depth resolve, in surface
+// coordinates. Each update reads near the previous update's points (sun, light
+// glows), so depth that is never restored is resolved only in blocks around
+// them. A read outside the resolved blocks makes the next resolve full.
+struct DepthReadPoint { int framebuffer; LONG x, y; };
+std::vector<DepthReadPoint> depth_read_points;
+bool depth_full_resolve_next = true;
+unsigned depth_region_misses;
 unsigned framebuffer_clear_count, framebuffer_restore_avoided, framebuffer_depth_restore_avoided;
 unsigned framebuffer_depth_resolves, framebuffer_depth_resolves_skipped;
 unsigned framebuffer_early_depth_fences;
@@ -216,8 +226,12 @@ int upload_tile, active_fb;
 // Published image holds a separate reference until replacement or shutdown.
 IDirect3DTexture9* published_framebuffer_image = NULL;
 bool presentation_image_ever_published;
+// End() points the presentation color resolve at a front buffer instead of the image.
+IDirect3DTexture9* finish_color_target;
 IDirect3DSurface9* presentation_color;
 IDirect3DSurface9* presentation_depth;
+uint32_t presentation_width = 1280, presentation_height = 720;
+bool presentation_owns_depth;
 IDirect3DVertexShader9* restore_vertex;
 IDirect3DPixelShader9* restore_color;
 IDirect3DPixelShader9* restore_depth;
@@ -237,6 +251,7 @@ void FinishFramebuffer(bool preserveDepth = true, bool preserveColor = true);
 void TilingSpaceBegin();
 void TilingSpaceSetup();
 void TilingSpaceBeforeResolve();
+bool AliasesPresentation(int id, uint32_t width, uint32_t height, uint32_t samples);
 void TilingSpaceBeforeEnd();
 void QueryTilingSpace(DWORD* used, DWORD* remaining);
 bool GuardTrialBeforeDraw(uint64_t inputBytes);
@@ -256,6 +271,8 @@ unsigned filtering_key = unsigned(FILTER_THREE_POINT) << 4;
 // not texture identity: a sampler edit through either alias must reach both
 // bound slots. External/native drawing invalidates this state explicitly.
 struct NativeStateCache {
+    IDirect3DTexture9* texture[6];
+    bool texture_valid[6];
     DWORD sampler[6][5];
     __declspec(align(16)) float constants[12];
     __declspec(align(16)) float binding_constants[24];
@@ -291,6 +308,7 @@ void InvalidateNativeState() {
 #endif
     for (int i = 0; i < 6; ++i) {
         native_state.sampler_valid[i] = false;
+        native_state.texture_valid[i] = false;
     }
     native_state.constants_valid = false;
     native_state.alpha_valid = false;
@@ -299,7 +317,7 @@ void InvalidateNativeState() {
     native_state.pixel = NULL;
     native_state.declaration = NULL;
 }
-HRESULT SetNativeTexture(int tile, IDirect3DTexture9* texture) {
+HRESULT WriteNativeTexture(int tile, IDirect3DTexture9* texture) {
     // SetTexture changes the image, not the slot's sampler values. The SDK
     // merges both into its fetch constant. Keep full invalidation at external
     // drawing/state-block boundaries. Literal slots avoid XDK variable-mask work.
@@ -316,6 +334,23 @@ HRESULT SetNativeTexture(int tile, IDirect3DTexture9* texture) {
     if (tile == 5)
         return xenos_device->SetTexture(5, texture);
     return E_INVALIDARG;
+}
+// The XDK holds no reference to bound textures, so a released pointer may name
+// a new texture later; release paths forget it before skipping a rebind.
+HRESULT SetNativeTexture(int tile, IDirect3DTexture9* texture) {
+    if (tile < 0 || tile >= 6)
+        return E_INVALIDARG;
+    if (native_state.texture_valid[tile] && native_state.texture[tile] == texture)
+        return S_OK;
+    const HRESULT result = WriteNativeTexture(tile, texture);
+    native_state.texture[tile] = texture;
+    native_state.texture_valid[tile] = SUCCEEDED(result);
+    return result;
+}
+void ForgetNativeTexture(IDirect3DTexture9* texture) {
+    for (int i = 0; i < 6; ++i)
+        if (native_state.texture[i] == texture)
+            native_state.texture_valid[i] = false;
 }
 __declspec(noinline) void VerifyNativeSampler(int tile, const DWORD* desired) {
     for (unsigned field = 0; field < 5; ++field) {
@@ -689,6 +724,14 @@ void CollectTextures(bool wait) {
     }
 }
 void ReleaseTexture(IDirect3DTexture9* texture, bool recyclable = false) {
+    // A shared reference (GUI capture pins, published images) frees nothing and
+    // never waits; queueing it would charge the full image to the budget below.
+    texture->AddRef();
+    if (texture->Release() > 1) {
+        texture->Release();
+        return;
+    }
+    ForgetNativeTexture(texture);
     // XDK Release waits for the GPU when dropping the last reference. Keep the
     // replaced immutable image alive until the SDK reports it unused, so a
     // small texture upload doesn't drain the GPU halfway through a frame.
@@ -715,9 +758,11 @@ void ReleaseTexture(IDirect3DTexture9* texture, bool recyclable = false) {
     pending_texture_bytes += bytes;
 }
 void SelectTexture(int tile, uint32_t id) {
-    draw_state_prepared = false;
     if (tile < 0 || tile > 5 || id >= textures.size())
         Shipyard_Fatal("texture index", E_INVALIDARG);
+    if (selected_fb[tile] >= 0 || selected[tile] != id ||
+        !native_state.texture_valid[tile] || native_state.texture[tile] != textures[id].native)
+        draw_state_prepared = false;
     upload_tile = tile;
     selected[tile] = id;
     selected_fb[tile] = -1;
@@ -911,16 +956,19 @@ void ApplyAlpha() {
     if (native_state.alpha_valid && native_state.alpha_mode == mode)
         return;
     xenos_device->SetRenderState(D3DRS_ALPHABLENDENABLE, mode == 1);
-    xenos_device->SetRenderState(D3DRS_SRCBLEND, D3DBLEND_SRCALPHA);
-    xenos_device->SetRenderState(D3DRS_DESTBLEND, D3DBLEND_INVSRCALPHA);
-    xenos_device->SetRenderState(D3DRS_BLENDOP, D3DBLENDOP_ADD);
     // Cutout writes RGB only; ZERO/ONE separate-alpha blending preserves the
     // destination alpha of nonopaque offscreen targets.
     xenos_device->SetRenderState(D3DRS_COLORWRITEENABLE, color_writes ? (mode == 2 ? 7 : 15) : 0);
-    xenos_device->SetRenderState(D3DRS_SEPARATEALPHABLENDENABLE, TRUE);
-    xenos_device->SetRenderState(D3DRS_SRCBLENDALPHA, D3DBLEND_ZERO);
-    xenos_device->SetRenderState(D3DRS_DESTBLENDALPHA, D3DBLEND_ONE);
-    xenos_device->SetRenderState(D3DRS_BLENDOPALPHA, D3DBLENDOP_ADD);
+    // The blend equation is fixed; write it only after invalidation.
+    if (!native_state.alpha_valid) {
+        xenos_device->SetRenderState(D3DRS_SRCBLEND, D3DBLEND_SRCALPHA);
+        xenos_device->SetRenderState(D3DRS_DESTBLEND, D3DBLEND_INVSRCALPHA);
+        xenos_device->SetRenderState(D3DRS_BLENDOP, D3DBLENDOP_ADD);
+        xenos_device->SetRenderState(D3DRS_SEPARATEALPHABLENDENABLE, TRUE);
+        xenos_device->SetRenderState(D3DRS_SRCBLENDALPHA, D3DBLEND_ZERO);
+        xenos_device->SetRenderState(D3DRS_DESTBLENDALPHA, D3DBLEND_ONE);
+        xenos_device->SetRenderState(D3DRS_BLENDOPALPHA, D3DBLENDOP_ADD);
+    }
     native_state.alpha_mode = mode;
     native_state.alpha_valid = true;
 }
@@ -1546,6 +1594,27 @@ void ProtectPublishedDepth(Framebuffer& b) {
     b.depth_samples[0]->Release();
     b.depth_samples[0] = storage;
 }
+// A partial resolve consumes the recorded read points. Blocks span an eighth of
+// the height around each point; no points or a recent miss resolve everything.
+void TakeDepthRegions(const Framebuffer& b, bool partial, std::vector<D3DRECT>& regions) {
+    regions.clear();
+    if (!partial)
+        return;
+    const LONG margin = (LONG)b.height / 8, align = D3DRESOLVEALIGNMENT;
+    if (!depth_full_resolve_next)
+        for (size_t i = 0; i < depth_read_points.size(); ++i) {
+            const DepthReadPoint& p = depth_read_points[i];
+            if (p.framebuffer != active_fb)
+                continue;
+            D3DRECT r = {std::max(p.x - margin, 0L) & ~(align - 1),
+                         std::max(p.y - margin, 0L) & ~(align - 1),
+                         std::min((p.x + margin + align) & ~(align - 1), (LONG)b.width),
+                         std::min((p.y + margin + align) & ~(align - 1), (LONG)b.height)};
+            regions.push_back(r);
+        }
+    depth_full_resolve_next = false;
+    depth_read_points.clear();
+}
 void FinishFramebuffer(bool preserveDepth, bool preserveColor) {
 #if SHIPYARD_XENOS_DEFERRED_FRAMEBUFFERS
     // Reads, copies and target switches must observe the requested depth clear
@@ -1569,6 +1638,11 @@ void FinishFramebuffer(bool preserveDepth, bool preserveColor) {
         b.depth_samples[0] == published_depth.texture)
         ProtectPublishedDepth(b);
 #endif
+    // Depth is restored only together with retained color. Without it, the
+    // resolved depth serves only reads.
+    if (b.depth && preserveDepth)
+        TakeDepthRegions(b, b.samples == 1 && !(preserveColor && !finish_color_target),
+                         b.depth_regions);
     const DWORD fragments[] = {D3DRESOLVE_FRAGMENT0, D3DRESOLVE_FRAGMENT1, D3DRESOLVE_FRAGMENT2,
                                D3DRESOLVE_FRAGMENT3};
     D3DVECTOR4 clear = {0, 0, 0, 1};
@@ -1580,7 +1654,23 @@ void FinishFramebuffer(bool preserveDepth, bool preserveColor) {
         rectangle.y2 = std::min(rectangle.y2, (LONG)b.height);
         D3DPOINT destination = {rectangle.x1, rectangle.y1};
         for (uint32_t sample = 0; sample < b.samples; ++sample) {
-            if (b.depth && preserveDepth) {
+            if (b.depth && preserveDepth && !b.depth_regions.empty()) {
+                for (size_t i = 0; i < b.depth_regions.size(); ++i) {
+                    D3DRECT block = b.depth_regions[i];
+                    block.x1 = std::max(block.x1, rectangle.x1);
+                    block.y1 = std::max(block.y1, rectangle.y1);
+                    block.x2 = std::min(block.x2, rectangle.x2);
+                    block.y2 = std::min(block.y2, rectangle.y2);
+                    if (block.x1 >= block.x2 || block.y1 >= block.y2)
+                        continue;
+                    D3DPOINT at = {block.x1, block.y1};
+                    Shipyard_Check(xenos_device->Resolve(D3DRESOLVE_DEPTHSTENCIL | fragments[sample],
+                                                         &block, b.depth_samples[sample], &at, 0,
+                                                         0, NULL, 1, 0, NULL),
+                                   "retain depth block");
+                }
+                ++framebuffer_depth_resolves;
+            } else if (b.depth && preserveDepth) {
                 Shipyard_Check(xenos_device->Resolve(D3DRESOLVE_DEPTHSTENCIL | fragments[sample],
                                                      &rectangle, b.depth_samples[sample],
                                                      &destination, 0, 0, NULL, 1, 0, NULL),
@@ -1599,7 +1689,9 @@ void FinishFramebuffer(bool preserveDepth, bool preserveColor) {
         if (b.tiles.size() > 1)
             flags |= D3DRESOLVE_CLEARRENDERTARGET | (b.depth ? D3DRESOLVE_CLEARDEPTHSTENCIL : 0);
         if (preserveColor)
-            Shipyard_Check(xenos_device->Resolve(flags, &rectangle, b.image, &destination, 0, 0,
+            Shipyard_Check(xenos_device->Resolve(flags, &rectangle,
+                                                 finish_color_target ? finish_color_target : b.image,
+                                                 &destination, 0, 0,
                                                  &clear, 1, 0, NULL),
                            "resolve framebuffer color");
         else
@@ -1625,7 +1717,7 @@ void FinishFramebuffer(bool preserveDepth, bool preserveColor) {
         xenos_device->InsertFence();
         ++framebuffer_early_depth_fences;
     }
-    b.stored = preserveColor;
+    b.stored = preserveColor && !finish_color_target;
     b.depth_stored = preserveDepth && b.depth != NULL;
     live_framebuffer = false;
     InvalidateNativeState();
@@ -1662,6 +1754,7 @@ void ReleaseFramebuffer(Framebuffer& b) {
         b.depth->Release();
     }
     if (b.image) {
+        ForgetNativeTexture(b.image);
         b.image->Release();
     }
     for (int i = 0; i < 4; ++i) {
@@ -1762,7 +1855,7 @@ void UpdateFramebuffer(int id, uint32_t width, uint32_t height, uint32_t request
     UINT color_tiles = XGSurfaceSize(tile_width, tile_height, D3DFMT_A8R8G8B8, msaa);
     D3DSURFACE_PARAMETERS parameters = {0};
     parameters.Base = 0;
-    if (id == 0 && width == 1280 && height == 720 && samples == 1) {
+    if (AliasesPresentation(id, width, height, samples)) {
         b.color = presentation_color;
         b.color->AddRef();
     } else
@@ -1772,13 +1865,13 @@ void UpdateFramebuffer(int id, uint32_t width, uint32_t height, uint32_t request
     if (depth) {
         parameters.Base = color_tiles;
 #if SHIPYARD_XENOS_DEFERRED_FRAMEBUFFERS
-        const bool owns_depth = !(id == 0 && width == 1280 && height == 720 && samples == 1);
+        const bool owns_depth = !AliasesPresentation(id, width, height, samples);
         b.hiz_capable = FramebufferHiZCapable(owns_depth, tile_width, tile_height, msaa);
         if (!b.hiz_capable)
             parameters.HierarchicalZBase = 0xffffffffu;
         if (!owns_depth) {
 #else
-        if (id == 0 && width == 1280 && height == 720 && samples == 1) {
+        if (AliasesPresentation(id, width, height, samples)) {
 #endif
             b.depth = presentation_depth;
             b.depth->AddRef();
@@ -1960,6 +2053,7 @@ template<class Range> void ReadPixelDepth(int id, Range& coords) {
     bool resume = false;
     IDirect3DTexture9* depth_texture;
     uint32_t width, height;
+    const std::vector<D3DRECT>* regions;
     if (published_depth.texture && published_depth.framebuffer == id) {
         // The previous update's final replay. Later replays of this update
         // never wrote this texture, so no framebuffer work is needed; the lock
@@ -1967,6 +2061,7 @@ template<class Range> void ReadPixelDepth(int id, Range& coords) {
         depth_texture = published_depth.texture;
         width = published_depth.width;
         height = published_depth.height;
+        regions = &published_depth.regions;
     } else {
         resume = live_framebuffer;
         FinishFramebuffer();
@@ -1990,6 +2085,7 @@ template<class Range> void ReadPixelDepth(int id, Range& coords) {
         depth_texture = b.depth_samples[0];
         width = b.width;
         height = b.height;
+        regions = &b.depth_regions;
     }
     if (timing_enabled && detailed_timing_enabled) {
         // IsBusy is a nonblocking state sample. Do not pre-wait here: that
@@ -2022,9 +2118,26 @@ template<class Range> void ReadPixelDepth(int id, Range& coords) {
             coords.Set(it, 65532);
             continue;
         }
+        const LONG row = (LONG)height - 1 - y;
+        const DepthReadPoint point = {id, x, row};
+        if (depth_read_points.size() < 64)
+            depth_read_points.push_back(point);
+        else
+            depth_full_resolve_next = true; // Blocks would cover most of the surface.
+        bool resolved = regions->empty();
+        for (size_t i = 0; i < regions->size() && !resolved; ++i) {
+            const D3DRECT& r = (*regions)[i];
+            resolved = x >= r.x1 && x < r.x2 && row >= r.y1 && row < r.y2;
+        }
+        if (!resolved) {
+            // The texel is from an older resolve; the next resolve is full.
+            depth_full_resolve_next = true;
+            if (!(++depth_region_misses & (depth_region_misses - 1)))
+                Shipyard_Log("depth read outside resolved blocks: misses=%u", depth_region_misses);
+        }
         DWORD value;
         POINT destination = {0, 0};
-        RECT source = {x, (LONG)height - 1 - y, x + 1, (LONG)height - y};
+        RECT source = {x, row, x + 1, (LONG)height - y};
         XGUntileTextureLevel(width, height, 0, XGGetGpuFormat(desc.Format), 0, &value,
                              sizeof(value), &destination, lock.pBits, &source);
         // Match the Fast3D D3D11 backend's sample-zero read for multisampled depth.
@@ -2093,6 +2206,24 @@ void Filter(FilteringMode mode) {
 FilteringMode GetFilter() {
     return filtering;
 }
+// The back buffer takes the console's output mode, so every display, CRT
+// included, receives its own pixels. The game renders square pixels at the
+// display's aspect; SD modes are anamorphic, and End() squeezes that image.
+void DisplayMode(uint32_t* width, uint32_t* height, uint32_t* viewWidth, uint32_t* viewHeight) {
+    XVIDEO_MODE mode;
+    memset(&mode, 0, sizeof(mode));
+    XGetVideoMode(&mode);
+    *width = mode.dwDisplayWidth ? mode.dwDisplayWidth : 1280;
+    *height = mode.dwDisplayHeight ? mode.dwDisplayHeight : 720;
+    *viewHeight = *height;
+    *viewWidth = mode.fIsHiDef ? *width : *height * (mode.fIsWideScreen ? 16 : 4) / (mode.fIsWideScreen ? 9 : 3);
+}
+// Framebuffer 0 renders directly into the back buffer only when both match and
+// the back buffer also has depth; otherwise it tiles and End() copies it here.
+bool AliasesPresentation(int id, uint32_t width, uint32_t height, uint32_t samples) {
+    return id == 0 && presentation_depth && width == presentation_width &&
+           height == presentation_height && samples == 1;
+}
 void InitializeDisplay() {
     if (xenos_device)
         return;
@@ -2102,13 +2233,22 @@ void InitializeDisplay() {
     IDirect3D9* d3d = Direct3DCreate9(D3D_SDK_VERSION);
     if (!d3d)
         Shipyard_Fatal("Direct3DCreate9", E_FAIL);
+    uint32_t viewWidth, viewHeight;
+    DisplayMode(&presentation_width, &presentation_height, &viewWidth, &viewHeight);
+    // D24S8 occupies as many EDRAM tiles as the color surface.
+    const UINT colorTiles = XGSurfaceSize(XGNextMultiple(presentation_width, GPU_EDRAM_TILE_WIDTH_1X),
+                                          XGNextMultiple(presentation_height, GPU_EDRAM_TILE_HEIGHT_1X),
+                                          D3DFMT_A8R8G8B8, D3DMULTISAMPLE_NONE);
+    if (colorTiles > 2048)
+        Shipyard_Fatal("display mode exceeds EDRAM", E_INVALIDARG);
+    presentation_owns_depth = colorTiles * 2 <= 2048;
     D3DPRESENT_PARAMETERS pp = {0};
-    pp.BackBufferWidth = 1280;
-    pp.BackBufferHeight = 720;
+    pp.BackBufferWidth = presentation_width;
+    pp.BackBufferHeight = presentation_height;
     pp.BackBufferFormat = D3DFMT_A8R8G8B8;
     pp.FrontBufferFormat = D3DFMT_LE_X8R8G8B8;
     pp.BackBufferCount = 1;
-    pp.EnableAutoDepthStencil = TRUE;
+    pp.EnableAutoDepthStencil = presentation_owns_depth;
     pp.AutoDepthStencilFormat = D3DFMT_D24S8;
     pp.SwapEffect = D3DSWAPEFFECT_DISCARD;
     pp.PresentationInterval = D3DPRESENT_INTERVAL_ONE;
@@ -2120,7 +2260,7 @@ void InitializeDisplay() {
     pp.DisableAutoFrontBuffer = TRUE;
     Shipyard_Check(d3d->CreateDevice(0, D3DDEVTYPE_HAL, NULL, D3DCREATE_HARDWARE_VERTEXPROCESSING,
                                      &pp, &xenos_device),
-                   "CreateDevice 720p");
+                   "CreateDevice");
     Shipyard_Check(::Shipyard::XenosPresentationChain().Create(xenos_device, pp),
                    "presentation front buffers");
     d3d->Release();
@@ -2131,7 +2271,8 @@ void Init() {
     memset(&native_state_counts, 0, sizeof(native_state_counts));
     InitializeDisplay();
     Shipyard_Check(xenos_device->GetRenderTarget(0, &presentation_color), "presentation color");
-    Shipyard_Check(xenos_device->GetDepthStencilSurface(&presentation_depth), "presentation depth");
+    if (presentation_owns_depth)
+        Shipyard_Check(xenos_device->GetDepthStencilSurface(&presentation_depth), "presentation depth");
     InitializeRestore();
     // Fast3D's zero-initialized depth-state cache means disabled test/write.
     // Xenos defaults to both enabled. Match the cache before the first draw,
@@ -2145,7 +2286,8 @@ void Init() {
     xenos_device->SetRenderState(D3DRS_HISTENCILWRITEENABLE, FALSE);
     NewFramebuffer();
     xenos_device->SetRenderState(D3DRS_CULLMODE, D3DCULL_NONE);
-    Shipyard_Log("Xenos 1280x720: shared EDRAM, tiled 1x/2x/4x MSAA, color/depth retention");
+    Shipyard_Log("Xenos %ux%u: shared EDRAM, tiled 1x/2x/4x MSAA, color/depth retention",
+                 presentation_width, presentation_height);
 }
 void Resize() {
     FinishFramebuffer();
@@ -2183,13 +2325,26 @@ void End() {
     }
     if (discardPresentationColor && !canDiscardPresentationColor)
         ++presentation_color_discard_blocked;
+    // A presentation target that cannot alias the back buffer (1080p is tiled)
+    // resolves its tiles straight into the next front buffer, skipping a
+    // full-screen copy and a second resolve. Only a frame drawn without
+    // retained color qualifies, since its image is not kept.
+    Framebuffer& presentation = buffers[0];
+    IDirect3DTexture9* front = NULL;
+    if (active_fb == 0 && presentation.color != presentation_color && presentation.samples == 1 &&
+        presentation.width == presentation_width && presentation.height == presentation_height &&
+        !presentation.stored && !presentation_image_ever_published)
+        front = ::Shipyard::XenosPresentationChain().ResolveTarget();
 #if SHIPYARD_XENOS_DEFERRED_FRAMEBUFFERS
     if (live_framebuffer || pending_game_depth_clear == active_fb || !buffers[active_fb].stored) {
         BeginFramebuffer();
-        if (active_fb == 0)
+        if (active_fb == 0) {
+            finish_color_target = front;
             FinishFramebuffer(!discardPresentationDepth, !canDiscardPresentationColor);
-        else
+            finish_color_target = NULL;
+        } else {
             FinishFramebuffer();
+        }
     } else if (active_fb == 0) {
         // A read-only framebuffer image already completed the resolve. Keep
         // that result until the next actual draw, and apply end-of-frame
@@ -2201,10 +2356,13 @@ void End() {
     }
 #else
     BeginFramebuffer();
-    if (active_fb == 0)
+    if (active_fb == 0) {
+        finish_color_target = front;
         FinishFramebuffer(!discardPresentationDepth, !canDiscardPresentationColor);
-    else
+        finish_color_target = NULL;
+    } else {
         FinishFramebuffer();
+    }
 #endif
     if (active_fb != 0) {
         active_fb = 0;
@@ -2213,10 +2371,12 @@ void End() {
         BeginFramebuffer();
         FinishFramebuffer(!discardPresentationDepth, !canDiscardPresentationColor);
     }
-    if (buffers[0].color != presentation_color) {
+    if (front) {
+        ::Shipyard::XenosPresentationChain().MarkResolved();
+    } else if (buffers[0].color != presentation_color) {
         Shipyard_Check(xenos_device->SetRenderTarget(0, presentation_color), "presentation target");
         xenos_device->SetDepthStencilSurface(NULL);
-        RestoreQuad(buffers[0].image, NULL, 1280, 720, ~0u);
+        RestoreQuad(buffers[0].image, NULL, presentation_width, presentation_height, ~0u);
     }
     // Close the SDK's resource-use interval before Present inserts its vblank
     // synchronization. Otherwise LockRect on the resolved previous-frame depth
@@ -2491,6 +2651,7 @@ void PublishFramebufferDepth(int id) {
     published_depth.framebuffer = id;
     published_depth.width = b.width;
     published_depth.height = b.height;
+    published_depth.regions = b.depth_regions;
 }
 void SetShaderCache(const ShaderCacheOps* operations) {
     if (operations)
@@ -2738,6 +2899,10 @@ void DrawIndexedTriangles(const float* vertices, size_t floatCount, size_t verte
 }
 void InitializeDisplay() {
     ::Fast::InitializeDisplay();
+}
+void GetDisplaySize(uint32_t* width, uint32_t* height) {
+    uint32_t presentWidth, presentHeight;
+    ::Fast::DisplayMode(&presentWidth, &presentHeight, width, height);
 }
 HRESULT PresentStartupUI() {
     if (!xenos_device || !buffers.empty())

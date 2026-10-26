@@ -14,7 +14,7 @@ class XenosSwapChain {
   public:
     enum { FrontBuffers = 3 };
 
-    XenosSwapChain() : device(NULL), backBuffer(NULL), next(0) {
+    XenosSwapChain() : device(NULL), backBuffer(NULL), next(0), resolved(false) {
         for (UINT i = 0; i < FrontBuffers; ++i) front[i] = NULL;
     }
 
@@ -39,16 +39,28 @@ class XenosSwapChain {
         return S_OK;
     }
 
+    // A frame tiled in EDRAM never sits whole in the back buffer: it resolves
+    // each tile into this front buffer, then calls MarkResolved().
+    IDirect3DTexture9* ResolveTarget() {
+        if (!device) return NULL;
+        WaitForFrontBuffer();
+        return front[next];
+    }
+    void MarkResolved() { resolved = true; }
+
     // Call after the frame's commands were kicked (InsertFence), with the
-    // finished image in the device back buffer.
+    // finished image in the device back buffer or already resolved.
     HRESULT Present() {
         if (!device) return E_UNEXPECTED;
-        WaitForFrontBuffer();
-        IDirect3DSurface9* bound = NULL;
-        if (SUCCEEDED(device->GetRenderTarget(0, &bound)) && bound != backBuffer)
-            device->SetRenderTarget(0, backBuffer);
-        if (bound) bound->Release();
-        device->Resolve(D3DRESOLVE_RENDERTARGET0, NULL, front[next], NULL, 0, 0, NULL, 0.0f, 0, NULL);
+        if (!resolved) {
+            WaitForFrontBuffer();
+            IDirect3DSurface9* bound = NULL;
+            if (SUCCEEDED(device->GetRenderTarget(0, &bound)) && bound != backBuffer)
+                device->SetRenderTarget(0, backBuffer);
+            if (bound) bound->Release();
+            device->Resolve(D3DRESOLVE_RENDERTARGET0, NULL, front[next], NULL, 0, 0, NULL, 0.0f, 0, NULL);
+        }
+        resolved = false;
         device->InsertFence();
         device->Swap(front[next], NULL);
         next = (next + 1) % FrontBuffers;
@@ -68,6 +80,7 @@ class XenosSwapChain {
         }
         device = NULL;
         next = 0;
+        resolved = false;
     }
 
   private:
@@ -97,6 +110,7 @@ class XenosSwapChain {
     IDirect3DSurface9* backBuffer;
     IDirect3DTexture9* front[FrontBuffers];
     UINT next;
+    bool resolved;
 };
 
 // The presentation device has one swap chain, shared by device setup, the

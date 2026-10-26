@@ -1,5 +1,6 @@
 #include "shader_lower.h"
 #include <cstdio>
+#include <cstdlib>
 #include <cctype>
 
 namespace {
@@ -172,6 +173,292 @@ void LowerSemantics(std::string& text) {
             "(screenSpace.xy + framebufferTile.xy) * noise_scale");
 }
 
+// Fast3D combiner inputs are 8-bit colors over 255 and its textures are unorm,
+// so both lie in [0, 1]. A combiner WRAP whose operand provably stays inside
+// [low, high) is the identity; most are, and they are a fifth of the ALU.
+struct Range {
+    double low, high;
+};
+struct Value {
+    Range rgb, a; // A scalar has rgb == a.
+};
+const Range Unit = {0.0, 1.0};
+
+Range Hull(const Range& x, const Range& y) {
+    const Range r = {x.low < y.low ? x.low : y.low, x.high > y.high ? x.high : y.high};
+    return r;
+}
+
+bool Apply(char op, const Range& x, const Range& y, Range& out) {
+    if (op == '/') {
+        if (y.low <= 0.0)
+            return false;
+        const Range inverse = {1.0 / y.high, 1.0 / y.low};
+        return Apply('*', x, inverse, out);
+    }
+    if (op == '+') {
+        out.low = x.low + y.low;
+        out.high = x.high + y.high;
+    } else if (op == '-') {
+        out.low = x.low - y.high;
+        out.high = x.high - y.low;
+    } else {
+        const double p[] = {x.low * y.low, x.low * y.high, x.high * y.low, x.high * y.high};
+        out.low = out.high = p[0];
+        for (int i = 1; i < 4; ++i) {
+            out.low = p[i] < out.low ? p[i] : out.low;
+            out.high = p[i] > out.high ? p[i] : out.high;
+        }
+    }
+    return true;
+}
+
+bool Apply(char op, const Value& x, const Value& y, Value& out) {
+    return Apply(op, x.rgb, y.rgb, out.rgb) && Apply(op, x.a, y.a, out.a);
+}
+
+// Reads [-]digits[.digits] without the CRT, so the Xbox and the offline shader
+// pack generator lower byte for byte alike (their sscanf/strtod differ).
+bool ReadNumber(const std::string& text, size_t& at, double& out) {
+    const bool negative = at < text.size() && text[at] == '-';
+    size_t i = at + (negative ? 1 : 0), digits = 0;
+    double value = 0.0, scale = 1.0;
+    for (; i < text.size() && std::isdigit(static_cast<unsigned char>(text[i])); ++i, ++digits)
+        value = value * 10.0 + (text[i] - '0');
+    if (i < text.size() && text[i] == '.')
+        for (++i; i < text.size() && std::isdigit(static_cast<unsigned char>(text[i])); ++i, ++digits)
+            value += (text[i] - '0') * (scale *= 0.1);
+    if (!digits)
+        return false;
+    out = negative ? -value : value;
+    at = i;
+    return true;
+}
+
+// Bounds one combiner formula as Fast3D's append_formula spells it.
+class RangeParser {
+public:
+    RangeParser(const std::string& text, const Value* texel) : text_(text), at_(0), texel_(texel) {}
+    bool Parse(Value& out) {
+        if (!Sum(out))
+            return false;
+        Skip();
+        return at_ == text_.size();
+    }
+
+private:
+    void Skip() {
+        while (at_ < text_.size() && text_[at_] == ' ')
+            ++at_;
+    }
+    bool Take(char c) {
+        Skip();
+        if (at_ < text_.size() && text_[at_] == c) {
+            ++at_;
+            return true;
+        }
+        return false;
+    }
+    bool Sum(Value& out) {
+        if (!Product(out))
+            return false;
+        for (;;) {
+            const char op = Take('+') ? '+' : Take('-') ? '-' : 0;
+            Value right;
+            if (!op)
+                return true;
+            if (!Product(right) || !Apply(op, out, right, out))
+                return false;
+        }
+    }
+    bool Product(Value& out) {
+        if (!Unary(out))
+            return false;
+        for (;;) {
+            const char op = Take('*') ? '*' : Take('/') ? '/' : 0;
+            Value right;
+            if (!op)
+                return true;
+            if (!Unary(right) || !Apply(op, out, right, out))
+                return false;
+        }
+    }
+    bool Unary(Value& out) {
+        if (!Take('-'))
+            return Atom(out);
+        const Value zero = {{0.0, 0.0}, {0.0, 0.0}};
+        Value operand;
+        return Unary(operand) && Apply('-', zero, operand, out);
+    }
+    bool Arguments(Value* out, unsigned capacity, unsigned& count) {
+        count = 0;
+        if (!Take('('))
+            return false;
+        do {
+            if (count == capacity || !Sum(out[count++]))
+                return false;
+        } while (Take(','));
+        return Take(')');
+    }
+    bool Atom(Value& out) {
+        if (Take('(')) {
+            return Sum(out) && Take(')');
+        }
+        Skip();
+        const size_t begin = at_;
+        double number = 0.0;
+        if (at_ < text_.size() && text_[at_] != '-' && ReadNumber(text_, at_, number)) {
+            const Range r = {number, number};
+            out.rgb = out.a = r;
+            return true;
+        }
+        while (at_ < text_.size() &&
+               (std::isalnum(static_cast<unsigned char>(text_[at_])) || text_[at_] == '_' || text_[at_] == '.'))
+            ++at_;
+        const std::string name = text_.substr(begin, at_ - begin);
+        if (name == "random") {
+            // frac(sin(...) * k): skip the seed expression.
+            unsigned depth = 0;
+            do {
+                if (at_ == text_.size())
+                    return false;
+                depth += text_[at_] == '(';
+                depth -= text_[at_] == ')';
+                ++at_;
+            } while (depth);
+            out.rgb = out.a = Unit;
+            return true;
+        }
+        Value args[4];
+        unsigned count = 0;
+        if (name == "lerp") {
+            if (!Arguments(args, 3, count) || count != 3)
+                return false;
+            Range* channel[2] = {&out.rgb, &out.a};
+            const Range* from[2] = {&args[0].rgb, &args[0].a};
+            const Range* to[2] = {&args[1].rgb, &args[1].a};
+            const Range* weight[2] = {&args[2].rgb, &args[2].a};
+            for (int i = 0; i < 2; ++i) {
+                if (weight[i]->low >= 0.0 && weight[i]->high <= 1.0) {
+                    *channel[i] = Hull(*from[i], *to[i]);
+                    continue;
+                }
+                Range delta, scaled;
+                if (!Apply('-', *to[i], *from[i], delta) || !Apply('*', *weight[i], delta, scaled) ||
+                    !Apply('+', *from[i], scaled, *channel[i]))
+                    return false;
+            }
+            return true;
+        }
+        if (name == "float3" || name == "float4") {
+            if (!Arguments(args, 4, count))
+                return false;
+            if (count == 1) {
+                out = args[0];
+            } else if (name == "float4" && count == 2) {
+                out.rgb = args[0].rgb;
+                out.a = args[1].a;
+            } else if (count == (name == "float4" ? 4u : 3u)) {
+                out.rgb = Hull(Hull(args[0].rgb, args[1].rgb), args[2].rgb);
+                out.a = name == "float4" ? args[3].a : out.rgb;
+            } else {
+                return false;
+            }
+            return true;
+        }
+        const size_t dot = name.find('.');
+        const std::string base = name.substr(0, dot), swizzle = dot == std::string::npos ? "" : name.substr(dot);
+        if ((base.size() == 7 && base.compare(0, 6, "texVal") == 0 && std::isdigit(static_cast<unsigned char>(base[6]))) ||
+            name.compare(0, 11, "input.input") == 0) {
+            out.rgb = out.a = Unit;
+            return true;
+        }
+        if (base != "texel" || !texel_)
+            return false;
+        if (swizzle == ".a") {
+            out.rgb = out.a = texel_->a;
+        } else if (swizzle == ".rgb") {
+            out.rgb = out.a = texel_->rgb;
+        } else if (swizzle.empty()) {
+            out = *texel_;
+        } else {
+            return false;
+        }
+        return true;
+    }
+
+    const std::string& text_;
+    size_t at_;
+    const Value* texel_;
+};
+
+bool Inside(const Range& r, double low, double high) {
+    return low < r.low && r.high < high;
+}
+
+// Drops identity WRAPs between the texel declaration and the final clamp.
+// Any statement it does not recognise leaves the shader unchanged.
+void FoldCombinerWraps(std::string& text) {
+    const bool vector = text.find("float4 texel;") != std::string::npos;
+    const size_t start = text.find(vector ? "float4 texel;" : "float3 texel;");
+    const size_t end = text.find("texel = clamp(texel, 0.0, 1.0);");
+    if (start == std::string::npos || end == std::string::npos || end < start)
+        return;
+    const std::string body = text.substr(start, end - start);
+    const std::string alphaTest = "if (texel.a > ", alphaPass = ") texel.a = 1.0; else clip(-1.0);";
+    std::string out;
+    Value texel;
+    bool known = false;
+    for (size_t begin = 0, line = 0; begin <= body.size(); ++line) {
+        size_t next = body.find('\n', begin);
+        if (next == std::string::npos)
+            next = body.size();
+        const std::string raw = body.substr(begin, next - begin);
+        begin = next + 1;
+        size_t first = raw.find_first_not_of(' '), last = raw.find_last_not_of(' ');
+        const std::string s = first == std::string::npos ? "" : raw.substr(first, last - first + 1);
+        bool keep = true;
+        if (line == 0 || s.empty()) {
+        } else if (s.find("WRAP") != std::string::npos) {
+            const char* groups[] = {"", ".rgb", ".a"};
+            bool matched = false;
+            for (int g = 0; g < 3 && !matched; ++g) {
+                const std::string prefix =
+                    std::string("texel") + groups[g] + " = WRAP(texel" + groups[g] + ", ";
+                double low = 0.0, high = 0.0;
+                size_t at = prefix.size();
+                if (s.compare(0, prefix.size(), prefix) != 0 || !ReadNumber(s, at, low) ||
+                    s.compare(at, 2, ", ") != 0 || !ReadNumber(s, at += 2, high) || s.compare(at, std::string::npos, ");") != 0)
+                    continue;
+                matched = true;
+                const bool rgb = g != 2 && !(known && Inside(texel.rgb, low, high));
+                const bool alpha = g != 1 && !(known && Inside(texel.a, low, high));
+                const Range wrapped = {low, high};
+                keep = rgb || alpha;
+                if (known && rgb)
+                    texel.rgb = wrapped;
+                if (known && alpha)
+                    texel.a = vector ? wrapped : texel.rgb;
+            }
+            if (!matched)
+                return;
+        } else if (s.compare(0, 8, "texel = ") == 0 && s[s.size() - 1] == ';') {
+            known = RangeParser(s.substr(8, s.size() - 9), known ? &texel : NULL).Parse(texel);
+            if (known && !vector)
+                texel.a = texel.rgb;
+        } else if (s.compare(0, alphaTest.size(), alphaTest) == 0 && s.size() > alphaPass.size() &&
+                   s.compare(s.size() - alphaPass.size(), alphaPass.size(), alphaPass) == 0) {
+            const Range one = {1.0, 1.0};
+            texel.a = one;
+        } else {
+            return;
+        }
+        if (keep)
+            out += raw + (begin <= body.size() ? "\n" : "");
+    }
+    text.replace(start, end - start, out);
+}
+
 bool RejectUnsupported(const std::string& text, std::string& error) {
     const char* unsupported[] = {"Texture2D", "SamplerState", ".Sample(",   ".GetDimensions(",
                                  "cbuffer ",  "register(t",   "register(b", "SV_"};
@@ -248,9 +535,30 @@ bool Shipyard_LowerShader(const std::string& hlsl, std::string& lowered, std::st
                      "\n    result.position.z *= rasterDepthInfo.x;");
         text = "float4 rasterDepthInfo : register(c14);\n" + text;
     }
+    // Three-point weights the lower triangle's texels (1-x-y, x, y) and the
+    // upper's (x+y-1, 1-y, 1-x). Fetching all four from one point with fetch
+    // offsets moves the coordinate math off the ALU; the shader is ALU-bound.
+    Block(text, "float4 tex2D3PointFilter(",
+          "float4 tex2D3PointFilter(in Texture2D tex, in SamplerState tSampler, in float2 texCoord, "
+          "in float2 texSize) {\n"
+          "    float2 f = frac(texCoord * texSize - float2(0.5, 0.5));\n"
+          "    float2 base = texCoord - f / texSize;\n"
+          "    float s = f.x + f.y - 1.0;\n"
+          "    float2 w = max(float2(s, -s), 0.0);\n"
+          "    float2 n = f - w.x;\n"
+          "    float4 t00, t10, t01, t11;\n"
+          "    asm {\n"
+          "        tfetch2D t00, base, tex, OffsetX=0.0, OffsetY=0.0\n"
+          "        tfetch2D t10, base, tex, OffsetX=1.0, OffsetY=0.0\n"
+          "        tfetch2D t01, base, tex, OffsetX=0.0, OffsetY=1.0\n"
+          "        tfetch2D t11, base, tex, OffsetX=1.0, OffsetY=1.0\n"
+          "    };\n"
+          "    return t00 * w.y + t10 * n.x + t01 * n.y + t11 * w.x;\n"
+          "}");
     LowerTextureSlots(text);
     LowerTextureInfo(text);
     LowerSemantics(text);
+    FoldCombinerWraps(text);
     if (!RejectUnsupported(text, error)) {
         return false;
     }

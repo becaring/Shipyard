@@ -15,6 +15,7 @@ class RasterBoundsTests(unittest.TestCase):
     def test_target_bind_and_tiling_restarts_keep_draw_bounds(self):
         source = core_source()
         methods = function(source, "void BeginFramebuffer() {") + "\n"
+        methods += function(source, "void TakeDepthRegions(") + "\n"
         methods += function(source, "void FinishFramebuffer(bool preserveDepth, bool preserveColor) {")
         methods += "\n" + function(source, "void Viewport(int x, int y, int w, int h) {")
         methods += "\n" + function(source, "void Scissor(int x, int y, int w, int h) {")

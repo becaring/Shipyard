@@ -260,6 +260,12 @@ void CacheCompleted(bool ok) {
 void CodeCache::Store(const std::string& key, const void* code, size_t size) {
     Load();
     ++compiled;
+    if (entries.size() >= MaxRecords || bytes + sizeof(DWORD) * 3 + key.size() + size > Limit) {
+        // Full, mostly of earlier builds' programs: start over with this build's.
+        entries.clear();
+        bytes = 5 * sizeof(DWORD);
+        appendable = false;
+    }
     if (!configured || !size || (size & 3) || size > MaxCode || key.empty() ||
         key.size() > MaxKey || entries.size() >= MaxRecords ||
         bytes + sizeof(DWORD) * 3 + key.size() + size > Limit || entries.find(key) != entries.end())

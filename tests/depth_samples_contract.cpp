@@ -8,6 +8,7 @@
 #include <set>
 #include <unordered_map>
 #include <utility>
+#include <vector>
 #include "fast3d/depth_samples.h"
 #include "xenos/depth_samples.h"
 namespace ShipyardXenos = Fast::ShipyardXenos;
@@ -27,6 +28,7 @@ typedef uint32_t DWORD;
 typedef int32_t LONG;
 struct POINT { LONG x, y; };
 struct RECT { LONG left, top, right, bottom; };
+struct D3DRECT { LONG x1, y1, x2, y2; };
 struct D3DLOCKED_RECT { void* pBits; };
 struct XGTEXTURE_DESC { unsigned Format; };
 const unsigned D3DLOCK_READONLY = 1;
@@ -47,8 +49,19 @@ struct Framebuffer {
     IDirect3DTexture9* depth_samples[1];
     uint32_t width, height, samples;
     bool depth_stored;
+    std::vector<D3DRECT> depth_regions;
 } buffers[2];
-struct Published { IDirect3DTexture9* texture; int framebuffer; uint32_t width, height; } published_depth;
+struct Published {
+    IDirect3DTexture9* texture;
+    int framebuffer;
+    uint32_t width, height;
+    std::vector<D3DRECT> regions;
+} published_depth;
+// Empty resolved regions mean a full resolve, so every read is resolved.
+struct DepthReadPoint { int framebuffer; LONG x, y; };
+std::vector<DepthReadPoint> depth_read_points;
+bool depth_full_resolve_next = true;
+unsigned depth_region_misses;
 struct Timing {
     uint64_t depthReadTicks, depthLockTicks;
     unsigned depthReadCalls, depthLockCalls, depthSamples;
@@ -173,6 +186,9 @@ IDirect3DTexture9 target = {57}, published = {98};
 void Setup(unsigned mode) {
     trace = {}; timing_counts = {};
     active_fb = int(mode & 1);
+    // Production clears the points at each resolve and keeps their capacity.
+    depth_read_points.clear();
+    depth_read_points.reserve(64);
     buffers[0] = { {&target}, 1280, 720, 1, (mode & 2) != 0 };
     buffers[1] = { {&target}, 1920, 1080, 4, (mode & 2) != 0 };
     published_depth = {(mode & 4) ? &published : nullptr, int(mode & 1), 640, 480};

@@ -68,6 +68,8 @@ float primitive_depth = 0, uploaded_depth = 0;
 unsigned depthCalls = 0;
 unsigned draw_sampler_mask = 0;
 struct NativeState {
+    void* texture[6];
+    bool texture_valid[6];
     unsigned sampler[6][5], sampler_key[6];
     float constants[12], binding_constants[24];
     bool sampler_valid[6], constants_valid, alpha_valid, binding_constants_valid;

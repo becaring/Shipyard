@@ -31,7 +31,7 @@ class PresentationDepthDiscardTests(unittest.TestCase):
             self.assertIn(guard, end)
         self.assertLess(end.index('discard_presentation_color_on_end = false;'),
                         end.index('BeginFramebuffer();'))
-        self.assertIn('b.stored = preserveColor;', core)
+        self.assertIn('b.stored = preserveColor && !finish_color_target;', core)
 
 
 if __name__ == '__main__':

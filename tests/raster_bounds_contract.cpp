@@ -126,9 +126,18 @@ struct Framebuffer {
     void *color, *depth, *image, *color_samples[4], *depth_samples[4];
     bool stored, depth_stored;
     unsigned width, height, samples;
-    std::vector<D3DRECT> tiles;
+    std::vector<D3DRECT> tiles, depth_regions;
 };
 std::vector<Framebuffer> buffers(1);
+// No recorded read points: every depth resolve covers the whole target.
+const LONG D3DRESOLVEALIGNMENT = 32;
+struct DepthReadPoint {
+    int framebuffer;
+    LONG x, y;
+};
+std::vector<DepthReadPoint> depth_read_points;
+bool depth_full_resolve_next = true;
+void* finish_color_target;
 int active_fb = 0;
 bool live_framebuffer = false;
 void* presentation_color = (void*)1;
