@@ -132,8 +132,66 @@ def lower(text, parser, walk, expected_tables, *, composed_dispatch=False):
         source = source[:start] + replacement + source[end:]
     if not composed_dispatch:
         return source.decode(), tables
-    text = source.decode()
-    start = text.index("static constexpr std::array ucode_handlers = {")
+    return _compose(source.decode()), tables
+
+
+def _block(lines, what):
+    """CALL from an exact `if (CALL) {` / `return;` / `}` dispatch block."""
+    match = re.fullmatch(r"( +)if \((.*)\) \{", lines[0]) if len(lines) == 3 else None
+    if not match or lines[1] != match[1] + "    return;" or lines[2] != match[1] + "}":
+        raise ValueError("Opcode dispatch block changed: " + what)
+    return match[2]
+
+
+def _branches(region):
+    """Split the OTR/RDP/ucode/invalid chain into (condition, body lines)."""
+    branches = []
+    for line in region.rstrip("\n").split("\n"):
+        head = re.fullmatch(r"    (?:if|\} else if) \((.*)\) \{|    \} else \{|    \}", line)
+        if head:
+            branches.append((head[1] if head[1] is not None else line.strip(), []))
+        elif not branches:
+            raise ValueError("Opcode dispatch chain changed")
+        else:
+            branches[-1][1].append(line)
+    if [b[0] for b in branches][:2] != ["otrHandlers.contains(opcode)", "rdpHandlers.contains(opcode)"] or \
+            len(branches) != 5 or branches[3][0] != "} else {" or branches[4] != ("}", []):
+        raise ValueError("Opcode dispatch chain changed")
+    return branches[:4]
+
+
+def _guard(lines):
+    """Hoist a consumer's OTR argument guard ahead of the composed lookup.
+
+    The guard's own opcode tests run first, so other commands pay nothing;
+    it still applies only to commands the OTR table owns, as before.
+    """
+    body = [line[4:] if line.startswith("        ") else line for line in lines]
+    first = next((i for i, line in enumerate(body) if line.startswith("    if (")), None)
+    if first is None:
+        if any(line.strip() and not line.strip().startswith("//") for line in body):
+            raise ValueError("Opcode dispatch guard changed")
+        return ""
+    last = next(i for i in range(first, len(body)) if body[i].endswith(") {"))
+    if body[-1] != "    }" or any(line.strip() and not line.strip().startswith("//") for line in body[:first]):
+        raise ValueError("Opcode dispatch guard changed")
+    body[first] = body[first].replace("    if (", "    if ((", 1)
+    body[last] = body[last][: -len(") {")] + ") && otrHandlers.contains(opcode)) {"
+    return "\n".join(body) + "\n"
+
+
+def _compose(text):
+    """Index one composed OTR > RDP > ucode table per command.
+
+    Every consumer statement in the original chain is kept: OTR argument
+    guards, dispatch wrappers (pipeline stamps) and unhandled-opcode bodies.
+    An invalid ucode keeps the independent OTR/RDP lookups.
+    """
+    decl = re.search(r"static (constexpr std::array ucode_handlers|const UcodeHandler\* const ucode_handlers\[\]) = \{",
+                     text)
+    if not decl or len(re.findall(r"\bucode_handlers(?:\[\])? = \{", text)) != 1:
+        raise ValueError("Opcode dispatch ucode table changed")
+    start = decl.start()
     end = text.index("\n};", start) + len("\n};")
     handlers = text[start:end]
     for base, expected in [("f3d", 2), ("f3dex", 2), ("f3dex2", 1), ("s2dex", 1)]:
@@ -141,12 +199,9 @@ def lower(text, parser, walk, expected_tables, *, composed_dispatch=False):
         if handlers.count(old) != expected:
             raise ValueError("Opcode dispatch ucode inventory drift: " + base)
         handlers = handlers.replace(old, "&" + base + "Dispatch")
-    handlers = handlers.replace(
-        "static constexpr std::array ucode_handlers = {",
-        "static const std::array<const UcodeHandler*, 6> ucode_handlers = { {",
-        1,
-    )
-    handlers = handlers[:-3] + "\n} };"
+    if decl[1].startswith("constexpr"):
+        handlers = handlers.replace(decl[0], "static const std::array<const UcodeHandler*, 6> ucode_handlers = { {", 1)
+        handlers = handlers[:-3] + "\n} };"
     dispatch = """static const UcodeHandler f3dDispatch(otrHandlers, rdpHandlers, f3dHandlers);
 static const UcodeHandler f3dexDispatch(otrHandlers, rdpHandlers, f3dexHandlers);
 static const UcodeHandler f3dex2Dispatch(otrHandlers, rdpHandlers, f3dex2Handlers);
@@ -157,8 +212,13 @@ static const UcodeHandler s2dexDispatch(otrHandlers, rdpHandlers, s2dexHandlers)
     name_start = text.index("const char* GfxGetOpcodeName(int8_t opcode) {")
     name_end = text.index("\n}", name_start)
     old_name = text[name_start:name_end]
+    if old_name.count("otrHandlers.contains(opcode)") != 1 or old_name.count("rdpHandlers.contains(opcode)") != 1:
+        raise ValueError("Opcode name dispatch anchor changed")
+    size = re.findall(r"if \((ucode_handler_index < .+)\) \{", old_name)
+    if len(size) != 1:
+        raise ValueError("Opcode name dispatch anchor changed")
     new_name = """const char* GfxGetOpcodeName(int8_t opcode) {
-    if (ucode_handler_index < ucode_handlers.size()) {
+    if (%s) {
         const auto& handler = ucode_handlers[ucode_handler_index]->at(opcode);
         if (handler.first) return handler.first;
         SPDLOG_CRITICAL("Unhandled OP code: 0x{:X}, for loaded ucode: {}", (uint8_t)opcode,
@@ -170,35 +230,46 @@ static const UcodeHandler s2dexDispatch(otrHandlers, rdpHandlers, s2dexHandlers)
         SPDLOG_CRITICAL("Unhandled OP code: 0x{:X}, invalid ucode: {}", (uint8_t)opcode,
                         (uint32_t)ucode_handler_index);
     }
-    return nullptr;"""
-    if old_name.count("otrHandlers.contains(opcode)") != 1 or old_name.count("rdpHandlers.contains(opcode)") != 1:
-        raise ValueError("Opcode name dispatch anchor changed")
+    return nullptr;""" % size[0]
     text = text[:name_start] + new_name + text[name_end:]
-    step_start = text.index("static void gfx_step() {")
+    steps = list(re.finditer(r"static void gfx_step\([^)]*\) \{", text))
+    if len(steps) != 1:
+        raise ValueError("Opcode step anchor changed")
+    step_start = steps[0].start()
     step_end = text.index("\n}", step_start)
     step = text[step_start:step_end]
     dispatch_start = step.index("    if (otrHandlers.contains(opcode)) {")
     dispatch_end = step.index("\n    ++cmd;", dispatch_start)
-    new_step = """    if (ucode_handler_index < ucode_handlers.size()) {
+    (_, otr), (_, rdp), (ucode_size, ucode), (_, invalid) = _branches(step[dispatch_start:dispatch_end])
+    split = max(i for i, line in enumerate(otr) if line.startswith("        if (") and "otrHandlers.at(opcode).second" in line)
+    otr_call = _block(otr[split:], "OTR")
+    rdp_call = _block(rdp, "RDP")
+    owned = "        if (ucode_handlers[ucode_handler_index]->contains(opcode)) {"
+    if not ucode_size.startswith("ucode_handler_index < ") or ucode[0] != owned or ucode[4] != "        } else {" or \
+            ucode[-1] != "        }":
+        raise ValueError("Opcode dispatch ucode branch changed")
+    ucode_call = _block(ucode[1:4], "ucode")
+    if ucode_call.count("ucode_handlers[ucode_handler_index]->at(opcode).second") != 1:
+        raise ValueError("Opcode dispatch ucode call changed")
+    ucode_call = ucode_call.replace("ucode_handlers[ucode_handler_index]->at(opcode).second", "handler.second")
+    new_step = _guard(otr[:split]) + """    if (%s) {
         const auto& handler = ucode_handlers[ucode_handler_index]->at(opcode);
         if (handler.first) {
-            if (handler.second(&cmd)) return;
+            if (%s) return;
         } else {
-            SPDLOG_CRITICAL("Unhandled OP code: 0x{:X}, for loaded ucode: {}", (uint8_t)opcode,
-                            (uint32_t)ucode_handler_index);
+%s
         }
     } else {
         // Invalid ucode retains the independent OTR/RDP dispatch paths.
         if (otrHandlers.contains(opcode)) {
-            if (otrHandlers.at(opcode).second(&cmd)) return;
+            if (%s) return;
         } else if (rdpHandlers.contains(opcode)) {
-            if (rdpHandlers.at(opcode).second(&cmd)) return;
+            if (%s) return;
         } else {
-            SPDLOG_CRITICAL("Unhandled OP code: 0x{:X}, invalid ucode: {}", (uint8_t)opcode,
-                            (uint32_t)ucode_handler_index);
+%s
         }
     }
-"""
+""" % (ucode_size, ucode_call, "\n".join(ucode[5:-1]), otr_call, rdp_call,
+       "\n".join(("    " + line) if line.strip() and not line.startswith("#") else line for line in invalid))
     step = step[:dispatch_start] + new_step + step[dispatch_end:]
-    text = text[:step_start] + step + text[step_end:]
-    return text, tables
+    return text[:step_start] + step + text[step_end:]

@@ -37,6 +37,135 @@ def synchronous_cache_hits(source):
     return source[:start] + body + source[end:]
 
 
+def synchronous_misses(source):
+    """Load a synchronous miss on the calling thread instead of a pool worker.
+
+    Handing it to a worker and blocking on the future costs two cross-core
+    wakeups per resource and waits behind the worker's current (prefetch) job;
+    a pool task loading a resource with one worker would deadlock. The
+    worker's body is LoadResourceProcess itself, so this keeps its cache,
+    alternate and first-publish rules, and the asynchronous normalization's
+    loadExact and init-data policy for signed paths. Archive reads must be
+    safe on any thread: a zip handle pool, or lus_resources.o2r_zip_mutex.
+    Run after synchronous_cache_hit(s).
+    """
+    keep = 'ResourceIdentifier(newFilePath, identifier.Owner, identifier.Parent), loadExact, priority'
+    if source.count('LoadResourceAsync(' + keep + ');') == 1:
+        signed = ''
+    elif source.count('LoadResourceAsync(' + keep + ', initData);') == 1:
+        signed = ', initData'
+    else:
+        raise ValueError('asynchronous resource normalization policy changed')
+    signature = 'std::shared_ptr<IResource> ResourceManager::LoadResource(const ResourceIdentifier& identifier, bool loadExact,'
+    start = source.index(signature)
+    end = source.index('\n}', start) + 2
+    body = _once(source[start:end],
+        '    auto resource = LoadResourceAsync(identifier, loadExact, BS::pr::highest, initData).get();',
+        '''    std::shared_ptr<IResource> resource;
+    if (OtrSignatureCheck(identifier.Path.c_str())) {
+        std::string normalizedPath = identifier.Path.substr(7);
+        while (OtrSignatureCheck(normalizedPath.c_str())) normalizedPath.erase(0, 7);
+        resource = LoadResourceProcess(ResourceIdentifier(normalizedPath, identifier.Owner, identifier.Parent),
+                                       loadExact''' + signed + ''');
+    } else {
+        resource = LoadResourceProcess(identifier, loadExact, initData);
+    }''')
+    return source[:start] + body + source[end:]
+
+
+def _replace_function(source, signature, replacement):
+    if source.count(signature) != 1:
+        raise ValueError('resource lookup function changed: ' + signature[:70])
+    begin = source.index(signature)
+    end = source.index('\n}', begin) + 2
+    return source[:begin] + replacement + source[end:]
+
+
+BORROWED_ALTERNATE = '''    const std::string& prefix = IResource::gAltAssetPrefix;
+    if (!loadExact && mAltAssetsEnabled && PATH.compare(0, prefix.size(), prefix) != 0) {
+        ResourceIdentifier alternate(PATH.c_str(), OWNER, PARENT, ResourceIdentifier::BorrowedLookup(),
+                                     prefix.data(), prefix.size());
+        if (alternate.mBorrowedLength != PATH.size()) {
+            alternate.mBorrowedLength = PATH.size();
+            alternate.mHash = alternate.CalculateHash();
+        }
+        const auto found = mResourceCache.find(alternate);
+        if (found != mResourceCache.end() &&
+            xbox_compat::holds_alternative<std::shared_ptr<IResource>>(found->second))
+            return found->second;
+    }
+'''
+
+
+def borrowed_lookup_keys(source):
+    """Borrow cache keys for CheckCache, GetCachedResource(string) and LoadResource(string) hits.
+
+    One lock covers the alternate and base probes. Alternate precedence, dirty
+    fallback (GetCachedResource) and owner/archive identity are unchanged;
+    signed paths and misses keep the owned-key route. Run after borrowed_cache_source.
+    """
+    if 'ResourceIdentifier::BorrowedLookup()' not in source:
+        raise ValueError('borrowed lookup keys require borrowed_cache_source')
+    lock = '    const Shipyard::Async::lock_guard<Shipyard::Async::mutex> lock(mMutex);\n'
+    source = _replace_function(source,
+        'ResourceManager::CheckCache(const ResourceIdentifier& identifier, bool loadExact)',
+        'ResourceManager::CheckCache(const ResourceIdentifier& identifier, bool loadExact) {\n' + lock +
+        BORROWED_ALTERNATE.replace('PATH', 'identifier.Path').replace('OWNER', 'identifier.Owner')
+                          .replace('PARENT', 'identifier.Parent') + '''    const auto found = mResourceCache.find(identifier);
+    if (found == mResourceCache.end()) return ResourceLoadError::NotCached;
+    return found->second;
+}''')
+    source = _replace_function(source,
+        'ResourceManager::CheckCache(const std::string& filePath, bool loadExact)',
+        'ResourceManager::CheckCache(const std::string& filePath, bool loadExact) {\n' + lock +
+        BORROWED_ALTERNATE.replace('PATH', 'filePath').replace('OWNER', 'mDefaultCacheOwner')
+                          .replace('PARENT', 'mDefaultCacheArchive') + '''    ResourceIdentifier key(filePath.c_str(), mDefaultCacheOwner, mDefaultCacheArchive,
+                           ResourceIdentifier::BorrowedLookup());
+    if (key.mBorrowedLength != filePath.size()) {
+        key.mBorrowedLength = filePath.size();
+        key.mHash = key.CalculateHash();
+    }
+    const auto found = mResourceCache.find(key);
+    if (found == mResourceCache.end()) return ResourceLoadError::NotCached;
+    return found->second;
+}''')
+    signature = 'std::shared_ptr<IResource> ResourceManager::GetCachedResource(const std::string& filePath, bool loadExact)'
+    source = _replace_function(source, signature, signature + ''' {
+    return GetCachedResource(CheckCache(filePath, loadExact));
+}''')
+    signature = 'std::shared_ptr<IResource> ResourceManager::LoadResource(const std::string& filePath, bool loadExact,'
+    begin = source.index(signature)
+    end = source.index('\n}', begin)
+    forward = 'return LoadResource(ResourceIdentifier(filePath, mDefaultCacheOwner, mDefaultCacheArchive), loadExact, initData);'
+    if source[begin:end].count(forward) != 1:
+        raise ValueError('string resource load forwarding changed')
+    return source[:begin] + source[begin:end].replace('    ' + forward, '''    if (!OtrSignatureCheck(filePath.c_str())) {
+        std::shared_ptr<IResource> cached = GetCachedResource(filePath, loadExact);
+        if (cached) return cached;
+    }
+    ''' + forward) + source[end:]
+
+
+def recorded_misses(source):
+    """A recorded NotFound returns before probing the archive again.
+
+    Archive contents do not change under a recorded miss: archives are added
+    at boot, a written file already had an archive, and unloads erase the
+    entry first. Only a genuine missing file may record NotFound, so archive
+    reads must never fail transiently (see lus_resources).
+    """
+    anchor = '    // Check for resource load errors which can indicate an alternate asset.\n'
+    if source.count(anchor) != 1 or 'auto cacheLine = CheckCache(identifier, loadExact);' not in source:
+        raise ValueError('resource miss shortcut anchor changed')
+    return _once(source, anchor, '''    // Archives do not change under a recorded miss; unloads erase the entry first.
+    if (xbox_compat::holds_alternative<ResourceLoadError>(cacheLine) &&
+        xbox_compat::get<ResourceLoadError>(cacheLine) == ResourceLoadError::NotFound) {
+        return nullptr;
+    }
+
+''' + anchor)
+
+
 def borrowed_cache_header(source):
     source = '#include "resources/path_span.h"\n' + source
     source = _once(source,
@@ -229,15 +358,43 @@ def lookup_generation_header(source):
         '    volatile LONG mXboxLookupGeneration;\n    bool mAltAssetsEnabled;')
 
 
-def lookup_generation_source(source):
+def lookup_generation_source(source, *, stable_fills=True):
+    """Advance the lookup generation whenever a settled path->resource answer can change.
+
+    Generation-keyed caches store only positive answers and also check IsDirty().
+    With stable_fills, a missing-file NotFound and a first fill of a base path keep
+    the generation: no settled lookup returned a resource for that key, and an
+    alternate answer outranks its base. A first alternate fill, replacing a
+    different resource, unloads, dirtying and alt toggles still advance it.
+    stable_fills=False keeps the older bump-on-every-load behaviour.
+    """
     source = _once(source, 'ResourceManager::ResourceManager() : mAltAssetsEnabled(false)',
         'ResourceManager::ResourceManager() : mXboxLookupGeneration(1), mAltAssetsEnabled(false)')
-    source = _once(source, '        mResourceCache[identifier] = ResourceLoadError::NotFound;\n        return nullptr;',
-        '        mResourceCache[identifier] = ResourceLoadError::NotFound;\n'
-        '        InterlockedIncrement(&mXboxLookupGeneration);\n        return nullptr;')
-    source = _once(source, '    }\n\n    if (resource != nullptr) {\n        SPDLOG_TRACE("Loaded Resource',
-        '        InterlockedIncrement(&mXboxLookupGeneration);\n    }\n\n'
-        '    if (resource != nullptr) {\n        SPDLOG_TRACE("Loaded Resource')
+    if stable_fills:
+        source = _once(source, '        // Set the cache to the loaded resource\n',
+            '        // An address only: owning the replaced resource would destroy it under the lock.\n'
+            '        const IResource* xboxPrevious = NULL;\n'
+            '        {\n'
+            '            const auto previous = mResourceCache.find(identifier);\n'
+            '            if (previous != mResourceCache.end() &&\n'
+            '                xbox_compat::holds_alternative<std::shared_ptr<IResource>>(previous->second))\n'
+            '                xboxPrevious = xbox_compat::get<std::shared_ptr<IResource>>(previous->second).get();\n'
+            '        }\n'
+            '        // Set the cache to the loaded resource\n')
+        source = _once(source, '    }\n\n    if (resource != nullptr) {\n        SPDLOG_TRACE("Loaded Resource',
+            '        // A first alternate fill changes the answer for its base path.\n'
+            '        if (xboxPrevious ? xboxPrevious != resource.get() :\n'
+            '            resource != nullptr && identifier.Path.compare(0, IResource::gAltAssetPrefix.size(),\n'
+            '                                                           IResource::gAltAssetPrefix) == 0)\n'
+            '            InterlockedIncrement(&mXboxLookupGeneration);\n    }\n\n'
+            '    if (resource != nullptr) {\n        SPDLOG_TRACE("Loaded Resource')
+    else:
+        source = _once(source, '        mResourceCache[identifier] = ResourceLoadError::NotFound;\n        return nullptr;',
+            '        mResourceCache[identifier] = ResourceLoadError::NotFound;\n'
+            '        InterlockedIncrement(&mXboxLookupGeneration);\n        return nullptr;')
+        source = _once(source, '    }\n\n    if (resource != nullptr) {\n        SPDLOG_TRACE("Loaded Resource',
+            '        InterlockedIncrement(&mXboxLookupGeneration);\n    }\n\n'
+            '    if (resource != nullptr) {\n        SPDLOG_TRACE("Loaded Resource')
     source = _once(source, 'void ResourceManager::DirtyResources(const ResourceFilter& filter) {',
         'void ResourceManager::DirtyResources(const ResourceFilter& filter) {\n'
         '    InterlockedIncrement(&mXboxLookupGeneration);')

@@ -15,6 +15,17 @@ CVARS += "void ConsoleVariable::SetInteger(const char* name, int value) {\n    a
 CVARS += "    if (it != mVariables.end()) it->second->Integer = value;\n}\n}\n"
 
 RESOURCES = """\
+std::shared_ptr<IResource> ResourceManager::LoadResourceProcess(const ResourceIdentifier& identifier, bool loadExact) {
+    auto cachedResource = GetCachedResource(cacheLine);
+    if (cachedResource != nullptr) {
+        return cachedResource;
+    }
+    return resource;
+}
+std::shared_ptr<IResource> ResourceManager::LoadResource(const ResourceIdentifier& identifier, bool loadExact) {
+    auto resource = LoadResourceAsync(identifier, loadExact).get();
+    return resource;
+}
 std::shared_ptr<IResource> ResourceManager::LoadResource(const std::string& path) {
     return resource;
 }
@@ -52,9 +63,38 @@ class OverlapLusTests(unittest.TestCase):
         self.assertEqual(dirty.count("Work(filter);"), 2)
         self.assertIn("        UnloadResourcesProcess(filter);\n    } else {", text)
 
+    def test_forwarded_owners_are_retained_once(self):
+        def body(text, signature):
+            start = text.index(signature)
+            return text[start:text.index("\n}\n", start)]
+        text = overlap_lus.resource_manager(RESOURCES)
+        process = body(text, "ResourceManager::LoadResourceProcess(const ResourceIdentifier&")
+        self.assertIn("        return cachedResource;", process)
+        self.assertIn("return Shipyard_OverlapKeepResource(resource);", process)
+        # A pool worker retains nothing, so the future's result is still retained.
+        load = body(text, "ResourceManager::LoadResource(const ResourceIdentifier&")
+        self.assertIn("return Shipyard_OverlapKeepResource(resource);", load)
+        inline = RESOURCES.replace("LoadResourceAsync(identifier, loadExact).get()",
+                                   "LoadResourceProcess(identifier, loadExact)")
+        load = body(overlap_lus.resource_manager(inline), "ResourceManager::LoadResource(const ResourceIdentifier&")
+        self.assertIn("    return resource;", load)
+        self.assertNotIn("KeepResource", load)
+        with self.assertRaises(ValueError):
+            overlap_lus.resource_manager(RESOURCES.replace("return cachedResource;", "return nullptr;"))
+
     def test_game_texture_clears_run_on_render(self):
         text = overlap_lus.texture_cache_clear("void Interpreter::TextureCacheClear() {\n    mCache.clear();\n}\n")
         self.assertLess(text.index("Shipyard_OverlapRunOnRender"), text.index("mCache.clear();"))
+
+    def test_game_input_blocks_read_the_handoff_snapshot(self):
+        deck = "".join("bool ControlDeck::%sGameInputBlocked() {\n    return ImGui::GetCurrentContext() != 0;\n}\n" % name
+                       for name in ("Gamepad", "Keyboard", "Mouse"))
+        text = overlap_lus.control_deck(deck)
+        for kind, name in enumerate(("Gamepad", "Keyboard", "Mouse")):
+            body = text[text.index(name + "GameInputBlocked() {"):]
+            self.assertLess(body.index("Shipyard_OverlapInputBlocked(%d, &blocked)" % kind), body.index("ImGui::"))
+        with self.assertRaises(ValueError):
+            overlap_lus.control_deck(deck.replace("MouseGameInputBlocked", "MouseBlocked"))
 
 
 if __name__ == "__main__":

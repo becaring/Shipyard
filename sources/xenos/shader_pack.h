@@ -7,30 +7,35 @@ namespace Shipyard {
 namespace Xenos {
 // Prebuilt shader pack: vertex and pixel microcode compiled offline, with the
 // XDK's own D3DX, for every Fast3D program key the offline harvest found.
-// Entries are keyed by the program key itself, so a hit needs no Prism
-// generation, lowering, hashing or file I/O. The pack is read into memory
+// Entries are keyed by the program key itself and the pack is read into memory
 // once. It is written on a PC and read on the console; every integer is
 // stored big-endian.
-//   header: magic, version, _XDK_VER, D3DX_SDK_VERSION, count, probe, 0, 0
+//   header: magic, version, _XDK_VER, D3DX_SDK_VERSION, count, probe, ABI, 0
 //           (u32 each), then the SHA-256 of the probe entry's lowered source
-//   index:  count entries of {shaderId0 (u64); shaderId1, flags, floats,
-//           vertex offset, vertex size, pixel offset, pixel size, checksum
-//           (u32)}, strictly ascending by (shaderId0, shaderId1, flags)
+//   index:  count entries, strictly ascending by (shaderId0, shaderId1, flags)
+//     v2 (40 bytes): shaderId0 (u64); shaderId1, flags, floats, vertex offset,
+//                    vertex size, pixel offset, pixel size, checksum (u32)
+//     v3 (76 bytes): shaderId0, shaderId1 (u64); the seven u32 fields; then
+//                    the SHA-256 of the entry's lowered source
 //   blobs:  microcode at 4-byte aligned offsets; identical code is stored once
-// The probe entry lets the runtime prove, once, that this XEX's Prism builder,
-// template and lowering still produce the source the pack was compiled from.
+// v2 stores a 32-bit shaderId1 and the ABI field as 0. The probe proves once
+// that this XEX's builder, template and lowering produce the pack's sources;
+// v3 source digests let the runtime prove it again for every program it uses.
 struct ShaderPackProgram {
     uint64_t shaderId0;
-    uint32_t shaderId1;
+    uint64_t shaderId1;
     uint32_t flags;
     uint32_t floats;
     uint32_t vertexOffset, vertexSize, pixelOffset, pixelSize;
     uint32_t checksum;
+    uint32_t digestOffset; // v3 source digest in the file; 0 for v2
 };
 const uint32_t ShaderPackMagic = 0x5348504B; // 'SHPK'
-const uint32_t ShaderPackVersion = 2;
+const uint32_t ShaderPackVersion = 3;
+const uint32_t ShaderPackVersion2 = 2;
 const size_t ShaderPackHeaderBytes = 64;
-const size_t ShaderPackEntryBytes = 40;
+const size_t ShaderPackEntryBytes2 = 40;
+const size_t ShaderPackEntryBytes3 = 76;
 const uint32_t ShaderPackMaxEntries = 1u << 20;
 const uint32_t ShaderPackThreePoint = 1u; // FILTER_THREE_POINT
 const uint32_t ShaderPackSrgb = 2u;
@@ -124,10 +129,17 @@ inline uint32_t ShaderPackRead32(const unsigned char* p) {
 inline uint64_t ShaderPackRead64(const unsigned char* p) {
     return ((uint64_t)ShaderPackRead32(p) << 32) | ShaderPackRead32(p + 4);
 }
-inline ShaderPackProgram ShaderPackParseProgram(const unsigned char* p) {
+inline size_t ShaderPackEntryBytes(uint32_t version) {
+    return version == ShaderPackVersion ? ShaderPackEntryBytes3 : ShaderPackEntryBytes2;
+}
+// offset is the entry's position in the file, which starts at bytes.
+inline ShaderPackProgram ShaderPackParseProgram(const unsigned char* bytes, size_t offset, uint32_t version) {
+    const unsigned char* p = bytes + offset;
+    const size_t wide = version == ShaderPackVersion ? 4 : 0;
     ShaderPackProgram program;
     program.shaderId0 = ShaderPackRead64(p);
-    program.shaderId1 = ShaderPackRead32(p + 8);
+    program.shaderId1 = wide ? ShaderPackRead64(p + 8) : ShaderPackRead32(p + 8);
+    p += wide;
     program.flags = ShaderPackRead32(p + 12);
     program.floats = ShaderPackRead32(p + 16);
     program.vertexOffset = ShaderPackRead32(p + 20);
@@ -135,10 +147,24 @@ inline ShaderPackProgram ShaderPackParseProgram(const unsigned char* p) {
     program.pixelOffset = ShaderPackRead32(p + 28);
     program.pixelSize = ShaderPackRead32(p + 32);
     program.checksum = ShaderPackRead32(p + 36);
+    program.digestOffset = wide ? (uint32_t)(offset + 44) : 0;
     return program;
 }
-inline bool ShaderPackBefore(uint64_t id0a, uint32_t id1a, uint32_t flagsa,
-                             uint64_t id0b, uint32_t id1b, uint32_t flagsb) {
+// The checksummed key prefix: shaderId0, shaderId1 (u32 in v2), flags, floats.
+inline size_t ShaderPackChecksumHead(const ShaderPackProgram& entry, uint32_t version, unsigned char head[24]) {
+    size_t at = 0;
+    for (int b = 0; b < 8; ++b)
+        head[at++] = (unsigned char)(entry.shaderId0 >> (56 - 8 * b));
+    for (int b = version == ShaderPackVersion ? 0 : 4; b < 8; ++b)
+        head[at++] = (unsigned char)(entry.shaderId1 >> (56 - 8 * b));
+    const uint32_t fields[2] = {entry.flags, entry.floats};
+    for (int f = 0; f < 2; ++f)
+        for (int b = 0; b < 4; ++b)
+            head[at++] = (unsigned char)(fields[f] >> (24 - 8 * b));
+    return at;
+}
+inline bool ShaderPackBefore(uint64_t id0a, uint64_t id1a, uint32_t flagsa,
+                             uint64_t id0b, uint64_t id1b, uint32_t flagsb) {
     if (id0a != id0b) return id0a < id0b;
     if (id1a != id1b) return id1a < id1b;
     return flagsa < flagsb;

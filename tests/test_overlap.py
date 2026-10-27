@@ -17,6 +17,9 @@ CONTRACTS = {
     'replay_batch': 'Interpolation cadence',
     'overlap_depth': 'overlap depth sampling',
     'presentation_cadence': 'Presentation cadence passed',
+    'resource_owners': 'resource owners: repeat suppression passed',
+    'timing_sample': 'timing sample: thread-owned merge passed',
+    'overlap_runtime': 'overlap runtime: passive GUI handoff',
 }
 
 

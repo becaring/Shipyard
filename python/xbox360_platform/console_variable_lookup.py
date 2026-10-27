@@ -2,9 +2,13 @@
 
 
 def header(text):
-    anchor = 'std::unordered_map<std::string, std::shared_ptr<CVar>> mVariables;'
-    if text.count(anchor) != 1:
+    # Newer LUS adds transparent std::string_view hashers; VC10 cannot use them.
+    anchors = [a for a in ('std::unordered_map<std::string, std::shared_ptr<CVar>> mVariables;',
+                           'std::unordered_map<std::string, std::shared_ptr<CVar>, TransparentStringHash, '
+                           'TransparentStringEqual> mVariables;') if a in text]
+    if len(anchors) != 1 or text.count(anchors[0]) != 1:
         raise ValueError('CVar key container drift')
+    anchor = anchors[0]
     return '#include "config/console_variable_key.h"\n' + text.replace(anchor,
         'std::unordered_map<Shipyard::ConsoleVariables::NameKey, std::shared_ptr<CVar>, '
         'Shipyard::ConsoleVariables::NameHash> mVariables;')

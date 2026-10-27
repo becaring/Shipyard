@@ -1,6 +1,7 @@
 import hashlib
 import json
 from pathlib import Path
+import struct
 import sys
 import tempfile
 import unittest
@@ -69,6 +70,8 @@ lines=[]
 time.sleep(0.35)
 for item in root.findall('.//'+ns+'ClCompile[@Include]'):
     source=pathlib.Path(item.attrib['Include'].replace('$(ProjectDir)',str(project.parent)+'\\\\'))
+    if b'FAIL' in source.read_bytes():
+        sys.exit(1)
     obj=pathlib.Path(item.find(ns+'ObjectFileName').text)
     obj.parent.mkdir(parents=True,exist_ok=True)
     if not obj.exists():
@@ -79,6 +82,118 @@ for item in root.findall('.//'+ns+'ClCompile[@Include]'):
 
     def build(self):
         return plan(self.project, self.manifest, self.output, jobs=2)
+
+    def rewrite(self, index, text):
+        source = Path(self.manifest[index]['source'])
+        source.write_text(text, encoding='utf-8')
+        self.manifest[index]['sha256'] = sha(source)
+
+    def edit_project(self, change):
+        root = ET.parse(self.project).getroot()
+        change(root)
+        self.project.write_bytes(ET.tostring(root, encoding='utf-8', xml_declaration=True))
+
+    def compile(self, arguments=None, check=True):
+        build = self.build()
+        receipt = run(build, [sys.executable, str(self.fake)],
+                      arguments=arguments or [str(self.header)], owned_roots=[self.root])
+        if check:
+            self.assertEqual(receipt['build_exit'], 0, '\n'.join(Path(row['log']).read_text()
+                                                         for row in receipt['builds']))
+            verify_receipt(build, receipt)
+        return build, receipt
+
+    @staticmethod
+    def compiled(receipt):
+        return {include.rsplit('\\', 1)[-1] for row in receipt['builds'] for include in row['sources']}
+
+    def objects(self):
+        return [Path(row['object']).read_bytes() for row in self.manifest]
+
+    ALL = {'unit0.cpp', 'unit1.cpp', 'unit2.cpp', 'unit3.cpp'}
+
+    def test_first_build_compiles_everything_then_reuses_all(self):
+        stale = Path(self.manifest[0]['object'])
+        stale.parent.mkdir(parents=True)
+        stale.write_bytes(struct.pack('<H', 0x1f2) + b'stale')
+        build, first = self.compile()
+        self.assertEqual(self.compiled(first), self.ALL)
+        self.assertEqual((first['reused_objects'], first['invalidated_objects']), (0, 1))
+        self.assertNotIn(b'stale', stale.read_bytes())
+        build, second = self.compile()
+        self.assertEqual((second['builds'], second['reused_objects']), ([], 4))
+        self.assertTrue(all(row['reused'] for row in second['sources']))
+        self.assertEqual(second['headers'], first['headers'])
+        plan_link_view(build, second)
+        self.assertTrue(all(not shard.project.exists() for shard in build.shards))
+
+    def test_changed_source_recompiles_only_that_unit(self):
+        self.compile()
+        before = self.objects()
+        self.rewrite(0, '#include "shared.h"\nint unit0() { return 5; }\n')
+        _, receipt = self.compile()
+        self.assertEqual(self.compiled(receipt), {'unit0.cpp'})
+        self.assertEqual(self.objects()[1:], before[1:])
+
+    def test_changed_header_recompiles_only_sources_that_include_it(self):
+        other = self.source_dir / 'other.h'
+        other.write_text('#define OTHER 1\n', encoding='utf-8')
+        self.rewrite(1, '#include "shared.h"\n#include "other.h"\nint unit1() { return 1; }\n')
+        (self.project_dir / 'a').mkdir()
+        (self.project_dir / 'b').mkdir()
+        (self.project_dir / 'b' / 'shadow.h').write_text('#define SHADOW 1\n', encoding='utf-8')
+        self.rewrite(3, '#include "shadow.h"\nint unit3() { return 3; }\n')
+        self.edit_project(lambda root: setattr(root.findall('.//' + N + 'AdditionalOptions')[3], 'text',
+                                               '/fp:precise /I"$(ProjectDir)a" /I"$(ProjectDir)b"'))
+        self.compile()
+        other.write_text('#define OTHER 2\n', encoding='utf-8')
+        _, receipt = self.compile()
+        self.assertEqual(self.compiled(receipt), {'unit1.cpp'})
+        # A new header earlier on the include path shadows the recorded one.
+        (self.project_dir / 'a' / 'shadow.h').write_text('#define SHADOW 2\n', encoding='utf-8')
+        _, receipt = self.compile()
+        self.assertEqual(self.compiled(receipt), {'unit3.cpp'})
+        self.header.write_text('#pragma once\n#define CHANGED 1\n', encoding='utf-8')
+        _, receipt = self.compile()
+        self.assertEqual(self.compiled(receipt), self.ALL)
+
+    def test_changed_item_option_recompiles_only_that_item(self):
+        first, _ = self.compile()
+        before = self.objects()
+        self.edit_project(lambda root: setattr(root.findall('.//' + N + 'AdditionalOptions')[2], 'text',
+                                               '/fp:fast'))
+        build, receipt = self.compile()
+        self.assertNotEqual(build.layout_sha256, first.layout_sha256)
+        self.assertEqual(self.compiled(receipt), {'unit2.cpp'})
+        self.assertEqual([data for index, data in enumerate(self.objects()) if index != 2],
+                         [data for index, data in enumerate(before) if index != 2])
+
+    def test_changed_shared_definition_or_arguments_invalidates_all(self):
+        self.compile()
+        self.edit_project(lambda root: setattr(root.find('.//' + N + 'Optimization'), 'text', 'Disabled'))
+        _, receipt = self.compile()
+        self.assertEqual((self.compiled(receipt), receipt['invalidated_objects']), (self.ALL, 4))
+        _, receipt = self.compile(arguments=['/p:Extra=1', str(self.header)])
+        self.assertEqual(self.compiled(receipt), self.ALL)
+
+    def test_deleted_or_tampered_object_is_recompiled(self):
+        self.compile()
+        Path(self.manifest[0]['object']).unlink()
+        Path(self.manifest[1]['object']).write_bytes(struct.pack('<H', 0x1f2) + b'tampered')
+        _, receipt = self.compile()
+        self.assertEqual(self.compiled(receipt), {'unit0.cpp', 'unit1.cpp'})
+        self.assertNotIn(b'tampered', Path(self.manifest[1]['object']).read_bytes())
+
+    def test_failed_shard_keeps_objects_of_successful_shards(self):
+        self.rewrite(0, '// FAIL\nint unit0() { return 0; }\n')
+        build, failed = self.compile(check=False)
+        self.assertEqual(failed['build_exit'], 1)
+        self.assertEqual({Path(row['source']).name for row in failed['sources']}, {'unit1.cpp', 'unit3.cpp'})
+        with self.assertRaisesRegex(ValueError, 'Successful current compile receipt'):
+            verify_receipt(build, failed)
+        self.rewrite(0, '#include "shared.h"\nint unit0() { return 0; }\n')
+        _, receipt = self.compile()
+        self.assertEqual(self.compiled(receipt), {'unit0.cpp', 'unit2.cpp'})
 
     def test_partition_preserves_source_and_canonical_objects(self):
         build = self.build()
@@ -132,10 +247,10 @@ for item in root.findall('.//'+ns+'ClCompile[@Include]'):
             self.header.write_text('#pragma once\n#define CHANGED 1\n', encoding='utf-8')
             with self.assertRaisesRegex(ValueError, 'header changed'):
                 verify_receipt(build, receipt)
-            build.shards[0].project.write_bytes(b'changed')
+            changed = json.loads(json.dumps(receipt))
+            changed['builds'][0]['project_sha256'] = '0' * 64
             with self.assertRaisesRegex(ValueError, 'shard project changed'):
-                verify_receipt(build, receipt)
-            build.shards[0].project.write_bytes(build.shards[0].contents)
+                verify_receipt(build, changed)
         finally:
             remove_shards(build)
 
@@ -150,6 +265,9 @@ for item in root.findall('.//'+ns+'ClCompile[@Include]'):
         for item in root.findall('.//' + N + 'ClCompile[@Include]'):
             item.find(N + 'AdditionalOptions').text += ' /I"$(GeneratedRoot)"'
         self.project.write_bytes(ET.tostring(root, encoding='utf-8', xml_declaration=True))
+        for index in range(4):
+            self.rewrite(index, '#include "shared.h"\n#include "interpreter.h"\nint unit%d() { return %d; }\n'
+                         % (index, index))
         build = self.build()
         # The fake compiler retains objects and omits this generated header from
         # its tlog, reproducing dependency tracking that missed an ABI change.

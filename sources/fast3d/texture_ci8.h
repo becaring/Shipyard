@@ -1,5 +1,7 @@
 #pragma once
 
+#include "fast3d/texel_decode.h"
+
 namespace Shipyard { namespace Fast3D {
 
 // Decode a rendered region while retaining the loaded image's source stride.
@@ -16,11 +18,8 @@ inline bool DecodeCi8Rows(unsigned char* output, const unsigned char* source,
             const unsigned char* palette = index < 128 ? palette0 : palette1;
             const unsigned offset = (index & 127) * 2;
             const unsigned color = (unsigned(palette[offset]) << 8) | palette[offset + 1];
-            const unsigned r = color >> 11, g = (color >> 6) & 31, b = (color >> 1) & 31;
-            *output++ = (unsigned char)(r * 255 / 31);
-            *output++ = (unsigned char)(g * 255 / 31);
-            *output++ = (unsigned char)(b * 255 / 31);
-            *output++ = (color & 1) ? 255 : 0;
+            StoreRgba(output, Rgba5551((uint16_t)color));
+            output += 4;
         }
     }
     return true;

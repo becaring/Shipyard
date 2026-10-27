@@ -32,6 +32,9 @@ SEQUENTIAL_LOOKUP = ('otrHandlers.contains(code) ? otrHandlers.at(code).second :
                      '                f3dex2Handlers.contains(code) ? f3dex2Handlers.at(code).second : 0')
 SEQUENTIAL_CALLS = ('otrHandlers.at(opcode).second', 'rdpHandlers.at(opcode).second',
                     'ucode_handlers[ucode_handler_index]->at(opcode).second')
+# fast3d_opcode.lower(composed_dispatch=True): one composed handler, plus the
+# independent OTR/RDP lookups kept for an invalid ucode.
+COMPOSED_CALLS = ('handler.second', 'otrHandlers.at(opcode).second', 'rdpHandlers.at(opcode).second')
 
 CERTIFICATE = '''
 // A key recaptured or fully revalidated at the current stamp stays current
@@ -92,12 +95,12 @@ def _once(text, old, new):
 
 def install(text, handlers=NEUTRAL_HANDLERS, lookup=SEQUENTIAL_LOOKUP, calls=SEQUENTIAL_CALLS,
             owner=OWNER, names=NAMES):
-    """Add the stamp, neutral table and stamped dispatch; wrap `if (CALL(&cmd)) {` sites."""
+    """Add the stamp, neutral table and stamped dispatch; wrap each `if (CALL(&cmd))` site."""
     for name in handlers:
         if not re.search(r'\bbool ' + re.escape(name) + r'\(F3DGfx\*\* cmd\w*\)\s*\{', text):
             raise ValueError('Neutral handler inventory changed: ' + name)
     text = _once(text, owner, owner + CERTIFICATE)
     text = _once(text, names, TABLE % (',\n    '.join(handlers), lookup) + names)
     for call in calls:
-        text = _once(text, 'if (' + call + '(&cmd)) {', 'if (XboxDispatchStamped(' + call + ', &cmd, opcode)) {')
+        text = _once(text, 'if (' + call + '(&cmd))', 'if (XboxDispatchStamped(' + call + ', &cmd, opcode))')
     return text

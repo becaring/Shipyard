@@ -1,8 +1,8 @@
-"""Deterministic ClCompile shards for generated Xbox 360 VC projects."""
+"""Deterministic, per-source incremental ClCompile shards for generated Xbox 360 VC projects."""
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from copy import deepcopy
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from functools import lru_cache
 import hashlib
 import json
@@ -23,6 +23,15 @@ def _sha(path):
 
 def _key(value):
     return value.replace('\\', '/').casefold()
+
+
+def _digest(value):
+    return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
+
+
+def _canon(element):
+    return [element.tag, sorted(element.attrib.items()), (element.text or '').strip(),
+            [_canon(child) for child in element]]
 
 
 @dataclass(frozen=True)
@@ -95,7 +104,6 @@ def plan(project, manifest, output, jobs=8):
         raise ValueError('Duplicate source item or object path')
     root = ET.parse(project).getroot()
     namespace, items, _, _ = _xml_parts(root)
-    ET.register_namespace('', namespace[1:-1])
     selected = {_key(row.include): row for row in records}
     actual = [_key(item.attrib['Include']) for item in items]
     if len(actual) != len(set(actual)) or set(actual) != set(selected):
@@ -110,18 +118,25 @@ def plan(project, manifest, output, jobs=8):
         if item.find(namespace + 'ProgramDataBaseFileName') is not None:
             raise ValueError('Per-item PDB override is not supported: ' + row.include)
     project_digest = _sha(project)
-    payload = json.dumps({
+    manifest_digest = _digest({
         'project_sha256': project_digest,
         'sources': [(row.include, str(row.source), str(row.object), row.sha256) for row in records],
-    }, sort_keys=True, separators=(',', ':')).encode()
-    manifest_digest = hashlib.sha256(payload).hexdigest()
-    count = min(jobs, len(records))
-    layout = json.dumps({
-        'project_sha256': project_digest,
-        'shards': count,
+    })
+    layout_digest, shards = _shards(project, records, min(jobs, len(records)), output)
+    return Plan(project, project_digest, manifest_digest, layout_digest, output, tuple(records), shards)
+
+
+def _shards(project, records, workers, output):
+    """Stripe records over at most workers compile projects; plan() passes every source."""
+    root = ET.parse(project).getroot()
+    namespace = _xml_parts(root)[0]
+    ET.register_namespace('', namespace[1:-1])
+    layout = _digest({
+        'project_sha256': _sha(project), 'workers': workers,
         'sources': [(row.include, str(row.source), str(row.object)) for row in records],
-    }, sort_keys=True, separators=(',', ':')).encode()
-    layout_digest = hashlib.sha256(layout).hexdigest()
+    })
+    count = min(workers, len(records))
+    selected = {_key(row.include): row for row in records}
     shards = []
     for index in range(count):
         chosen = tuple(records[index::count])
@@ -135,7 +150,8 @@ def plan(project, manifest, output, jobs=8):
                     group.remove(item)
                 else:
                     item.find(ns + 'ObjectFileName').text = str(selected[name].object)
-        folder = output / ('layout-' + layout_digest[:16]) / ('shard-%02d' % index)
+        # Worker slots outlive layouts so compile PDBs referenced by reused objects remain.
+        folder = output / ('workers-%02d' % workers) / ('shard-%02d' % index)
         intermediate.text = str(folder) + '\\'
         pdb = definitions.find(ns + 'ProgramDataBaseFileName')
         if pdb is None:
@@ -143,11 +159,11 @@ def plan(project, manifest, output, jobs=8):
         pdb.text = str(folder / 'vc100.pdb')
         guid = clone.find('.//' + ns + 'ProjectGuid')
         if guid is not None:
-            guid.text = '{' + str(uuid.uuid5(uuid.NAMESPACE_URL, str(project) + ':' + layout_digest + ':' + str(index))).upper() + '}'
-        shard_path = project.with_name(project.stem + '.shipyard-' + layout_digest[:12] + '-%02d.vcxproj' % index)
+            guid.text = '{' + str(uuid.uuid5(uuid.NAMESPACE_URL, str(project) + ':' + layout + ':' + str(index))).upper() + '}'
+        shard_path = project.with_name(project.stem + '.shipyard-' + layout[:12] + '-%02d.vcxproj' % index)
         shards.append(Shard(shard_path, folder, folder / 'compile.log', chosen,
                             ET.tostring(clone, encoding='utf-8', xml_declaration=True)))
-    return Plan(project, project_digest, manifest_digest, layout_digest, output, tuple(records), tuple(shards))
+    return layout, tuple(shards)
 
 
 def write_shards(build):
@@ -207,6 +223,7 @@ def _invoke(shard, command_prefix, arguments, timeout):
     return {
         'project': str(shard.project), 'intermediate': str(shard.intermediate),
         'log': str(shard.log), 'project_sha256': _sha(shard.project),
+        'sources': [row.include for row in shard.sources],
         'command': command, 'pid': process.pid,
         'exit': exit_code, 'timed_out': timed_out,
         'started_monotonic': started, 'ended_monotonic': ended,
@@ -214,40 +231,40 @@ def _invoke(shard, command_prefix, arguments, timeout):
     }
 
 
-def _header_closure(build, roots):
+def _header_closure(shards, roots):
+    """Owned headers each compiled source read, keyed by casefolded source path."""
     allowed = tuple(Path(root).resolve() for root in roots)
-    headers = {}
-    for shard in build.shards:
+    closures = {}
+    shas = {}
+    for shard in shards:
         expected = {str(row.source).casefold() for row in shard.sources}
-        observed = set()
-        active = False
+        active = set()
         tlog = shard.intermediate / 'CL.read.1.tlog'
         for line in tlog.read_text(encoding='utf-16').splitlines():
             if line.startswith('^'):
-                keys = {str(Path(name).resolve()).casefold() for name in line[1:].split('|')}
-                if keys - expected:
+                active = {str(Path(name).resolve()).casefold() for name in line[1:].split('|')}
+                if active - expected:
                     raise ValueError('Compiler tlog contains unselected sources: ' + str(tlog))
-                active = bool(keys & expected)
-                observed.update(keys & expected)
+                for key in active:
+                    closures.setdefault(key, {})
             elif active:
                 path = Path(line)
                 if path.suffix.lower() in ('.h', '.hpp', '.inl', '.inc'):
                     resolved = path.resolve()
                     if any(resolved.is_relative_to(root) for root in allowed):
-                        headers[str(resolved)] = _sha(resolved)
-        if observed != expected:
+                        if resolved not in shas:
+                            shas[resolved] = _sha(resolved)
+                        for key in active:
+                            closures[key][str(resolved)] = shas[resolved]
+        if not expected <= closures.keys():
             raise ValueError('Compiler tlog omits selected sources: ' + str(tlog))
-    return dict(sorted(headers.items()))
+    return closures
 
 
-def _selected_headers(build, roots):
-    """Hash selected include trees even when MSBuild omits generated dependencies."""
-    allowed = tuple(Path(root).resolve() for root in roots)
-    root = ET.parse(build.project).getroot()
-    ns, items, _, definitions = _xml_parts(root)
+def _expander(project, root, ns):
     properties = {key.casefold(): value for key, value in os.environ.items()}
-    properties.update(projectdir=str(build.project.parent) + '/',
-                      msbuildthisfiledirectory=str(build.project.parent) + '/')
+    properties.update(projectdir=str(project.parent) + '/',
+                      msbuildthisfiledirectory=str(project.parent) + '/')
     for group in root.findall(ns + 'PropertyGroup'):
         for item in group:
             if item.text:
@@ -261,6 +278,42 @@ def _selected_headers(build, roots):
                 return result
             value = result
         raise ValueError('Cyclic project property in include path: ' + value)
+    return expand
+
+
+def _compile_identity(build, command):
+    """Digest of every project input shared by all compiles, plus one digest per ClCompile item."""
+    root = ET.parse(build.project).getroot()
+    ns, items, _, _ = _xml_parts(root)
+    expand = _expander(build.project, root, ns)
+    item_digests = {_key(item.attrib['Include']): _digest(_canon(item)) for item in items}
+    for group in root.findall(ns + 'ItemGroup'):
+        for item in group.findall(ns + 'ClCompile'):
+            group.remove(item)
+    imports = {}
+    for node in root.iter(ns + 'Import'):
+        path = Path(expand(node.attrib.get('Project', '')).replace('\\', '/'))
+        path = path if path.is_absolute() else build.project.parent / path
+        if '$(' not in str(path) and path.is_file():
+            imports[str(path)] = _sha(path)
+    environment = {key.casefold(): value for key, value in os.environ.items()}
+    referenced = {name.casefold() for name in re.findall(r'\$\(([^)]+)\)', build.project.read_text(
+        encoding='utf-8', errors='replace'))}
+    return _digest({
+        'project': _canon(root), 'imports': imports, 'command': list(command),
+        'environment': {name: environment[name] for name in sorted(referenced & environment.keys())},
+    }), item_digests
+
+
+def _selected_headers(build, roots):
+    """Hash selected include trees even when MSBuild omits generated dependencies.
+
+    Returns the whole inventory and each source's static include closure.
+    """
+    allowed = tuple(Path(root).resolve() for root in roots)
+    root = ET.parse(build.project).getroot()
+    ns, items, _, definitions = _xml_parts(root)
+    expand = _expander(build.project, root, ns)
 
     @lru_cache(maxsize=None)
     def owned_path(value):
@@ -298,8 +351,8 @@ def _selected_headers(build, roots):
         local_dirs, local_forced = options(item)
         dirs = tuple(dict.fromkeys(local_dirs + base_dirs))
         directories.update(dirs)
-        forced = local_forced + base_forced
-        headers.update(path for path in forced if path.is_file())
+        forced = [path for path in local_forced + base_forced if path.is_file()]
+        headers.update(forced)
         selected.append((sources[_key(item.attrib['Include'])], dirs, forced))
 
     # Broad repository roots allow qualified includes; follow those from sources
@@ -316,7 +369,8 @@ def _selected_headers(build, roots):
                 if Path(name).suffix.lower() in ('.h', '.hpp', '.hxx', '.inl', '.inc'):
                     headers.add((Path(folder) / name).resolve())
 
-    includes = re.compile(r'^\s*#\s*include\s*[<"]([^">]+)[">]', re.MULTILINE)
+    # [ \t] rather than \s: whitespace spanning lines backtracks badly on large generated headers.
+    includes = re.compile(r'^[ \t]*#[ \t]*include[ \t]*[<"]([^">]+)[">]', re.MULTILINE)
     @lru_cache(maxsize=None)
     def include_target(directory, name):
         target = directory / name.replace('\\', '/')
@@ -327,46 +381,67 @@ def _selected_headers(build, roots):
         target = target.resolve()
         return target if any(target.is_relative_to(base) for base in allowed) else None
 
-    parsed = {}
-    visited = set()
-    pending = [(path, dirs) for source, dirs, forced in selected for path in [source, *forced]]
-    while pending:
-        path, dirs = pending.pop()
-        key = (path, dirs)
-        if key in visited or not path.is_file():
-            continue
-        visited.add(key)
-        if path not in parsed:
-            parsed[path] = includes.findall(path.read_text(encoding='utf-8', errors='replace'))
-        for name in parsed[path]:
+    @lru_cache(maxsize=None)
+    def parse(path):
+        return includes.findall(path.read_text(encoding='utf-8', errors='replace')) if path.is_file() else ()
+
+    @lru_cache(maxsize=None)
+    def edges(path, dirs):
+        found = []
+        for name in parse(path):
             for directory in (path.parent, *dirs):
                 target = include_target(directory, name)
                 if target is not None:
-                    headers.add(target)
-                    pending.append((target, dirs))
+                    found.append(target)
                     break
-    return {str(path): _sha(path) for path in sorted(headers)}
+        return tuple(found)
+
+    # ponytail: one walk per source over cached edges; memoize closures per (header, dirs) if this shows up.
+    closures = {}
+    for source, dirs, forced in selected:
+        seen = set(forced)
+        pending = [source, *forced]
+        while pending:
+            for target in edges(pending.pop(), dirs):
+                if target not in seen:
+                    seen.add(target)
+                    pending.append(target)
+        headers.update(seen)
+        closures[str(source).casefold()] = {str(path) for path in seen}
+    return {str(path): _sha(path) for path in sorted(headers)}, closures
 
 
-def _invalidate_header_changes(build, headers):
-    previous_path = build.output / 'compile-receipt.json'
+def _reusable(build, identity, items, inventory, closures):
+    """Previous objects whose source, item options, header closure and bytes are unchanged."""
     try:
-        previous = json.loads(previous_path.read_text(encoding='utf-8'))
-    except (OSError, ValueError):
-        previous = {}
-    if (previous.get('header_inventory_version') == 1
-            and previous.get('selected_headers') == headers
-            and previous.get('build_exit') == 0
-            and previous.get('layout_sha256') == build.layout_sha256
-            and all(Path(name).is_file() and _sha(name) == digest
-                    for name, digest in previous.get('headers', {}).items())):
-        return 0
-    removed = 0
-    for row in build.sources:
-        if row.object.exists():
-            row.object.unlink()
-            removed += 1
-    return removed
+        previous = json.loads((build.output / 'compile-receipt.json').read_text(encoding='utf-8'))
+        if previous.get('header_inventory_version') != 2 or previous.get('compile_sha256') != identity:
+            return {}
+        recorded = previous['headers']
+        names = list(recorded)
+        entries = {(row['source'], row['object']): row for row in previous['sources']}
+        current = dict(inventory)
+        reused = {}
+        for row in build.sources:
+            entry = entries.get((str(row.source), str(row.object)))
+            if (entry is None or entry['source_sha256'] != row.sha256
+                    or entry['item_sha256'] != items[_key(row.include)]):
+                continue
+            closure = {names[index]: recorded[names[index]] for index in entry['headers']}
+            # A header the source newly reaches, such as one shadowing an older match, is a change.
+            if not ({path.casefold() for path in closures[str(row.source).casefold()]}
+                    <= {path.casefold() for path in closure}):
+                continue
+            for path in closure:
+                if path not in current:
+                    current[path] = _sha(path) if Path(path).is_file() else None
+            if (any(current[path] != digest for path, digest in closure.items())
+                    or not row.object.is_file() or _sha(row.object) != entry['object_sha256']):
+                continue
+            reused[str(row.object)] = (entry, closure)
+        return reused
+    except (OSError, ValueError, KeyError, IndexError, TypeError):
+        return {}
 
 
 def run(build, command_prefix, arguments=(), owned_roots=(), timeout=7200):
@@ -379,51 +454,94 @@ def run(build, command_prefix, arguments=(), owned_roots=(), timeout=7200):
     for row in build.sources:
         if _sha(row.source) != row.sha256:
             raise ValueError('Source changed before compilation: ' + str(row.source))
-    headers_before = _selected_headers(build, owned_roots)
-    invalidated = _invalidate_header_changes(build, headers_before)
+    identity, items = _compile_identity(build, (*command_prefix, *arguments))
+    headers_before, closures = _selected_headers(build, owned_roots)
+    reused = _reusable(build, identity, items, headers_before, closures)
+    stale = [row for row in build.sources if str(row.object) not in reused]
+    invalidated = 0
+    for row in stale:
+        if row.object.exists():
+            row.object.unlink()
+            invalidated += 1
     (build.output / 'compile-receipt.json').unlink(missing_ok=True)
-    write_shards(build)
-    with ThreadPoolExecutor(max_workers=len(build.shards)) as pool:
-        futures = {pool.submit(_invoke, shard, tuple(command_prefix), tuple(arguments), timeout): index
-                   for index, shard in enumerate(build.shards)}
-        results = [None] * len(build.shards)
-        for future in as_completed(futures):
-            results[futures[future]] = future.result()
+    # Only stale sources reach MSBuild, so its tracking logs never decide what is current.
+    compiling = replace(build, shards=_shards(build.project, stale, len(build.shards), build.output)[1])
+    write_shards(compiling)
+    results = [None] * len(compiling.shards)
+    try:
+        for shard in compiling.shards:
+            for tlog in shard.intermediate.glob('*.tlog'):
+                tlog.unlink()
+        with ThreadPoolExecutor(max_workers=len(compiling.shards) or 1) as pool:
+            futures = {pool.submit(_invoke, shard, tuple(command_prefix), tuple(arguments), timeout): index
+                       for index, shard in enumerate(compiling.shards)}
+            for future in as_completed(futures):
+                results[futures[future]] = future.result()
+    finally:
+        remove_shards(compiling)
     receipt = {
         'project': str(build.project), 'project_sha256': build.project_sha256,
         'manifest_sha256': build.manifest_sha256, 'layout_sha256': build.layout_sha256,
-        'builds': results,
+        'compile_sha256': identity, 'builds': results,
         'build_exit': next((row['exit'] for row in results if row['exit']), 0),
         'sources': [], 'headers': {},
-        'header_inventory_version': 1, 'selected_headers': headers_before,
-        'invalidated_objects': invalidated,
+        'header_inventory_version': 2, 'selected_headers': headers_before,
+        'invalidated_objects': invalidated, 'reused_objects': len(reused),
     }
-    if receipt['build_exit'] == 0:
-        if _sha(build.project) != build.project_sha256:
-            raise ValueError('Project changed during compilation')
-        for row in build.sources:
-            if _sha(row.source) != row.sha256:
-                raise ValueError('Source changed during compilation: ' + str(row.source))
-            data = row.object.read_bytes()
-            offset = 6 if data[:4] == b'\0\0\xff\xff' else 0
-            if len(data) < offset + 2 or struct.unpack_from('<H', data, offset)[0] != 0x1f2:
-                raise ValueError('Not a PPC COFF object: ' + str(row.object))
-            receipt['sources'].append({
-                'source': str(row.source), 'source_sha256': row.sha256,
-                'object': str(row.object), 'object_sha256': hashlib.sha256(data).hexdigest(),
-            })
-        if _selected_headers(build, owned_roots) != headers_before:
+    # A failed compile still records reused objects and those of shards that succeeded,
+    # so the next run resumes; verify_receipt rejects the receipt itself.
+    strict = receipt['build_exit'] == 0
+    ok = [shard for shard, row in zip(compiling.shards, results) if row['exit'] == 0]
+    if strict and _sha(build.project) != build.project_sha256:
+        raise ValueError('Project changed during compilation')
+    if _selected_headers(build, owned_roots)[0] != headers_before:
+        if strict:
             raise ValueError('Selected headers changed during compilation')
-        receipt['headers'] = dict(headers_before, **_header_closure(build, owned_roots))
-        if owned_roots and not receipt['headers']:
-            raise ValueError('Actual owned compiler header closure is absent')
+        ok, reused = [], {}
+    observed = _header_closure(ok, owned_roots)
+    compiled = {str(row.object) for shard in ok for row in shard.sources}
+    headers = dict(headers_before)
+    for row in build.sources:
+        key = str(row.source).casefold()
+        if str(row.object) in reused:
+            entry, closure = reused[str(row.object)]
+        elif str(row.object) in compiled:
+            entry, closure = None, dict({path: headers_before[path] for path in closures[key]}, **observed[key])
+        else:
+            continue
+        if _sha(row.source) != row.sha256:
+            if strict:
+                raise ValueError('Source changed during compilation: ' + str(row.source))
+            continue
+        data = row.object.read_bytes() if row.object.is_file() else b''
+        digest = hashlib.sha256(data).hexdigest()
+        offset = 6 if data[:4] == b'\0\0\xff\xff' else 0
+        if (len(data) < offset + 2 or struct.unpack_from('<H', data, offset)[0] != 0x1f2
+                or (entry and entry['object_sha256'] != digest)):
+            if strict:
+                raise ValueError('Not a current PPC COFF object: ' + str(row.object))
+            continue
+        headers.update(closure)
+        receipt['sources'].append({
+            'source': str(row.source), 'source_sha256': row.sha256,
+            'object': str(row.object), 'object_sha256': digest,
+            'item_sha256': items[_key(row.include)], 'reused': entry is not None,
+            'headers': sorted(closure),
+        })
+    receipt['headers'] = dict(sorted(headers.items()))
+    # Per-source closures index into the sorted header table to keep the receipt small.
+    index = {path: number for number, path in enumerate(receipt['headers'])}
+    for row in receipt['sources']:
+        row['headers'] = [index[path] for path in row['headers']]
+    if strict and not receipt['headers']:
+        raise ValueError('Actual owned compiler header closure is absent')
     build.output.mkdir(parents=True, exist_ok=True)
     (build.output / 'compile-receipt.json').write_text(json.dumps(receipt, indent=2) + '\n', encoding='utf-8')
     return receipt
 
 
 def verify_receipt(build, receipt):
-    if receipt.get('header_inventory_version') != 1:
+    if receipt.get('header_inventory_version') != 2:
         raise ValueError('Selected header inventory is absent; rebuild required')
     if receipt['build_exit'] or receipt['project_sha256'] != _sha(build.project):
         raise ValueError('Successful current compile receipt required')
@@ -431,20 +549,25 @@ def verify_receipt(build, receipt):
         raise ValueError('Compile manifest changed')
     if receipt['layout_sha256'] != build.layout_sha256:
         raise ValueError('Compile shard layout changed')
-    if len(receipt['builds']) != len(build.shards) or any(item['exit'] for item in receipt['builds']):
+    if any(item['exit'] for item in receipt['builds']):
         raise ValueError('Incomplete shard compile receipt')
-    for shard, item in zip(build.shards, receipt['builds']):
-        if (item['project'] != str(shard.project)
-                or item['intermediate'] != str(shard.intermediate)
-                or item['project_sha256'] != hashlib.sha256(shard.contents).hexdigest()
-                or _sha(shard.project) != item['project_sha256']):
-            raise ValueError('Compiled shard project changed: ' + str(shard.project))
-    if not receipt.get('headers'):
-        raise ValueError('Compiled header closure is absent')
     expected = {(str(row.source), str(row.object)) for row in build.sources}
     actual = {(row['source'], row['object']) for row in receipt['sources']}
     if actual != expected or len(receipt['sources']) != len(build.sources):
         raise ValueError('Compile receipt source inventory differs')
+    # The compile projects were removed after compiling; regenerate them from this plan instead.
+    reused = {row['object'] for row in receipt['sources'] if row['reused']}
+    _, shards = _shards(build.project, [row for row in build.sources if str(row.object) not in reused],
+                        len(build.shards), build.output)
+    if len(shards) != len(receipt['builds']):
+        raise ValueError('Incomplete shard compile receipt')
+    for shard, item in zip(shards, receipt['builds']):
+        if (item['project'] != str(shard.project)
+                or item['intermediate'] != str(shard.intermediate)
+                or item['project_sha256'] != hashlib.sha256(shard.contents).hexdigest()):
+            raise ValueError('Compiled shard project changed: ' + str(shard.project))
+    if not receipt.get('headers'):
+        raise ValueError('Compiled header closure is absent')
     pinned = {(str(row.source), str(row.object)): row.sha256 for row in build.sources}
     for row in receipt['sources']:
         if row['source_sha256'] != pinned[(row['source'], row['object'])]:
