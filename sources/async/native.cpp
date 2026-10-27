@@ -52,12 +52,88 @@ bool manual_reset_event::wait_for_ms(DWORD milliseconds) const {
     throw native_error("WaitForSingleObject", GetLastError());
 }
 
+// Condition waits reuse events instead of creating one per wait. A managed
+// thread's scope owns one event; nested or unmanaged waits borrow from a small
+// pool, and fall back to a private event when the pool is exhausted.
+namespace {
+struct WaitEventScope;
+__declspec(thread) WaitEventScope* activeWaitEventScope = NULL;
+struct WaitEventScope {
+    std::unique_ptr<manual_reset_event> event;
+    bool busy;
+    WaitEventScope* previous;
+    WaitEventScope() : busy(false), previous(activeWaitEventScope) { activeWaitEventScope = this; }
+    ~WaitEventScope() { activeWaitEventScope = previous; }
+};
+struct WaitEventPool {
+    enum { Capacity = 16 };
+    mutex gate;
+    manual_reset_event* events[Capacity];
+    bool busy[Capacity];
+    WaitEventPool() {
+        for (unsigned i = 0; i < Capacity; ++i) { events[i] = NULL; busy[i] = false; }
+    }
+    manual_reset_event* acquire(unsigned& slot) {
+        lock_guard<mutex> lock(gate);
+        for (unsigned i = 0; i < Capacity; ++i) {
+            if (busy[i]) continue;
+            if (!events[i]) events[i] = new manual_reset_event();
+            busy[i] = true;
+            slot = i;
+            return events[i];
+        }
+        return NULL;
+    }
+    void release(unsigned slot) { lock_guard<mutex> lock(gate); busy[slot] = false; }
+};
+static void* volatile waitEventPoolPointer = NULL;
+static WaitEventPool* GetWaitEventPool() {
+    WaitEventPool* pool = static_cast<WaitEventPool*>(InterlockedCompareExchangePointer(&waitEventPoolPointer, NULL, NULL));
+    if (!pool) {
+        std::unique_ptr<WaitEventPool> candidate(new WaitEventPool());
+        pool = static_cast<WaitEventPool*>(InterlockedCompareExchangePointer(&waitEventPoolPointer, candidate.get(), NULL));
+        if (!pool) pool = candidate.release();
+    }
+    // At most sixteen handles survive until process exit, including main-thread waits.
+    // No static destructor can race a different module's shutdown waits.
+    return pool;
+}
+}
+
 struct condition_variable::waiter {
-    manual_reset_event event;
+    union { unsigned char bytes[sizeof(manual_reset_event)]; void* alignment; } owned;
+    manual_reset_event* event;
+    WaitEventScope* borrowed;
+    WaitEventPool* pool;
+    unsigned poolSlot;
     waiter* next;
-    waiter() : next(NULL) {
+    waiter() : event(NULL), borrowed(NULL), pool(NULL), poolSlot(0), next(NULL) {
+        WaitEventScope* scope = activeWaitEventScope;
+        if (scope && !scope->busy) {
+            if (!scope->event.get()) scope->event.reset(new manual_reset_event());
+            else scope->event->reset();
+            scope->busy = true;
+            borrowed = scope;
+            event = scope->event.get();
+        } else {
+            pool = GetWaitEventPool();
+            event = pool->acquire(poolSlot);
+            if (event) {
+                try { event->reset(); }
+                catch (...) { pool->release(poolSlot); throw; }
+            } else {
+                pool = NULL;
+                event = new (owned.bytes) manual_reset_event();
+            }
+        }
+    }
+    ~waiter() {
+        if (borrowed) borrowed->busy = false;
+        else if (pool) pool->release(poolSlot);
+        else event->~manual_reset_event();
     }
 };
+
 condition_variable::condition_variable() : first_(NULL) {
 }
 void condition_variable::remove(waiter* target) {
@@ -78,7 +154,7 @@ void condition_variable::wait(unique_lock<mutex>& lock) {
         lock.unlock();
     }
     try {
-        entry.event.wait();
+        entry.event->wait();
     } catch (...) {
         {
             lock_guard<mutex> guard(gate_);
@@ -98,7 +174,7 @@ void condition_variable::notify_one() {
     lock_guard<mutex> guard(gate_);
     if (first_) {
         waiter* target = first_;
-        target->event.set();
+        target->event->set();
         first_ = target->next;
     }
 }
@@ -106,7 +182,7 @@ void condition_variable::notify_all() {
     lock_guard<mutex> guard(gate_);
     while (first_) {
         waiter* target = first_;
-        target->event.set();
+        target->event->set();
         first_ = target->next;
     }
 }
@@ -166,6 +242,7 @@ DWORD WINAPI joining_thread::run(void* context) {
         std::terminate();
 #endif
     try {
+        WaitEventScope waitEventScope;
         entry(argument);
     } catch (...) {
         std::terminate();
