@@ -46,9 +46,9 @@ class OverlapAudioTest(unittest.TestCase):
     def test_barrier_runs_before_declarations_and_body(self):
         text, inserted = overlap_audio.barriers(GAME, {"Audio_ReadsState", "Audio_Command", "Missing"})
         self.assertEqual(inserted, {"Audio_ReadsState", "Audio_Command"})
-        self.assertIn("void Audio_ReadsState(void) {\n    Shipyard_OverlapAudioBarrier();\n"
+        self.assertIn("void Audio_ReadsState(void) {\n    " + overlap_audio.BARRIER + "\n"
                       "    s32 count = gAudioCtx.numNotes;", text)
-        self.assertIn("void Audio_Command(void) {\n    Shipyard_OverlapAudioBarrier();\n"
+        self.assertIn("void Audio_Command(void) {\n    " + overlap_audio.BARRIER + "\n"
                       "    AUDIOCMD_GLOBAL", text)
         self.assertEqual(text.count(overlap_audio.BARRIER), 2)
 

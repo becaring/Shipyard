@@ -46,6 +46,7 @@ class LusInputTests(unittest.TestCase):
         text = lus_input.borrow_polling("src/ship/controller/controldevice/controller/ControllerStick.cpp", stick)
         self.assertEqual(text.count("ControllerAxisDirectionMapping> >::value_type& "), 2)
         self.assertNotIn("std::pair", text)
+        self.assertIn("value_type& b) -> bool {", text)
         self.assertEqual(lus_input.borrow_polling("src/ship/Other.cpp", controller), controller)
         with self.assertRaises(ValueError):
             lus_input.borrow_polling("src/libultraship/controller/controldevice/controller/Controller.cpp", "")

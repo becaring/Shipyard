@@ -38,8 +38,9 @@ def borrow_polling(name, text):
         return once(text, "for (auto [bitmask, button] : mButtons)",
                     "for (const auto& [bitmask, button] : mButtons)")
     if name.endswith("/ship/controller/controldevice/controller/ControllerStick.cpp"):
-        for argument in ("a", "b"):
+        # The XDK compiler deduces no return type for this comparator.
+        for argument, tail in (("a", ""), ("b)", " -> bool")):
             text = once(text, STICK + argument,
                         "const std::unordered_map<std::string, std::shared_ptr<ControllerAxisDirectionMapping> >"
-                        "::value_type& " + argument)
+                        "::value_type& " + argument + tail)
     return text

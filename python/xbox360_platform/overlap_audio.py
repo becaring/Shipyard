@@ -16,7 +16,8 @@ import re
 from tree_sitter import Language, Parser
 import tree_sitter_c
 
-BARRIER = "Shipyard_OverlapAudioBarrier();"
+# A declaration, so the entry stays valid C89 ahead of the body's own declarations.
+BARRIER = "const int shipyardAudioBarrier = Shipyard_OverlapAudioBarrier();"
 _CALL = re.compile(r"\b([A-Za-z_]\w*)\s*\(")
 
 
