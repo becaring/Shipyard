@@ -1,5 +1,7 @@
 // Texture resolutions belong to one immutable command batch. Entries own both
 // the resource and path; dirty resources and explicit invalidations still miss.
+// Certify before each lookup: entries hold only under the lookup generation and
+// archive epoch current when they were resolved.
 #pragma once
 #include <stdint.h>
 #include <string>
@@ -21,7 +23,8 @@ template<class Metadata, unsigned Capacity = 512> struct TextureReplayCache {
     bool active;
     mutable unsigned hits, misses;
     unsigned stores, clears;
-    TextureReplayCache() : active(false), hits(0), misses(0), stores(0), clears(0) {}
+    unsigned generation, epoch;
+    TextureReplayCache() : active(false), hits(0), misses(0), stores(0), clears(0), generation(0), epoch(0) {}
     static unsigned Bucket(uint64_t hash) {
         unsigned folded = static_cast<unsigned>(hash) ^ static_cast<unsigned>(hash >> 32);
         folded ^= folded >> 11;
@@ -37,6 +40,12 @@ template<class Metadata, unsigned Capacity = 512> struct TextureReplayCache {
     }
     void Begin(unsigned replays) { Clear(); active = replays > 1; hits = misses = stores = clears = 0; }
     void End() { active = false; Clear(); }
+    void Certify(unsigned lookupGeneration, unsigned archiveEpoch) {
+        if (lookupGeneration == generation && archiveEpoch == epoch) return;
+        Clear();
+        generation = lookupGeneration;
+        epoch = archiveEpoch;
+    }
     const Entry* Lookup(const void* owner, uint64_t hash) const {
         if (!active) return NULL;
         const unsigned first = Bucket(hash);
