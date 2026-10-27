@@ -14,10 +14,12 @@ class XenosPresentationSurface {
     HRESULT Prepare(double (*now)(), bool* ready);
     HRESULT Present();
     HRESULT SetMaxFrameLatency(int frames);
+    float PresentedFps() const { return cadence.Fps(); }
 
   private:
     IDirect3DDevice9* device;
     PresentationPacing pacing;
+    PresentationCadence cadence;
     bool uncapped;
 };
 }

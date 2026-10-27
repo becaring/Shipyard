@@ -72,3 +72,7 @@ struct IDirect3DDevice9 {
 };
 
 void Sleep(DWORD);
+
+union LARGE_INTEGER { long long QuadPart; };
+inline BOOL QueryPerformanceCounter(LARGE_INTEGER* value) { value->QuadPart = 0; return TRUE; }
+inline BOOL QueryPerformanceFrequency(LARGE_INTEGER* value) { value->QuadPart = 1000; return TRUE; }

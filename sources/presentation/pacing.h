@@ -23,4 +23,33 @@ class PresentationPacing {
   private:
     uint32_t rate, refresh, remainder;
 };
+
+// GUI capture can run once for several presents; measure display cadence separately.
+class PresentationCadence {
+  public:
+    PresentationCadence() : start(0), count(0), fps(0), started(false) {}
+    void Observe(uint64_t now, uint64_t clockFrequency) {
+        if (!clockFrequency) return;
+        if (!started || now < start) {
+            start = now;
+            count = 0;
+            fps = 0;
+            started = true;
+            return;
+        }
+        ++count;
+        const uint64_t elapsed = now - start;
+        if (elapsed && elapsed >= clockFrequency / 2) {
+            fps = static_cast<float>(double(count) * double(clockFrequency) / double(elapsed));
+            start = now;
+            count = 0;
+        }
+    }
+    float Fps() const { return fps; }
+  private:
+    uint64_t start;
+    unsigned count;
+    float fps;
+    bool started;
+};
 }

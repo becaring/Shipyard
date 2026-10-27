@@ -16,6 +16,7 @@ CONTRACTS = {
     'writable_spans': 'writable spans: alternation',
     'replay_batch': 'Interpolation cadence',
     'overlap_depth': 'overlap depth sampling',
+    'presentation_cadence': 'Presentation cadence passed',
 }
 
 

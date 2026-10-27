@@ -80,6 +80,7 @@ int main() {
     // Frames go through the device's swap chain, which device setup creates;
     // swap_chain_cases.cpp covers it. The surface never calls device Present.
     assert(surface.Present() == E_UNEXPECTED);
+    assert(surface.PresentedFps() == 0);
 
     bool threw = false;
     try { surface.SetRate(0); } catch (const std::invalid_argument&) { threw = true; }

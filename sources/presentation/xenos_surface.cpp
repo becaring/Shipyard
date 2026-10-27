@@ -32,7 +32,15 @@ HRESULT XenosPresentationSurface::Prepare(double (*now)(), bool* ready) {
 }
 
 HRESULT XenosPresentationSurface::Present() {
-    return device ? XenosPresentationChain().Present() : E_INVALIDARG;
+    if (!device) return E_INVALIDARG;
+    const HRESULT result = XenosPresentationChain().Present();
+    if (SUCCEEDED(result)) {
+        LARGE_INTEGER now, frequency;
+        QueryPerformanceCounter(&now);
+        QueryPerformanceFrequency(&frequency);
+        cadence.Observe(static_cast<uint64_t>(now.QuadPart), static_cast<uint64_t>(frequency.QuadPart));
+    }
+    return result;
 }
 
 HRESULT XenosPresentationSurface::SetMaxFrameLatency(int frames) {
