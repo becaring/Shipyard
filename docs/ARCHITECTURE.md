@@ -39,19 +39,21 @@ normal without populating the lookup table.
 ## Renderer capabilities
 
 Adapters choose the following definitions when compiling `sources/xenos/core.cpp`.
-All names below have the prefix `SHIPYARD_XENOS_`.
+All names below have the prefix `SHIPYARD_XENOS_`. The release column is
+`xbox360_platform.xenos_capabilities.compiler_options`; setting
+`SHIPYARD_XENOS_DIAGNOSTICS=1` selects the instrumented build of it.
 
-| Definition | Default / Warwing | 3Shipsty | 2Ship3Shipsty |
-| --- | --- | --- | --- |
-| `SHADER_ABI` | 3 | 2 | 3 |
-| `SHADER_PACK` | 0 | 1 | 0 |
-| `DEFERRED_FRAMEBUFFERS` | 0 | 1 | 0 |
-| `BINDING_REUSE` | 0 | 1 | 0 |
-| `TILING_BUDGET` | 0 | 1 | 0 |
-| `DIAGNOSTICS` | 1 | 0, or 1 for instrumented builds | 1 |
-| `DETAILED_TIMING` | 1 | 1 | 0 |
-| `ALPHA_HISTOGRAM` | 0 | 1, active in instrumented builds | 0 |
-| `TILING_TRIALS` | 1 | 1 | 0 |
+| Definition | Source default | Release (Warwing) | 3Shipsty | 2Ship3Shipsty |
+| --- | --- | --- | --- | --- |
+| `SHADER_ABI` | 3 | 3 | 2 | 3 |
+| `SHADER_PACK` | 0 | 0 | 1 | 0 |
+| `DEFERRED_FRAMEBUFFERS` | 0 | 1 | 1 | 0 |
+| `BINDING_REUSE` | 0 | 1 | 1 | 0 |
+| `TILING_BUDGET` | 0 | 1 | 1 | 0 |
+| `DIAGNOSTICS` | 1 | 0, or 1 instrumented | 0, or 1 for instrumented builds | 1 |
+| `DETAILED_TIMING` | 1 | follows `DIAGNOSTICS` | 1 | 0 |
+| `ALPHA_HISTOGRAM` | 0 | follows `DIAGNOSTICS` | 1, active in instrumented builds | 0 |
+| `TILING_TRIALS` | 1 | 0 | 1 | 0 |
 
 Shader ABI 3 supplies primitive depth and logical raster state. ABI 2 uses the
 shader-pack format selected by 3Shipsty. Runtime shader lowering and pack
