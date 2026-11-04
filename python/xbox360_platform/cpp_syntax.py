@@ -1,5 +1,6 @@
 """Compiler-compatibility lowering shared by active Xbox consumers."""
 
+import re
 from dataclasses import dataclass
 
 
@@ -41,6 +42,10 @@ def collect_member_defaults(text, classname, parser, walk, parse_source=None):
             if (declarator is not None and declarator.type == 'function_declarator' and
                     declarator.child_by_field_name('declarator').type == 'field_identifier' and
                     default.type == 'initializer_list' and not default.named_children):
+                continue
+            # A pure virtual method's "= 0" parses as a field default.
+            if (declarator is not None and default.text == b'0' and
+                    any(node.type == 'function_declarator' for node in walk(declarator))):
                 continue
             if declarator is None or declarator.type == 'function_declarator' or typ is None:
                 raise ValueError('Unsupported member default ' + member.text.decode())
@@ -135,3 +140,20 @@ def lift_captureless_callbacks(text, parser, walk, *, parameters, return_type, p
     # first so callers need no extra declarations. Consumers may qualify
     # these definitions as members already declared in a class header.
     return data.decode(), '\n\n'.join(reversed(definitions))
+
+
+def scoped_enums(text):
+    """Scope each enum class's enumerators in a struct and keep its name as a plain enum type.
+
+    Qualified enumerator names rely on the compiler's enum-qualification extension;
+    conversions become implicit, which accepts every program the scoped form did.
+    """
+    def lower(match):
+        name, base, body = match[1], match[2], match[3]
+        base = ' : ' + base if base else ''
+        return ('struct ' + name + '_scope { enum type' + base + ' {' + body + '}; };\n'
+                'typedef ' + name + '_scope::type ' + name + ';')
+    text = re.sub(r'\benum (?:class|struct) (\w+)\s*(?::\s*([\w:]+)\s*)?\{([^}]*)\};', lower, text)
+    if re.search(r'\benum (?:class|struct)\b', text):
+        raise ValueError('Unlowered scoped enum declaration')
+    return text

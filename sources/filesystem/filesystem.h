@@ -47,6 +47,13 @@ public:
     path lexically_normal() const;
     path& replace_extension(const path& extension = path());
     path& operator/=(const path& right);
+    path& concat(const path& right) {
+        text_ += right.text_;
+        return *this;
+    }
+    path& operator+=(const path& right) {
+        return concat(right);
+    }
 
 private:
     std::string text_;

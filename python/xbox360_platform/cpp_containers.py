@@ -97,3 +97,59 @@ def lower_constructor_arguments(text, parser, walk, *, constructor, argument, ty
     for first, last, replacement in sorted(edits, reverse=True):
         data = data[:first]+replacement+data[last:]
     return data.decode()
+
+
+_TABLES = ('std::map', 'std::unordered_map', 'std::set', 'std::unordered_set', 'std::vector')
+
+
+def lower_table_initializers(text, parser, walk):
+    """Build brace-initialized STL tables from a static aggregate array.
+
+    The entry text is kept verbatim: a map entry {key, value} initializes an
+    aggregate {first, second}, and insertion keeps the first of repeated keys as
+    initializer_list construction does. Entries may not name enclosing locals.
+    """
+    data = text.encode()
+    edits = []
+    for node in walk(parser.parse(data).root_node):
+        if node.type != 'declaration':
+            continue
+        typ = node.child_by_field_name('type')
+        declarator = node.child_by_field_name('declarator')
+        if typ is None or declarator is None or declarator.type != 'init_declarator':
+            continue
+        value = declarator.child_by_field_name('value')
+        if value is None or value.type != 'initializer_list' or not typ.text.decode().endswith('>'):
+            continue
+        kind, args = template_parts(typ.text.decode())
+        if kind not in _TABLES:
+            continue
+        if len(node.children_by_field_name('declarator')) != 1:
+            raise ValueError('Table declaration must declare one name')
+        name = declarator.child_by_field_name('declarator').text.decode()
+        type_name = typ.text.decode()
+        prefix = data[node.start_byte:typ.start_byte].decode()
+        if not value.named_children:
+            edits.append((node.start_byte, node.end_byte, (prefix + type_name + ' ' + name + ';').encode()))
+            continue
+        if kind in ('std::map', 'std::unordered_map'):
+            entry = 'struct entry { ' + args[0] + ' first; ' + args[1] + ' second; };\n'
+            fill = ('for (size_t i = 0; i < sizeof(entries) / sizeof(entries[0]); ++i) '
+                    'result.insert(std::make_pair(entries[i].first, entries[i].second));\n')
+            element = 'entry'
+        else:
+            entry = ''
+            method = 'push_back' if kind == 'std::vector' else 'insert'
+            fill = 'for (size_t i = 0; i < sizeof(entries) / sizeof(entries[0]); ++i) result.' + method + '(entries[i]);\n'
+            element = args[0]
+        table = name + '_table'
+        if table.encode() in data:
+            raise ValueError('Table builder collision: ' + table)
+        replacement = ('struct ' + table + ' { static ' + type_name + ' build() {\n' + entry +
+                       'static const ' + element + ' entries[] = ' + value.text.decode() + ';\n' +
+                       type_name + ' result;\n' + fill + 'return result;\n} };\n' +
+                       prefix + type_name + ' ' + name + ' = ' + table + '::build();')
+        edits.append((node.start_byte, node.end_byte, replacement.encode()))
+    for first, last, replacement in sorted(edits, reverse=True):
+        data = data[:first] + replacement + data[last:]
+    return data.decode()

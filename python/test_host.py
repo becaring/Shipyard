@@ -18,6 +18,7 @@ TESTS = [
     "tests.test_parallel_build",
     "tests.test_prism_projector",
     "tests.test_triangle_certificate_projection",
+    "tests.test_zapd",
 ]
 
 
