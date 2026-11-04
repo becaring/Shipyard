@@ -3,10 +3,11 @@
 #include <string>
 
 namespace {
+const unsigned Buffers = Shipyard::XenosSwapChain::FrontBuffers;
 struct Device : IDirect3DDevice9 {
     IDirect3DSurface9 backBuffer, other;
     IDirect3DSurface9* bound;
-    IDirect3DTexture9 textures[3];
+    IDirect3DTexture9 textures[Buffers];
     UINT created, failCreateAt, width, height;
     D3DFORMAT format;
     DWORD enqueued;
@@ -58,7 +59,7 @@ struct Device : IDirect3DDevice9 {
         assert(!rect && !point && !level && !slice && !clear && !parameters);
         assert(bound == &backBuffer);
         // The resolve may only overwrite a buffer that is neither shown nor pending.
-        assert(enqueued + 1 < 3);
+        assert(enqueued + 1 < Buffers);
         resolveFlags = flags;
         resolved = texture;
         calls += "resolve ";
@@ -102,29 +103,29 @@ int main() {
         Shipyard::XenosSwapChain chain;
         Device device;
         assert(chain.Create(&device, parameters) == S_OK);
-        assert(device.created == 3 && device.async && device.calls == "async ");
+        assert(Buffers == 4 && device.created == Buffers && device.async && device.calls == "async ");
         assert(device.width == 1280 && device.height == 720 && device.format == D3DFMT_LE_X8R8G8B8);
-        assert(chain.Create(&device, parameters) == E_UNEXPECTED && device.created == 3);
+        assert(chain.Create(&device, parameters) == E_UNEXPECTED && device.created == Buffers);
 
         // Rotation and order: resolve into the free buffer, kick it, then swap.
-        for (unsigned frame = 0; frame < 4; ++frame) {
+        for (unsigned frame = 0; frame < Buffers + 1; ++frame) {
             device.calls.clear();
             device.enqueued = 0;
             device.queries = 0;
             assert(chain.Present() == S_OK);
             assert(device.calls == "resolve fence swap ");
             assert(device.resolveFlags == D3DRESOLVE_RENDERTARGET0);
-            assert(device.resolved == &device.textures[frame % 3]);
+            assert(device.resolved == &device.textures[frame % Buffers]);
             assert(device.queries == 1);
         }
 
-        // One finished frame may wait for its vblank without stalling the CPU.
-        device.enqueued = 1;
+        // Two finished frames may wait for their vblanks without stalling the CPU.
+        device.enqueued = 2;
         device.queries = 0;
         assert(chain.Present() == S_OK && device.queries == 1);
 
-        // Two waiting frames: this thread waits until one is shown, never the GPU.
-        device.enqueued = 2;
+        // Three waiting frames: this thread waits until one is shown, never the GPU.
+        device.enqueued = 3;
         device.queries = 0;
         device.calls.clear();
         assert(chain.Present() == S_OK && device.queries == 2 && device.calls == "resolve fence swap ");
@@ -140,7 +141,7 @@ int main() {
 
         chain.Release();
         assert(device.backBuffer.references == 1);
-        for (unsigned i = 0; i < 3; ++i) assert(device.textures[i].references == 0);
+        for (unsigned i = 0; i < Buffers; ++i) assert(device.textures[i].references == 0);
         assert(chain.Present() == E_UNEXPECTED);
     }
     assert(&Shipyard::XenosPresentationChain() == &Shipyard::XenosPresentationChain());

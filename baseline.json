@@ -206,7 +206,7 @@
     "sources/presentation/xenos_pacing.h": "6e405fcab66f1dd4d6ea2f2b7b3de68c9c5947fe6cec047bdd81514ac25d8acd",
     "sources/presentation/xenos_surface.cpp": "fdb7bde59cbc7d2e5a7a4bf9818fb06242bca0a35d52655734aa83586a20b809",
     "sources/presentation/xenos_surface.h": "ce7073a184834ac5c3780d8c9454d19555e2560c22e068d959543396caf4488b",
-    "sources/presentation/xenos_swap_chain.h": "3f017ea404f1d69f9a1469d819b189d530bfb2aa6ea740b2d36c2e0c8cc48c22",
+    "sources/presentation/xenos_swap_chain.h": "6be92df1bfb4d700e180b35ca25fd26a55ef20009196f830804386c78b21d5a3",
     "sources/prism/compat.h": "979345f2558a661bcd961f18349e6070861bc7633c07355a44e00e55f4996308",
     "sources/random/shuffle.h": "32fd4982745fbb7f754e3c142821be583779613e4a8cb2acdde70807baeaa624",
     "sources/resources/path_hash.h": "5d50046fd4a263dbbc12ff08d999f0b78f00fc257a10862dd2af47e73f8c18c8",

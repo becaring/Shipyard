@@ -6,13 +6,14 @@
 #endif
 
 namespace Shipyard {
-// Title-owned front buffers, following the XDK AsyncSwaps sample. Three
-// buffers allow rendering ahead of scanout; the submitting CPU waits before
+// Title-owned front buffers, following the XDK AsyncSwaps sample. Four
+// buffers let rendering run two frames ahead of scanout, so one slow
+// presentation between quick ones keeps refresh; the submitting CPU waits before
 // reusing a busy buffer. Swaps retain the device's presentation interval and
 // submission order. Buffering does not guarantee that a workload meets refresh.
 class XenosSwapChain {
   public:
-    enum { FrontBuffers = 3 };
+    enum { FrontBuffers = 4 };
 
     XenosSwapChain() : device(NULL), backBuffer(NULL), next(0), resolved(false) {
         for (UINT i = 0; i < FrontBuffers; ++i) front[i] = NULL;
