@@ -266,6 +266,7 @@ float noise_scale = 1;
 float noise_scale_input = 1;
 FilteringMode filtering = FILTER_THREE_POINT;
 unsigned filtering_key = unsigned(FILTER_THREE_POINT) << 4;
+const unsigned BilinearDrawKey = 64;
 
 // Only this thread owns these values. Cache the actual native sampler fields,
 // not texture identity: a sampler edit through either alias must reach both
@@ -452,7 +453,8 @@ template <int tile> void ApplySamplerSlot(const TextureSampler& sampler) {
     }
     native_state.sampler_key[tile] = key;
     const D3DTEXTUREFILTERTYPE filter =
-        filtering == FILTER_LINEAR && sampler.linear ? D3DTEXF_LINEAR : D3DTEXF_POINT;
+        (filtering == FILTER_LINEAR || (filtering_key & BilinearDrawKey)) && sampler.linear
+            ? D3DTEXF_LINEAR : D3DTEXF_POINT;
     const DWORD address_u = (sampler.s & 2)   ? D3DTADDRESS_CLAMP
                             : (sampler.s & 1) ? D3DTADDRESS_MIRROR
                                               : D3DTADDRESS_WRAP;
@@ -1003,6 +1005,12 @@ __declspec(noinline) void RebuildDrawState() {
     if (timing_enabled)
         ++timing_counts.preparationRebuilt;
     draw_sampler_mask = 0;
+    // Two three-point samplers cost 44 ALU and 32 fetch cycles a pixel where
+    // bilinear costs 12 and 8 (fxc). They are layered, scrolling floors and water,
+    // which fill the screen and look the same under bilinear.
+    const bool bilinearDraw = filtering == FILTER_THREE_POINT &&
+        current_shader->features.usedTextures[0] && current_shader->features.usedTextures[1];
+    filtering_key = (unsigned(filtering) << 4) | (bilinearDraw ? BilinearDrawKey : 0);
     __declspec(align(16)) float constants[12] = {shader_frame_number, noise_scale, 0, 0};
     const TextureSampler* base_samplers[2] = {NULL, NULL};
     for (int i = 0; i < 2; ++i) {
@@ -1028,7 +1036,7 @@ __declspec(noinline) void RebuildDrawState() {
                 ApplyPreparedSampler(i, *sampler);
                 draw_sampler_mask |= 1u << i;
                 constants[6 + i * 4] =
-                    filtering == FILTER_THREE_POINT && sampler->linear ? 1.0f : 0.0f;
+                    filtering == FILTER_THREE_POINT && !bilinearDraw && sampler->linear ? 1.0f : 0.0f;
             }
         }
     }

@@ -48,6 +48,7 @@ struct ShaderProgram {
 enum FilteringMode { FILTER_POINT, FILTER_LINEAR, FILTER_THREE_POINT };
 FilteringMode filtering = FILTER_THREE_POINT;
 unsigned filtering_key = unsigned(FILTER_THREE_POINT) << 4;
+const unsigned BilinearDrawKey = 64;
 ShaderProgram shaders[3] = {{{true, true}}, {{false, true}}, {{false, false}}};
 ShaderProgram* current_shader = &shaders[0];
 std::vector<Texture> textures;
@@ -246,7 +247,8 @@ int main() {
     constantCalls = bindingCalls = samplerCalls = 0;
     for (unsigned i = 0; i < 100; ++i)
         compare();
-    require(constantCalls == 1 && bindingCalls == 1 && samplerCalls == 0,
+    // The first two-texture preparation moves all six slots to its bilinear key.
+    require(constantCalls == 1 && bindingCalls == 1 && samplerCalls == 6,
             "100 stable draws must prepare constants/bindings once and reuse already applied samplers");
     SelectTexture(0, 1);
     const unsigned afterTextureSelection = samplerCalls;

@@ -21,7 +21,8 @@ void ReferencePrepareDrawState() {
                 // through either slot applies to that texture, as in D3D11/GL.
                 ::Oracle::ApplySampler(i, *sampler);
                 constants[6 + i * 4] =
-                    filtering == FILTER_THREE_POINT && sampler->linear ? 1.0f : 0.0f;
+                    filtering == FILTER_THREE_POINT && sampler->linear &&
+                    !(current_shader->features.usedTextures[0] && current_shader->features.usedTextures[1]) ? 1.0f : 0.0f;
             }
         }
     SetNativeConstants(constants);
