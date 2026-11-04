@@ -35,6 +35,13 @@ inline xbox_compat::filesystem::recursive_directory_iterator PrismEnd(
 void ShipyardZapdLog(const std::string& message);
 template <class T> void ShipyardZapdLog(const char* format, const T&) { ShipyardZapdLog(std::string(format)); }
 
+// ZAPD reads through fopen and fstreams, which take only native absolute paths on the XDK.
+inline std::string ShipyardZapdNative(const xbox_compat::filesystem::path& value) {
+    std::error_code error;
+    std::string native = xbox_compat::filesystem::to_native_path(value, error);
+    return error ? value.string() : native;
+}
+
 #ifdef _XBOX
 #include <crt/format.h>
 #define PRIi64 "lli"

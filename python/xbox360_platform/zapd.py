@@ -159,9 +159,23 @@ private:
 """
 
 
+def _native_opens(text, pattern, replacement, expected):
+    text, count = re.subn(pattern, replacement, text)
+    if count != expected:
+        raise ValueError('ZAPD file open inventory changed: ' + str(count))
+    return text
+
+
 def _file_specific(name, text, parser):
     if name.startswith('OTRExporter/'):
         text = _otr_includes(text)
+    # The XDK opens only native absolute paths, which the filesystem shim resolves.
+    if name in ('ZAPD/GameConfig.cpp', 'ZAPD/Main.cpp'):
+        text = _native_opens(text, r'doc\.LoadFile\((.+)\);', r'doc.LoadFile(ShipyardZapdNative(\1).c_str());',
+                             3 if name == 'ZAPD/GameConfig.cpp' else 1)
+    elif name == 'ZAPD/Utils/DiskFile.h':
+        text = _native_opens(text, r'std::(i|o)fstream file\(filePath,',
+                             r'std::\1fstream file(ShipyardZapdNative(filePath).c_str(),', 7)
     if name == 'ZAPD/Utils/StringHelper.h':
         for kind in ('std::vector<std::string_view> Split(std::string_view s, const std::string& delimiter)',
                      'bool IsValidHex(std::string_view str)', 'bool IsValidOffset(std::string_view str)'):
@@ -217,6 +231,11 @@ def _file_specific(name, text, parser):
         text = _once(text, 'using ConfigFunc = void (GameConfig::*)(const tinyxml2::XMLElement&);',
                      'typedef void (GameConfig::*ConfigFunc)(const tinyxml2::XMLElement&);')
         text = _once(text, 'std::invoke(it->second, *this, *child);', '(this->*(it->second))(*child);')
+        # A relative folder names a path beside the asset folder that holds the config.
+        text = _once(text, '\texternalXmlFolder = pathValue;\n',
+                     '\tfs::path folder(pathValue);\n'
+                     '\texternalXmlFolder = folder.is_absolute() ? folder : '
+                     'fs::path(configFilePath).parent_path().parent_path() / folder;\n')
         # The texture pool names C include files only; skipping it skips a CRC of every texture.
         text = _once(text, '\tstd::string fileName = element.Attribute("File");\n'
                      '\tReadTexturePool(Path::GetDirectoryName(configFilePath) / fileName);\n', '')
