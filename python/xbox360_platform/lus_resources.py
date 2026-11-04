@@ -152,6 +152,81 @@ def o2r_partial_read(source, *, handle_pool):
         '    ReleaseZipHandle(zipArchive);')
 
 
+HANDLES = ('namespace {\n'
+           '// libzip keeps a whole central directory per handle (17 MB for a 50k-entry\n'
+           '// archive), so each archive has one read handle that loaders take in turn.\n'
+           'Shipyard::Async::mutex sXboxHandleMutex;\n'
+           'Shipyard::Async::condition_variable sXboxHandleFree;\n'
+           'std::set<const void*> sXboxHandlesOpen;\n'
+           '\n'
+           'void XboxDiscardZipHandle(const void* archive, zip_t* handle) {\n'
+           '    zip_discard(handle);\n'
+           '    Shipyard::Async::lock_guard<Shipyard::Async::mutex> lock(sXboxHandleMutex);\n'
+           '    sXboxHandlesOpen.erase(archive);\n'
+           '    sXboxHandleFree.notify_all();\n'
+           '}\n'
+           '}\n\n')
+POOL_LOCK = 'Shipyard::Async::lock_guard<Shipyard::Async::mutex> lock(mPoolMutex);'
+
+
+def o2r_single_handle(source):
+    """Give each pooled O2R archive one read handle, and drop the indexing handle.
+
+    Upstream opens a handle per concurrent loader and keeps the indexing handle
+    for writes; each copies the archive's central directory, which on the
+    console costs tens of megabytes. Run after o2r_partial_read(handle_pool=True).
+    """
+    source = _once(source, 'namespace Ship {\nO2rArchive::O2rArchive(',
+                   'namespace Ship {\n' + HANDLES + 'O2rArchive::O2rArchive(')
+    source = _once(source,
+        '    ' + POOL_LOCK + '\n'
+        '    if (!mZipArchivePool.empty()) {\n'
+        '        zip_t* handle = mZipArchivePool.back();\n'
+        '        mZipArchivePool.pop_back();\n'
+        '        return handle;\n'
+        '    }\n'
+        '    return zip_open(GetPath().c_str(), ZIP_RDONLY, nullptr);\n',
+        '    Shipyard::Async::unique_lock<Shipyard::Async::mutex> lock(sXboxHandleMutex);\n'
+        '    while (mZipArchivePool.empty() && sXboxHandlesOpen.count(this)) sXboxHandleFree.wait(lock);\n'
+        '    if (!mZipArchivePool.empty()) {\n'
+        '        zip_t* handle = mZipArchivePool.back();\n'
+        '        mZipArchivePool.pop_back();\n'
+        '        return handle;\n'
+        '    }\n'
+        '    zip_t* handle = zip_open(GetPath().c_str(), ZIP_RDONLY, nullptr);\n'
+        '    if (handle) sXboxHandlesOpen.insert(this);\n'
+        '    return handle;\n')
+    source = _once(source, '    ' + POOL_LOCK + '\n    mZipArchivePool.push_back(handle);\n',
+        '    Shipyard::Async::lock_guard<Shipyard::Async::mutex> lock(sXboxHandleMutex);\n'
+        '    mZipArchivePool.push_back(handle);\n'
+        '    sXboxHandleFree.notify_all();\n')
+    if source.count('        zip_discard(zipArchive);\n') != 2:
+        raise ValueError('LUS resource anchor changed: pooled read discards')
+    source = source.replace('        zip_discard(zipArchive);\n', '        XboxDiscardZipHandle(this, zipArchive);\n')
+    if source.count(POOL_LOCK) != 2:
+        raise ValueError('LUS resource anchor changed: pool clears')
+    source = source.replace(POOL_LOCK, 'Shipyard::Async::lock_guard<Shipyard::Async::mutex> lock(sXboxHandleMutex);')
+    source = _subn_twice(r'( +)mZipArchivePool\.clear\(\);\n', r'\1mZipArchivePool.clear();\n\1sXboxHandlesOpen.erase(this);\n',
+                         source)
+    source = _once(source, '        IndexFile(zipEntryName);\n    }\n\n    return true;\n',
+        '        IndexFile(zipEntryName);\n    }\n\n'
+        '    // Reads use the pooled handle; WriteFile reopens this one.\n'
+        '    zip_discard(mZipArchive);\n'
+        '    mZipArchive = nullptr;\n'
+        '    return true;\n')
+    source = _once(source, '    if (!mZipArchive) {\n        SPDLOG_ERROR("Cannot write to zip: Archive is not open.");',
+        '    if (!mZipArchive) {\n        mZipArchive = zip_open(GetPath().c_str(), ZIP_CREATE, nullptr);\n    }\n'
+        '    if (!mZipArchive) {\n        SPDLOG_ERROR("Cannot write to zip: Archive is not open.");')
+    return '#include "async/native.h"\n#include <set>\n' + source
+
+
+def _subn_twice(pattern, replacement, source):
+    source, count = re.subn(pattern, replacement, source)
+    if count != 2:
+        raise ValueError('LUS resource anchor changed: ' + pattern[:80])
+    return source
+
+
 def o2r_zip_mutex(source):
     """Serialize a single shared zip_t; libzip supports one thread per handle.
 

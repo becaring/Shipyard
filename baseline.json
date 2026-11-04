@@ -66,7 +66,7 @@
     "python/xbox360_platform/lus_config.py": "14fd235a6d634b2081ebb8ec14e740a7f62c0e3a8ef0075f64ba2df591924554",
     "python/xbox360_platform/lus_gui.py": "4efe494c3f01faf370a9958f49faa1bc3848ef3063d805341e259dd262f7e63d",
     "python/xbox360_platform/lus_input.py": "cd5a5fb445b2bf9ebb6dbfa959d0417ae6675bd252d3efdb805e2cbe2e073583",
-    "python/xbox360_platform/lus_resources.py": "6416eaac8f0018e88363d8211982a2e585065cef3bbccde1df1b3f8071dd086b",
+    "python/xbox360_platform/lus_resources.py": "0504b4cea1fcff11194adafccb961703ae65369dbf2ce8588f3e99dedad1ebee",
     "python/xbox360_platform/matrix_product.py": "d72c8e04e2cdb479943a7e5a32dc253a1e1e933809a7c1189cefd18091754323",
     "python/xbox360_platform/overlap_audio.py": "fd81f394445fba6b51247291de79775d0a680a3e323e9259690b0a0b323cad54",
     "python/xbox360_platform/overlap_lus.py": "fa9e5f697f185cd4c421afcfad4180792802a35f528658dc0b2bcb4557871057",

@@ -191,6 +191,39 @@ class ArchiveTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             lus_resources.o2r_partial_read(single, handle_pool=False)
 
+    def test_pooled_archive_keeps_one_read_handle(self):
+        lock = '    Shipyard::Async::lock_guard<Shipyard::Async::mutex> lock(mPoolMutex);\n'
+        archive = ('namespace Ship {\nO2rArchive::O2rArchive(const std::string& archivePath) : Archive(archivePath) {\n}\n'
+                   'zip_t* O2rArchive::GetZipHandle() {\n' + lock +
+                   '    if (!mZipArchivePool.empty()) {\n'
+                   '        zip_t* handle = mZipArchivePool.back();\n'
+                   '        mZipArchivePool.pop_back();\n'
+                   '        return handle;\n'
+                   '    }\n'
+                   '    return zip_open(GetPath().c_str(), ZIP_RDONLY, nullptr);\n}\n'
+                   'void O2rArchive::ReleaseZipHandle(zip_t* handle) {\n' + lock +
+                   '    mZipArchivePool.push_back(handle);\n}\n' +
+                   POOLED.replace('std::shared_ptr<File> O2rArchive::LoadFile', 'std::shared_ptr<File> O2rArchive::Load') +
+                   'bool O2rArchive::Open() {\n    for (;;) {\n        IndexFile(zipEntryName);\n    }\n\n    return true;\n}\n'
+                   'bool O2rArchive::Close() {\n' + lock + '    mZipArchivePool.clear();\n}\n'
+                   'bool O2rArchive::WriteFile(const std::string& filePath, const std::vector<uint8_t>& data) {\n'
+                   '    if (!mZipArchive) {\n        SPDLOG_ERROR("Cannot write to zip: Archive is not open.");\n    }\n'
+                   '    {\n    ' + lock + '        mZipArchivePool.clear();\n    }\n}\n}\n')
+        text = lus_resources.o2r_single_handle(lus_resources.o2r_partial_read(archive, handle_pool=True))
+        self.assertNotIn('mPoolMutex', text)
+        handle = body(text, 'O2rArchive::GetZipHandle(')
+        self.assertLess(handle.index('sXboxHandleFree.wait(lock)'), handle.index('zip_open('))
+        self.assertIn('sXboxHandlesOpen.insert(this);', handle)
+        self.assertIn('notify_all', body(text, 'O2rArchive::ReleaseZipHandle('))
+        self.assertEqual(text.count('XboxDiscardZipHandle(this, zipArchive);'), 2)
+        self.assertNotIn('        zip_discard(zipArchive);', text)
+        self.assertEqual(text.count('sXboxHandlesOpen.erase(this);'), 2)
+        self.assertIn('zip_discard(mZipArchive);\n    mZipArchive = nullptr;', body(text, 'O2rArchive::Open('))
+        write = body(text, 'O2rArchive::WriteFile(')
+        self.assertLess(write.index('zip_open(GetPath().c_str(), ZIP_CREATE'), write.index('Cannot write'))
+        with self.assertRaises(ValueError):
+            lus_resources.o2r_single_handle(text)
+
     def test_single_handle_reads_and_writes_serialize(self):
         text = lus_resources.o2r_zip_mutex(SINGLE)
         self.assertTrue(text.startswith('#include "async/native.h"\n'))
