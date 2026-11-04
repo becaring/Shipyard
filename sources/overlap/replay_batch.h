@@ -41,6 +41,46 @@ public:
 private:
     int lastFps_, lastUpdateRate_, time_;
 };
+
+// Without a display clock, one update's presentations that overrun the update
+// period hold the game back, so it runs in slow motion. The budget drops
+// interpolated presentations instead and restores them once the scene has
+// left room for half a second. The average presentation costs at least as
+// much as one more, so the fit never grows into an overrun. A drop needs two
+// overruns in a row: a single load hitch is not the scene's cost.
+class ReplayBudget {
+public:
+    ReplayBudget() : count_(0), last_(0), raise_(0), calm_(0) {}
+    // `elapsed` is the time `count` presentations took and `period` the time
+    // they may take; returns how many presentations later updates get.
+    unsigned observe(unsigned count, double elapsed, double period, unsigned most) {
+        if (!most) most = 1;
+        if (!count_ || count_ > most) count_ = most;
+        double fit = elapsed > 0 ? count * period / elapsed : most;
+        if (fit > most) fit = most;
+        const unsigned target = fit < 1 ? 1 : static_cast<unsigned>(fit);
+        const unsigned sustained = last_ > target ? last_ : target;
+        last_ = target;
+        if (sustained < count_) {
+            count_ = sustained;
+            calm_ = 0;
+        } else if (target < count_) {
+            calm_ = 0;
+        } else if (target > count_) {
+            raise_ = calm_ && raise_ < target ? raise_ : target;
+            if (++calm_ >= CalmUpdates) {
+                count_ = raise_;
+                calm_ = 0;
+            }
+        } else {
+            calm_ = 0;
+        }
+        return count_;
+    }
+private:
+    enum { CalmUpdates = 10 };
+    unsigned count_, last_, raise_, calm_;
+};
 }
 }
 

@@ -38,5 +38,24 @@ int main() {
     assert(next.maps.size() == 1 && next.maps[0].empty());
     next = cadence.prepare<Map>(60, 3, false, recorder);
     assert(next.maps.size() == 3 && next.maps[2].empty());
-    std::puts("Interpolation cadence, final maps and owned batch isolation passed");
+
+    // One 150 ms hitch keeps six presentations; two overruns of a 45 ms budget
+    // drop to the larger fit of the pair; quiet updates restore them only after
+    // ten in a row, at the smallest fit seen.
+    Shipyard::Overlap::ReplayBudget budget;
+    assert(budget.observe(6, 0.030, 0.045, 6) == 6);
+    assert(budget.observe(6, 0.150, 0.045, 6) == 6);
+    assert(budget.observe(6, 0.030, 0.045, 6) == 6);
+    assert(budget.observe(6, 0.061, 0.045, 6) == 6);
+    assert(budget.observe(6, 0.061, 0.045, 6) == 4);
+    assert(budget.observe(4, 0.044, 0.045, 6) == 4);
+    for (int update = 0; update < 9; ++update) assert(budget.observe(4, update == 4 ? 0.036 : 0.030, 0.045, 6) == 4);
+    assert(budget.observe(4, 0.044, 0.045, 6) == 4);
+    for (int update = 0; update < 9; ++update) assert(budget.observe(4, update == 4 ? 0.036 : 0.030, 0.045, 6) == 4);
+    assert(budget.observe(4, 0.030, 0.045, 6) == 5);
+    assert(budget.observe(5, 0.500, 0.045, 6) == 5);
+    assert(budget.observe(5, 0.500, 0.045, 6) == 1);
+    assert(budget.observe(1, 0.0, 0.045, 3) == 1);
+    assert(budget.observe(6, 0.010, 0.045, 3) == 1);
+    std::puts("Interpolation cadence, final maps, owned batch isolation and replay budget passed");
 }
