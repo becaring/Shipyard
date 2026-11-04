@@ -56,6 +56,30 @@ def final_depth(text, *, anchor, flag=True):
     return '#include "xenos/depth_discard.h"\n' + text[:start] + body + text[end:]
 
 
+PUBLICATION = """void Interpreter::XboxPublishGameDepth() {
+    Fast::ShipyardXenos::PublishFramebufferDepth(mRendersToFb ? mGameFb : 0);
+}
+
+void Interpreter::XboxRetireGameDepth() {
+    Fast::ShipyardXenos::RetireFramebufferDepth();
+}
+
+"""
+
+
+def depth_publication(text):
+    """Define XboxPublishGameDepth/XboxRetireGameDepth beside GetPixelDepth.
+
+    The replay owner publishes the game target's depth after an update's final
+    replay and samples it once the next update's first replay is recorded, so
+    the lock never waits for the GPU to drain; it retires the publication after
+    that read and whenever it leaves the replay path. The interpreter header
+    declares both methods.
+    """
+    signature = 'uint16_t Interpreter::GetPixelDepth(float x, float y) {'
+    return _once(text, signature, PUBLICATION + signature)
+
+
 def presentation(text, *, depth, color):
     """In EndFrame, tell End that nothing reads presentation depth or color afterwards."""
     return _enter(text, 'void Interpreter::EndFrame()',

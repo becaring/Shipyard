@@ -2642,6 +2642,9 @@ void RetireFramebufferDepth() {
     published_depth.spare_width = published_depth.width;
     published_depth.spare_height = published_depth.height;
 }
+bool PublishedFramebufferDepthBusy() {
+    return published_depth.texture && published_depth.texture->IsBusy() != FALSE;
+}
 void PublishFramebufferDepth(int id) {
     RetireFramebufferDepth();
     if (id < 0 || (size_t)id >= buffers.size() ||

@@ -20,5 +20,7 @@ void DiscardPresentationColorOnEnd();
 // depth, and a later depth resolve of the target writes other storage.
 void PublishFramebufferDepth(int id);
 void RetireFramebufferDepth();
+// The GPU has not finished the published depth, so locking it would wait.
+bool PublishedFramebufferDepthBusy();
 }
 }
