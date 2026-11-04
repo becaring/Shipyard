@@ -62,6 +62,103 @@ def _otr_includes(text):
     return text
 
 
+MERGE_VERTEX_LISTS = """void ZDisplayList::MergeConnectingVertexLists()
+{
+	if (vertices.empty())
+		return;
+	std::map<uint32_t, std::vector<ZVtx> >::iterator last = vertices.begin();
+	std::map<uint32_t, std::vector<ZVtx> >::iterator current = last;
+	for (++current; current != vertices.end();)
+	{
+		size_t lastEnd = last->first + last->second.size() * 16;
+		if (lastEnd >= current->first)
+		{
+			for (size_t j = (lastEnd - current->first) / 16; j < current->second.size(); j++)
+				last->second.push_back(current->second[j]);
+			vertices.erase(current++);
+		}
+		else
+			last = current++;
+	}
+}
+
+"""
+
+# Every resource registers its XML attributes, and display lists hold thousands of
+# vertex resources, so a vector keeps construction and copies to one allocation.
+RESOURCE_ATTRIBUTES = """class ResourceAttributes
+{
+public:
+	typedef std::pair<std::string, ResourceAttribute> value_type;
+	typedef std::vector<value_type>::iterator iterator;
+	typedef std::vector<value_type>::const_iterator const_iterator;
+	iterator begin() { return items.begin(); }
+	iterator end() { return items.end(); }
+	const_iterator begin() const { return items.begin(); }
+	const_iterator end() const { return items.end(); }
+	iterator find(const std::string& key)
+	{
+		for (iterator it = items.begin(); it != items.end(); ++it)
+			if (it->first == key)
+				return it;
+		return items.end();
+	}
+	const_iterator find(const std::string& key) const
+	{
+		for (const_iterator it = items.begin(); it != items.end(); ++it)
+			if (it->first == key)
+				return it;
+		return items.end();
+	}
+	size_t count(const std::string& key) const { return find(key) != end() ? 1 : 0; }
+	// Same result as assigning a fresh attribute through operator[].
+	void Register(const std::string& key, bool required, const std::string& value)
+	{
+		iterator it = find(key);
+		if (it == items.end())
+		{
+			if (items.empty())
+				items.reserve(8);
+			items.push_back(value_type(key, ResourceAttribute()));
+			it = items.end() - 1;
+		}
+		it->second.key = key;
+		it->second.value = value;
+		it->second.isRequired = required;
+		it->second.wasSet = false;
+	}
+	ResourceAttribute& operator[](const std::string& key)
+	{
+		iterator it = find(key);
+		if (it != items.end())
+			return it->second;
+		if (items.empty())
+			items.reserve(8);
+		items.push_back(value_type(key, ResourceAttribute()));
+		return items.back().second;
+	}
+	ResourceAttribute& at(const std::string& key)
+	{
+		iterator it = find(key);
+		if (it == items.end())
+			throw std::out_of_range("unregistered resource attribute: " + key);
+		return it->second;
+	}
+	const ResourceAttribute& at(const std::string& key) const
+	{
+		const_iterator it = find(key);
+		if (it == items.end())
+			throw std::out_of_range("unregistered resource attribute: " + key);
+		return it->second;
+	}
+
+private:
+	std::vector<value_type> items;
+};
+
+"""
+
+
 def _file_specific(name, text, parser):
     if name.startswith('OTRExporter/'):
         text = _otr_includes(text)
@@ -100,7 +197,14 @@ def _file_specific(name, text, parser):
     elif name == 'ZAPD/ZDisplayList.cpp':
         # Instructions are native 64-bit words after parsing.
         text = _once(text, 'gfxd_endian(gfxd_endian_little, sizeof(uint64_t));', 'gfxd_endian(gfxd_endian_host, sizeof(uint64_t));')
+        # Upstream copies every vertex list to walk the map; this walks it in place.
+        start = text.index('void ZDisplayList::MergeConnectingVertexLists()\n{\n')
+        end = text.index('void ZDisplayList::TextureGenCheck()\n')
+        text = text[:start] + MERGE_VERTEX_LISTS + text[end:]
     elif name == 'ZAPD/ZResource.h':
+        text = _once(text, '\tstd::map<std::string, ResourceAttribute> registeredAttributes;',
+                     '\tResourceAttributes registeredAttributes;')
+        text = _once(text, 'class ZResource\n{\npublic:\n', RESOURCE_ATTRIBUTES + 'class ZResource\n{\npublic:\n')
         # Some limb and room fields are never assigned; zeroed blocks match desktop archives.
         text = _once(text, 'class ZResource\n{\npublic:\n',
                      'class ZResource\n{\npublic:\n'
@@ -113,6 +217,9 @@ def _file_specific(name, text, parser):
         text = _once(text, 'using ConfigFunc = void (GameConfig::*)(const tinyxml2::XMLElement&);',
                      'typedef void (GameConfig::*ConfigFunc)(const tinyxml2::XMLElement&);')
         text = _once(text, 'std::invoke(it->second, *this, *child);', '(this->*(it->second))(*child);')
+        # The texture pool names C include files only; skipping it skips a CRC of every texture.
+        text = _once(text, '\tstd::string fileName = element.Attribute("File");\n'
+                     '\tReadTexturePool(Path::GetDirectoryName(configFilePath) / fileName);\n', '')
     elif name == 'ZAPD/Main.cpp':
         text = _zapd_main(text)
     elif name == 'ZAPD/ZRom.h':
@@ -156,12 +263,35 @@ def _file_specific(name, text, parser):
             raise ValueError('Display-list export guard inventory changed')
         # Extract-directory mode never writes Extract/, so only the archive answers membership.
         text = text.replace(guard, '!ArchiveContains(fName)')
+        # The dungeon pattern compiled once per call dominated path naming.
+        text = _once(text, '\t\tstd::regex dungeonsWithMQ(', '\t\tstatic const std::regex dungeonsWithMQ(')
+        text = _once(text, '\tstd::string prefix = GetPrefix(res);\n'
+                     '\tstd::string fName = StringHelper::Sprintf("%s/%s", GetParentFolderName(res).c_str(), varName.c_str());',
+                     '\tstd::string fName = StringHelper::Sprintf("%s/%s", GetParentFolderName(res).c_str(), varName.c_str());')
     elif name == 'ZAPD/ZFile.cpp':
         # Delegation to the default constructor becomes its statements at the top of each body.
         start = text.index('ZFile::ZFile()\n{\n') + len('ZFile::ZFile()\n{\n')
         defaults = text[start:text.index('}\n', start)]
         text = _once(text, ' : ZFile()\n{\n', '\n{\n' + defaults)
         text = _once(text, '\t: ZFile()\n{\n', '{\n' + defaults)
+        # Archive extraction writes no files, so it creates no output folders.
+        text = _once(text, '\tif (!Directory::Exists(outputPath))\n\t\tDirectory::CreateDirectory(outputPath.string());\n\n'
+                     '\tif (!Directory::Exists(GetSourceOutputFolderPath()))\n'
+                     '\t\tDirectory::CreateDirectory(GetSourceOutputFolderPath().string());\n\n', '')
+    elif name == 'ZAPD/ZTexture.cpp':
+        # Only the texture pool reads the hash, and archive extraction loads no pool.
+        text = _once(text, '\t\tconst auto& parentRawData = parent->GetRawData();\n'
+                     '\t\thash = CRC32B(parentRawData.data() + rawDataIndex, GetRawDataSize());\n',
+                     '\t\tif (Globals::Instance->cfg.texturePool.empty())\n\t\t\treturn;\n'
+                     '\t\tconst auto& parentRawData = parent->GetRawData();\n'
+                     '\t\thash = CRC32B(parentRawData.data() + rawDataIndex, GetRawDataSize());\n')
+    elif name == 'ZAPD/ZResource.cpp':
+        text = _once(text, '\tResourceAttribute resAtrr;\n\tresAtrr.key = attr;\n\tresAtrr.isRequired = true;\n'
+                     '\tregisteredAttributes[attr] = resAtrr;\n',
+                     '\tregisteredAttributes.Register(attr, true, std::string());\n')
+        text = _once(text, '\tResourceAttribute resAtrr;\n\tresAtrr.key = attr;\n\tresAtrr.value = defaultValue;\n'
+                     '\tregisteredAttributes[attr] = resAtrr;\n',
+                     '\tregisteredAttributes.Register(attr, false, defaultValue);\n')
     elif name == 'ZAPD/ZRoom/Commands/SetRoomList.cpp':
         text = _once(text, '\t: RoomEntry(BitConverter::ToInt32BE(rawData, rawDataIndex + 0),\n'
                      '                BitConverter::ToInt32BE(rawData, rawDataIndex + 4))\n{\n}',
@@ -233,6 +363,52 @@ def _zapd_main(text):
                 '\t\t\t\t}\n\n\t\t\t\tif (!Globals::Instance->singleThreaded)')
     text = _cut(text, '\t\t\t\tif (!Globals::Instance->singleThreaded)\n\t\t\t\t{\n\t\t\t\t\twhile (true)',
                 '\t\t\t\tauto end = std::chrono::steady_clock::now();')
+    return _shared_externals(text)
+
+
+def _shared_externals(text):
+    """Parse the config's external files once per run instead of once per listed file.
+
+    Listed files only read external files' declarations, so every file sees the same
+    external state; upstream rebuilds gameplay_keep and the others for each one.
+    """
+    text = _once(text, '#include <string>\n', '#include <string>\n#include <algorithm>\n')
+    text = _once(text, 'int ExtractFunc(int workerID, int fileListSize, std::string fileListItem, ZFileMode fileMode)\n{\n',
+                 'static std::vector<ZFile*> sConfigExternals;\n'
+                 'static bool sConfigExternalsParsed = false;\n\n'
+                 'int ExtractFunc(int workerID, int fileListSize, std::string fileListItem, ZFileMode fileMode)\n{\n')
+    start = text.index('\tfor (auto& extFile : Globals::Instance->cfg.externalFiles)\n\t{\n')
+    end = text.index('\tparseSuccessful = Parse(fileListItem, Globals::Instance->baseRomPath,')
+    loop = text[start:end]
+    text = text[:start] + (
+        '\tif (sConfigExternalsParsed)\n'
+        '\t{\n'
+        '\t\tfor (size_t e = 0; e < sConfigExternals.size(); e++)\n'
+        '\t\t{\n'
+        '\t\t\tGlobals::Instance->AddFile(sConfigExternals[e], workerID);\n'
+        '\t\t\tGlobals::Instance->AddExternalFile(sConfigExternals[e], workerID);\n'
+        '\t\t\tGlobals::Instance->AddSegment(sConfigExternals[e]->segment, sConfigExternals[e], workerID);\n'
+        '\t\t}\n'
+        '\t}\n'
+        '\telse\n'
+        '\t{\n'
+        '\tsize_t externalStart = Globals::Instance->files.size();\n'
+        + loop.rstrip('\n') + '\n'
+        '\tsConfigExternals.assign(Globals::Instance->files.begin() + externalStart, Globals::Instance->files.end());\n'
+        '\tsConfigExternalsParsed = true;\n'
+        '\t}\n\n') + text[end:]
+    text = _once(text, '\t\tfor (int i = 0; i < Globals::Instance->files.size(); i++)\n\t\t{\n'
+                 '\t\t\tdelete Globals::Instance->files[i];\n',
+                 '\t\tfor (int i = 0; i < Globals::Instance->files.size(); i++)\n\t\t{\n'
+                 '\t\t\tif (std::find(sConfigExternals.begin(), sConfigExternals.end(), Globals::Instance->files[i]) ==\n'
+                 '\t\t\t    sConfigExternals.end())\n'
+                 '\t\t\t\tdelete Globals::Instance->files[i];\n')
+    text = _once(text, '\t\t\t\tauto end = std::chrono::steady_clock::now();',
+                 '\t\t\t\tfor (size_t e = 0; e < sConfigExternals.size(); e++)\n'
+                 '\t\t\t\t\tdelete sConfigExternals[e];\n'
+                 '\t\t\t\tsConfigExternals.clear();\n'
+                 '\t\t\t\tsConfigExternalsParsed = false;\n'
+                 '\t\t\t\tauto end = std::chrono::steady_clock::now();')
     return text
 
 
