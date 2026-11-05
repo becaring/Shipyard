@@ -503,6 +503,16 @@ bool ArchiveContains(const std::string& fName)
     return text
 
 
+# libultraship defines global utility classes of the same names; distinct names keep
+# both copies, since their header-only methods would otherwise merge at link time.
+_UTILITIES = re.compile(r'(?<![\w:.])(StringHelper|BitConverter|DiskFile|Directory|Path)(?=::)')
+_UTILITY_CLASSES = re.compile(r'\bclass (StringHelper|BitConverter|DiskFile|Directory|Path)\b')
+
+
+def _utility_names(text):
+    return _UTILITY_CLASSES.sub(r'class Zapd\1', _UTILITIES.sub(r'Zapd\1', text))
+
+
 def _syntax(text):
     text = scoped_enums(text)
     text = re.sub(r'\[\[[a-z_]+\]\]\s*', '', text)
@@ -697,7 +707,7 @@ def project(zapd_root, otr_root, lus_root, resource_types, animation, output, pa
                        ('lus/GameResourceType.h', Path(resource_types))):
         sources[name] = path.read_bytes().decode().replace('\r\n', '\n')
     sources['lus/GameAnimation.h'] = _enum_header(Path(animation).read_bytes().decode(), 'AnimationType')
-    files = {name: _syntax(_file_specific(name, text, parser)) for name, text in sources.items()}
+    files = {name: _syntax(_utility_names(_file_specific(name, text, parser))) for name, text in sources.items()}
     headers = dict((name, text) for name, text in files.items() if name.endswith('.h'))
     sources = dict((name, text) for name, text in files.items() if not name.endswith('.h'))
     _member_defaults(headers, sources, parser)
