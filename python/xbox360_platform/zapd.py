@@ -254,6 +254,14 @@ def _file_specific(name, text, parser):
                      '\telse\n\t\tromData = DiskFile::ReadAllBytes(romPath);')
         text = _once(text, 'ZRom::ZRom(std::string romPath)', 'std::vector<uint8_t>* gShipyardZapdRom = nullptr;\n\n'
                      'ZRom::ZRom(std::string romPath)')
+        # Files are copied out above; later reads use only the header's version word.
+        text = _once(text, '\t\t//DiskFile::WriteAllBytes(StringHelper::Sprintf("baserom/%s", lines[i].c_str()), files[lines[i]]);\n'
+                     '\t}\n}\n',
+                     '\t\t//DiskFile::WriteAllBytes(StringHelper::Sprintf("baserom/%s", lines[i].c_str()), files[lines[i]]);\n'
+                     '\t}\n\tstd::vector<uint8_t>(romData.begin(), romData.begin() + 0x40).swap(romData);\n}\n')
+    elif name == 'ZAPD/ZPlayerAnimationData.cpp':
+        # The raw size already spans every frame; upstream reserved frameCount times it.
+        text = _once(text, '\tlimbRotData.reserve(totalSize * frameCount / 2);', '\tlimbRotData.reserve(totalSize / 2);')
     elif name == 'ZAPD/Utils/BitConverter.h':
         # Swap bytes explicitly; storing a big-endian read natively is a no-op on big-endian hosts.
         text = _once(text, '((uint16_t*)rom)[pos] = ToUInt16BE(rom, pos * 2);',
