@@ -15,7 +15,7 @@ Shipyard is the Xbox 360 code shared by ports built on libultraship. It handles 
 |---|---|---|
 | [3Shipsty](https://github.com/becaring/3Shipsty) | Ship of Harkinian 9.2.3 (Ocarina of Time) | Tested on hardware |
 | [Warwing](https://github.com/becaring/Warwing) | BattleShip (Super Smash Bros. 64) | Tested on hardware |
-| [2Ship3Shipsty](https://github.com/becaring/2Ship3Shipsty) | 2Ship2Harkinian 5.0.1 (Majora's Mask) | In testing |
+| 2Ship3Shipsty | 2Ship2Harkinian 5.0.1 (Majora's Mask) | In testing |
 
 ## Reporting a problem
 
