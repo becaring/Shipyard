@@ -1,6 +1,7 @@
 // In-process ZAPD extraction into a stored O2R archive. The adapter supplies
 // the asset paths, its normalized big-endian ROM, and optional progress
-// counters; extraction runs on the calling thread and is not reentrant.
+// counters; extraction runs on the calling thread and any helper threads it
+// asks for, and is not reentrant.
 #ifndef SHIPYARD_ZAPD_EXTRACT_H
 #define SHIPYARD_ZAPD_EXTRACT_H
 #include <stddef.h>
@@ -23,7 +24,8 @@ struct Request {
     volatile size_t* total;        // XML files to process, or null
     LogSink log;                   // null discards exporter diagnostics
     std::string* stages;           // receives seconds per extraction stage, or null
-    Request() : rom(NULL), done(NULL), total(NULL), log(NULL), stages(NULL) {}
+    int helpers;                   // threads to add on hardware threads 4, 5 and 2, at most 3
+    Request() : rom(NULL), done(NULL), total(NULL), log(NULL), stages(NULL), helpers(0) {}
 };
 
 // Returns ZAPD's exit code: zero once the archive is complete.

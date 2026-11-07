@@ -286,6 +286,20 @@ def _file_specific(name, text, parser):
                      '\tReadTexturePool(Path::GetDirectoryName(configFilePath) / fileName);\n', '')
     elif name == 'ZAPD/Main.cpp':
         text = _zapd_main(text)
+    elif name == 'ZAPD/Globals.h':
+        # Each extraction thread runs its own copy of the configured globals.
+        text = _once(text, '\tstatic Globals* Instance;', '\tstatic __declspec(thread) Globals* Instance;')
+        text = _once(text, '\tstd::map<int, FileWorker*> workerData;\n',
+                     '\tstd::map<int, FileWorker*> workerData;\n'
+                     '\tstd::vector<ZFile*> configExternals;  // the config\'s external files, parsed once per thread\n'
+                     '\tbool configExternalsParsed = false;\n')
+    elif name == 'ZAPD/Globals.cpp':
+        text = _once(text, 'Globals* Globals::Instance;', '__declspec(thread) Globals* Globals::Instance;')
+    elif name == 'OTRExporter/Exporter.cpp':
+        # Workers share the version table, so a lookup must not insert.
+        text = _once(text, '\twriter->Write((uint32_t)resourceVersions[resType]); // 0x10',
+                     '\twriter->Write((uint32_t)(resourceVersions.count((uint32_t)resType) ? '
+                     'resourceVersions.find((uint32_t)resType)->second : 0)); // 0x10')
     elif name == 'ZAPD/ZRom.h':
         text = _once(text, '    bool IsMQ();', '    bool IsMQ();\n'
                      '    uint32_t GetVersionCrc() const\n    {\n'
@@ -297,6 +311,8 @@ def _file_specific(name, text, parser):
         text = _once(text, '\tromData = DiskFile::ReadAllBytes(romPath);',
                      '\tif (gShipyardZapdRom != nullptr)\n\t\tromData.swap(*gShipyardZapdRom);\n'
                      '\telse\n\t\tromData = DiskFile::ReadAllBytes(romPath);')
+        text = _once(text, '\treturn files[fileName];', '\tauto it = files.find(fileName);\n'
+                     '\treturn it != files.end() ? it->second : std::vector<uint8_t>();')
         text = _once(text, 'ZRom::ZRom(std::string romPath)', 'std::vector<uint8_t>* gShipyardZapdRom = nullptr;\n\n'
                      'ZRom::ZRom(std::string romPath)')
         # Files are copied out above; later reads use only the header's version word.
@@ -336,7 +352,11 @@ def _file_specific(name, text, parser):
         # Extract-directory mode never writes Extract/, so only the archive answers membership.
         text = text.replace(guard, '!ArchiveContains(fName)')
         # The dungeon pattern compiled once per call dominated path naming.
-        text = _once(text, '\t\tstd::regex dungeonsWithMQ(', '\t\tstatic const std::regex dungeonsWithMQ(')
+        pattern = re.search(r'\t\tstd::regex dungeonsWithMQ\((.*)\);\n', text)
+        text = _once(text, pattern[0], '')
+        text = _once(text, '#elif GAME_OOT\nstd::string OTRExporter_DisplayList::GetPrefix(ZResource* res)\n',
+                     '#elif GAME_OOT\nstatic const std::regex dungeonsWithMQ(' + pattern[1] + ');\n\n'
+                     'std::string OTRExporter_DisplayList::GetPrefix(ZResource* res)\n')
         text = _once(text, '\tstd::string prefix = GetPrefix(res);\n'
                      '\tstd::string fName = StringHelper::Sprintf("%s/%s", GetParentFolderName(res).c_str(), varName.c_str());',
                      '\tstd::string fName = StringHelper::Sprintf("%s/%s", GetParentFolderName(res).c_str(), varName.c_str());')
@@ -436,7 +456,7 @@ def _zapd_main(text):
                 '\t\t\t\t}\n\n\t\t\t\tif (!Globals::Instance->singleThreaded)')
     text = _cut(text, '\t\t\t\tif (!Globals::Instance->singleThreaded)\n\t\t\t\t{\n\t\t\t\t\twhile (true)',
                 '\t\t\t\tauto end = std::chrono::steady_clock::now();')
-    return _stage_timers(_shared_externals(text))
+    return _stage_timers(_parallel_files(_shared_externals(text)))
 
 
 def _stage_timers(text):
@@ -489,49 +509,122 @@ def _raw_data_views(files):
     return files
 
 def _shared_externals(text):
-    """Parse the config's external files once per run instead of once per listed file.
+    """Parse the config's external files once per extraction thread instead of once per listed file.
 
     Listed files only read external files' declarations, so every file sees the same
     external state; upstream rebuilds gameplay_keep and the others for each one.
     """
-    text = _once(text, '#include <string>\n', '#include <string>\n#include <algorithm>\n')
-    text = _once(text, 'int ExtractFunc(int workerID, int fileListSize, std::string fileListItem, ZFileMode fileMode)\n{\n',
-                 'static std::vector<ZFile*> sConfigExternals;\n'
-                 'static bool sConfigExternalsParsed = false;\n\n'
-                 'int ExtractFunc(int workerID, int fileListSize, std::string fileListItem, ZFileMode fileMode)\n{\n')
+    text = _once(text, '#include <string>\n', '#include <string>\n#include <algorithm>\n#include <stdexcept>\n')
     start = text.index('\tfor (auto& extFile : Globals::Instance->cfg.externalFiles)\n\t{\n')
     end = text.index('\tparseSuccessful = Parse(fileListItem, Globals::Instance->baseRomPath,')
     loop = text[start:end]
     text = text[:start] + (
-        '\tif (sConfigExternalsParsed)\n'
+        '\tif (Globals::Instance->configExternalsParsed)\n'
         '\t{\n'
-        '\t\tfor (size_t e = 0; e < sConfigExternals.size(); e++)\n'
+        '\t\tconst std::vector<ZFile*>& externals = Globals::Instance->configExternals;\n'
+        '\t\tfor (size_t e = 0; e < externals.size(); e++)\n'
         '\t\t{\n'
-        '\t\t\tGlobals::Instance->AddFile(sConfigExternals[e], workerID);\n'
-        '\t\t\tGlobals::Instance->AddExternalFile(sConfigExternals[e], workerID);\n'
-        '\t\t\tGlobals::Instance->AddSegment(sConfigExternals[e]->segment, sConfigExternals[e], workerID);\n'
+        '\t\t\tGlobals::Instance->AddFile(externals[e], workerID);\n'
+        '\t\t\tGlobals::Instance->AddExternalFile(externals[e], workerID);\n'
+        '\t\t\tGlobals::Instance->AddSegment(externals[e]->segment, externals[e], workerID);\n'
         '\t\t}\n'
         '\t}\n'
         '\telse\n'
         '\t{\n'
         '\tsize_t externalStart = Globals::Instance->files.size();\n'
         + loop.rstrip('\n') + '\n'
-        '\tsConfigExternals.assign(Globals::Instance->files.begin() + externalStart, Globals::Instance->files.end());\n'
-        '\tsConfigExternalsParsed = true;\n'
+        '\tGlobals::Instance->configExternals.assign(Globals::Instance->files.begin() + externalStart,\n'
+        '\t                                           Globals::Instance->files.end());\n'
+        '\tGlobals::Instance->configExternalsParsed = true;\n'
         '\t}\n\n') + text[end:]
     text = _once(text, '\t\tfor (int i = 0; i < Globals::Instance->files.size(); i++)\n\t\t{\n'
                  '\t\t\tdelete Globals::Instance->files[i];\n',
                  '\t\tfor (int i = 0; i < Globals::Instance->files.size(); i++)\n\t\t{\n'
-                 '\t\t\tif (std::find(sConfigExternals.begin(), sConfigExternals.end(), Globals::Instance->files[i]) ==\n'
-                 '\t\t\t    sConfigExternals.end())\n'
+                 '\t\t\tconst std::vector<ZFile*>& externals = Globals::Instance->configExternals;\n'
+                 '\t\t\tif (std::find(externals.begin(), externals.end(), Globals::Instance->files[i]) == externals.end())\n'
                  '\t\t\t\tdelete Globals::Instance->files[i];\n')
-    text = _once(text, '\t\t\t\tauto end = std::chrono::steady_clock::now();',
-                 '\t\t\t\tfor (size_t e = 0; e < sConfigExternals.size(); e++)\n'
-                 '\t\t\t\t\tdelete sConfigExternals[e];\n'
-                 '\t\t\t\tsConfigExternals.clear();\n'
-                 '\t\t\t\tsConfigExternalsParsed = false;\n'
-                 '\t\t\t\tauto end = std::chrono::steady_clock::now();')
     return text
+
+
+EXTRACT_QUEUE = """// Extraction threads take listed files in turn. Helpers copy the configured globals
+// before any file is parsed and share only the ROM, so no file's resources cross threads.
+struct ExtractQueue
+{
+	const std::vector<std::string>& files;
+	ZFileMode fileMode;
+	volatile size_t* extractCount;
+	Globals* configured;
+	volatile long next;
+	volatile long done;
+	volatile long failed;
+
+	ExtractQueue(const std::vector<std::string>& list, ZFileMode mode, volatile size_t* count)
+		: files(list), fileMode(mode), extractCount(count), configured(new Globals(*Globals::Instance)), next(0),
+		  done(0), failed(0)
+	{
+	}
+	~ExtractQueue()
+	{
+		configured->rom = nullptr;
+		delete configured;
+	}
+
+	// Runs on every extraction thread; worker 0 is the thread that owns the configured globals.
+	static void Work(void* context, int worker)
+	{
+		ExtractQueue& queue = *static_cast<ExtractQueue*>(context);
+		Globals* owner = Globals::Instance;
+		if (worker != 0)
+			Globals::Instance = new Globals(*queue.configured);
+		try
+		{
+			for (long i = ShipyardZapdIncrement(&queue.next) - 1; i < (long)queue.files.size() && !queue.failed;
+			     i = ShipyardZapdIncrement(&queue.next) - 1)
+			{
+				ExtractFunc(i, (int)queue.files.size(), queue.files[i], queue.fileMode);
+				const long finished = ShipyardZapdIncrement(&queue.done);
+				if (queue.extractCount != nullptr)
+					*queue.extractCount = finished;
+			}
+		}
+		catch (...)
+		{
+			queue.failed = 1;
+		}
+		std::vector<ZFile*>& externals = Globals::Instance->configExternals;
+		for (size_t e = 0; e < externals.size(); e++)
+			delete externals[e];
+		externals.clear();
+		Globals::Instance->configExternalsParsed = false;
+		if (worker != 0)
+		{
+			Globals::Instance->rom = nullptr;
+			delete Globals::Instance;
+			Globals::Instance = owner;
+		}
+	}
+};
+
+"""
+
+
+def _parallel_files(text):
+    """Run the listed files on the adapter's extraction threads; see EXTRACT_QUEUE."""
+    text = _once(text, '\t\t\t\tfor (size_t i = 0; i < fileListSize; i++)\n'
+                 '\t\t\t\t\tGlobals::Instance->workerData[i] = new FileWorker();\n\n', '')
+    text = _once(text, '\t\t\t\tfor (size_t i = 0; i < fileListSize; i++)\n\t\t\t\t{\n'
+                 '\t\t\t\t\tif (Globals::Instance->singleThreaded)\n\t\t\t\t\t{\n'
+                 '\t\t\t\t\t\tExtractFunc(i, fileList.size(), fileList[i], fileMode);\n'
+                 '\t\t\t\t\t\tif (extractCount != nullptr) {\n\t\t\t\t\t\t\t*extractCount = i;\n'
+                 '\t\t\t\t\t\t}\n\t\t\t\t\t}\n\t\t\t\t}\n',
+                 '\t\t\t\t{\n\t\t\t\t\tExtractQueue queue(fileList, fileMode, extractCount);\n'
+                 '\t\t\t\t\tShipyardZapdRunParallel(&ExtractQueue::Work, &queue);\n'
+                 '\t\t\t\t\tif (queue.failed)\n'
+                 '\t\t\t\t\t\tthrow std::runtime_error("ZAPD extraction thread failed");\n'
+                 '\t\t\t\t}\n')
+    definition = ('int HandleExtract(ZFileMode fileMode, ExporterSet* exporterSet, volatile size_t* extractCount, '
+                  'volatile size_t* totalExtract)\n{')
+    return _once(text, definition, EXTRACT_QUEUE + definition)
 
 
 def _otr_main(text):
@@ -551,6 +644,7 @@ static std::set<std::string> sGenuineLogos;
 static void StreamFile(std::string fName, const std::vector<char>& data)
 {
     ShipyardZapdTimer timer(ZapdStageArchive);
+    ShipyardZapdArchiveLock lock;
     if (!sArchiveOpen)
         sArchiveOpen = sArchive.Open(archiveFileName.c_str());
     if (fName.find("gTitleZeldaShieldLogoMQTex") != std::string::npos)
@@ -569,10 +663,14 @@ static void StreamFile(std::string fName, const std::vector<char>& data)
 
 bool ArchiveContains(const std::string& fName)
 {
+    ShipyardZapdArchiveLock lock;
     return sArchive.Contains(fName);
 }
 ''')
     text = _cut(text, '        printf("BOTR: Generating OTR Archive...\\n");', '    }\n}\n')
+    # Nothing writes the per-file writer, which upstream leaks for every file.
+    text = _once(text, '    fileStart = std::chrono::steady_clock::now();\n\n'
+                 '    MemoryStream* stream = new MemoryStream();\n    fileWriter = new BinaryWriter(stream);\n', '')
     text = _once(text, '        std::string romPath = Globals::Instance->baseRomPath.string();\n'
                  '        std::vector<uint8_t> romData = DiskFile::ReadAllBytes(romPath);\n\n'
                  '        BitConverter::RomToBigEndian(romData.data(), romData.size());\n\n'
@@ -623,7 +721,7 @@ def _syntax(text):
     text = re.sub(r'\)\s*=\s*default;', ') {}', text)
     text = re.sub(r'\b(class \w+) final\b', r'\1', text)
     text = text.replace(' final override', ' override')
-    text = re.sub(r'\bthread_local\s+', '', text)
+    text = re.sub(r'\bthread_local\s+', '__declspec(thread) ', text)
     text = text.replace('#include <string_view>', '')
     text = text.replace('#include <chrono>', '#include <zapd/chrono.h>')
     text = text.replace('#include <cinttypes>', '#include <zapd/compat.h>')
@@ -784,8 +882,6 @@ def gfxd_sources(gfxd_root):
     for path in sorted(Path(gfxd_root).iterdir()):
         if path.suffix in ('.c', '.h'):
             raw[path.name] = path.read_bytes().decode().replace('\r\n', '\n')
-    # Extraction runs gfxd on one thread, so its state needs no thread-local storage.
-    raw['priv.h'] = _once(raw['priv.h'], '#define CONFIG_MT\n\n', '')
     return {name: gfxd.adapt(name, text, revision=gfxd.REVISION, gbi=raw['gbi.h']) for name, text in raw.items()}
 
 

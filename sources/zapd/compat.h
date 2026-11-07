@@ -35,12 +35,22 @@ inline xbox_compat::filesystem::recursive_directory_iterator PrismEnd(
 void ShipyardZapdLog(const std::string& message);
 template <class T> void ShipyardZapdLog(const char* format, const T&) { ShipyardZapdLog(std::string(format)); }
 
-// Seconds spent in each extraction stage, which Shipyard::Zapd::Extract reports.
+// Runs work(context, worker) on the calling thread as worker 0 and on each helper
+// thread the request asks for, then waits for the helpers. work must not throw.
+void ShipyardZapdRunParallel(void (*work)(void* context, int worker), void* context);
+long ShipyardZapdIncrement(volatile long* value);
+// Held while a thread uses the archive writer the extraction threads share.
+struct ShipyardZapdArchiveLock {
+    ShipyardZapdArchiveLock();
+    ~ShipyardZapdArchiveLock();
+};
+
+// Seconds this thread spent in each extraction stage; Shipyard::Zapd::Extract sums the threads.
 enum ShipyardZapdStage {
     ZapdStageConfig, ZapdStageRom, ZapdStageXml, ZapdStageParse, ZapdStageExport, ZapdStageArchive, ZapdStageFree,
     ZapdStageFinish, ZapdStageCount
 };
-extern double gShipyardZapdSeconds[ZapdStageCount];
+extern __declspec(thread) double gShipyardZapdSeconds[ZapdStageCount];
 double ShipyardZapdClock();
 struct ShipyardZapdTimer {
     int stage;
