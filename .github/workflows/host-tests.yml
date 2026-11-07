@@ -20,4 +20,5 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: '3.13'
+      - run: python -m pip install tree-sitter==0.26.0 tree-sitter-c==0.24.2 tree-sitter-cpp==0.23.4
       - run: python -B python/test_host.py

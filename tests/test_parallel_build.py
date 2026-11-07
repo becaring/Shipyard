@@ -64,15 +64,17 @@ class ParallelBuildTests(unittest.TestCase):
 project=pathlib.Path(sys.argv[1])
 root=ET.parse(project).getroot()
 ns='{http://schemas.microsoft.com/developer/msbuild/2003}'
-folder=pathlib.Path(root.find('.//'+ns+'IntDir').text)
+# MSBuild paths use backslashes; normalize them so the fake also runs on Linux CI.
+path=lambda text: pathlib.Path(text.replace('\\\\','/'))
+folder=path(root.find('.//'+ns+'IntDir').text)
 folder.mkdir(parents=True,exist_ok=True)
 lines=[]
 time.sleep(0.35)
 for item in root.findall('.//'+ns+'ClCompile[@Include]'):
-    source=pathlib.Path(item.attrib['Include'].replace('$(ProjectDir)',str(project.parent)+'\\\\'))
+    source=path(item.attrib['Include'].replace('$(ProjectDir)',str(project.parent)+'/'))
     if b'FAIL' in source.read_bytes():
         sys.exit(1)
-    obj=pathlib.Path(item.find(ns+'ObjectFileName').text)
+    obj=path(item.find(ns+'ObjectFileName').text)
     obj.parent.mkdir(parents=True,exist_ok=True)
     if not obj.exists():
         obj.write_bytes(struct.pack('<H',0x1f2)+b'PPC-OBJECT'+pathlib.Path(sys.argv[-1]).read_bytes())
