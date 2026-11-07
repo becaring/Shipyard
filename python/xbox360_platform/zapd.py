@@ -296,6 +296,7 @@ def _file_specific(name, text, parser):
                      '\tstd::string fName = StringHelper::Sprintf("%s/%s", GetParentFolderName(res).c_str(), varName.c_str());',
                      '\tstd::string fName = StringHelper::Sprintf("%s/%s", GetParentFolderName(res).c_str(), varName.c_str());')
     elif name == 'ZAPD/ZFile.cpp':
+        text = _type_timers(text)
         # Delegation to the default constructor becomes its statements at the top of each body.
         start = text.index('ZFile::ZFile()\n{\n') + len('ZFile::ZFile()\n{\n')
         defaults = text[start:text.index('}\n', start)]
@@ -411,6 +412,21 @@ def _stage_timers(text):
     return _once(text, '\tif (exporterSet != nullptr && exporterSet->endProgramFunc != nullptr)\n\t\texporterSet->endProgramFunc();\n',
                  '\tif (exporterSet != nullptr && exporterSet->endProgramFunc != nullptr)\n\t{\n'
                  '\t\tShipyardZapdTimer timer(ZapdStageFinish);\n\t\texporterSet->endProgramFunc();\n\t}\n')
+
+
+def _type_timers(text):
+    """Split the parse and export stages by resource type."""
+    text = _once(text, '\t\t\t\t\tnRes->ExtractWithXML(child, rawDataIndex);\n',
+                 '\t\t\t\t{\n\t\t\t\t\tShipyardZapdTypeTimer timer(ZapdStageParse, nodeName);\n'
+                 '\t\t\t\t\tnRes->ExtractWithXML(child, rawDataIndex);\n\t\t\t\t}\n')
+    text = _once(text, '\t\tDeclareResourceSubReferences();\n',
+                 '\t{\n\t\tShipyardZapdTypeTimer timer(ZapdStageParse, "references");\n\t\tDeclareResourceSubReferences();\n\t}\n')
+    late = ('\tfor (size_t i = 0; i < resources.size(); i++)\n\t\tresources[i]->ParseRawDataLate();\n'
+            '\tfor (size_t i = 0; i < resources.size(); i++)\n\t\tresources[i]->DeclareReferencesLate(name);\n')
+    text = _once(text, late, '\t{\n\tShipyardZapdTypeTimer timer(ZapdStageExport, "late");\n' + late + '\t}\n')
+    return _once(text, '\t\tauto start = std::chrono::steady_clock::now();\n',
+                 '\t\tauto start = std::chrono::steady_clock::now();\n'
+                 '\t\tShipyardZapdTypeTimer typeTimer(ZapdStageExport, res->GetSourceTypeName());\n')
 
 
 def _shared_externals(text):

@@ -54,6 +54,16 @@ struct ShipyardZapdTimer {
     }
 };
 
+// Seconds per resource type within the parse and export stages.
+void ShipyardZapdAddTypeSeconds(int stage, const std::string& type, double seconds);
+struct ShipyardZapdTypeTimer {
+    int stage;
+    std::string type;
+    double start;
+    ShipyardZapdTypeTimer(int value, const std::string& name) : stage(value), type(name), start(ShipyardZapdClock()) {}
+    ~ShipyardZapdTypeTimer() { ShipyardZapdAddTypeSeconds(stage, type, ShipyardZapdClock() - start); }
+};
+
 // ZAPD reads through fopen and fstreams, which take only native absolute paths on the XDK.
 inline std::string ShipyardZapdNative(const xbox_compat::filesystem::path& value) {
     std::error_code error;
