@@ -103,20 +103,32 @@ JOIN_OVERLAPPING_VERTEX_LISTS = """		std::map<uint32_t, std::vector<ZVtx> >::ite
 
 """
 
-# Every resource registers its XML attributes, and display lists hold thousands of
-# vertex resources, so a vector keeps construction and copies to one allocation.
-RESOURCE_ATTRIBUTES = """class ResourceAttributes
+# Every resource registers its XML attributes, but only resources an XML declares read them.
+# A resource's registrations are a path in a per-thread tree that each resource of its type
+# shares, and it copies them into its own list once something reads them.
+RESOURCE_ATTRIBUTES = """struct ResourceAttributeNode
+{
+	const ResourceAttributeNode* parent;
+	std::string key;
+	std::string value;
+	bool isRequired;
+	std::vector<ResourceAttributeNode*> children;
+};
+
+class ResourceAttributes
 {
 public:
 	typedef std::pair<std::string, ResourceAttribute> value_type;
 	typedef std::vector<value_type>::iterator iterator;
 	typedef std::vector<value_type>::const_iterator const_iterator;
-	iterator begin() { return items.begin(); }
-	iterator end() { return items.end(); }
-	const_iterator begin() const { return items.begin(); }
-	const_iterator end() const { return items.end(); }
+	ResourceAttributes() : registered(nullptr) {}
+	iterator begin() { Own(); return items.begin(); }
+	iterator end() { Own(); return items.end(); }
+	const_iterator begin() const { Own(); return items.begin(); }
+	const_iterator end() const { Own(); return items.end(); }
 	iterator find(const std::string& key)
 	{
+		Own();
 		for (iterator it = items.begin(); it != items.end(); ++it)
 			if (it->first == key)
 				return it;
@@ -124,6 +136,7 @@ public:
 	}
 	const_iterator find(const std::string& key) const
 	{
+		Own();
 		for (const_iterator it = items.begin(); it != items.end(); ++it)
 			if (it->first == key)
 				return it;
@@ -133,12 +146,14 @@ public:
 	// Same result as assigning a fresh attribute through operator[].
 	void Register(const std::string& key, bool required, const std::string& value)
 	{
+		if (items.empty())
+		{
+			registered = Child(registered != nullptr ? registered : Root(), key, required, value);
+			return;
+		}
 		iterator it = find(key);
 		if (it == items.end())
 		{
-			// Eight keyed attributes fit one 480-byte arena block, which covers scalars and vectors.
-			if (items.empty())
-				items.reserve(8);
 			items.push_back(value_type(key, ResourceAttribute()));
 			it = items.end() - 1;
 		}
@@ -151,8 +166,6 @@ public:
 		iterator it = find(key);
 		if (it != items.end())
 			return it->second;
-		if (items.empty())
-			items.reserve(8);
 		items.push_back(value_type(key, ResourceAttribute()));
 		return items.back().second;
 	}
@@ -170,9 +183,82 @@ public:
 			throw std::out_of_range("unregistered resource attribute: " + key);
 		return it->second;
 	}
+	// Frees this thread's tree; no resource this thread made may remain.
+	static void ReleaseThreadRegistrations()
+	{
+		Release(threadRoot);
+		threadRoot = nullptr;
+	}
 
 private:
-	std::vector<value_type> items;
+	static ResourceAttributeNode* Root()
+	{
+		if (threadRoot == nullptr)
+		{
+			threadRoot = new ResourceAttributeNode();
+			threadRoot->parent = nullptr;
+			threadRoot->isRequired = false;
+		}
+		return threadRoot;
+	}
+	static const ResourceAttributeNode* Child(const ResourceAttributeNode* from, const std::string& key, bool required,
+	                                          const std::string& value)
+	{
+		ResourceAttributeNode* parent = const_cast<ResourceAttributeNode*>(from);
+		for (size_t i = 0; i < parent->children.size(); i++)
+		{
+			const ResourceAttributeNode* child = parent->children[i];
+			if (child->key == key && child->isRequired == required && child->value == value)
+				return child;
+		}
+		ResourceAttributeNode* node = new ResourceAttributeNode();
+		node->parent = parent;
+		node->key = key;
+		node->value = value;
+		node->isRequired = required;
+		parent->children.push_back(node);
+		return node;
+	}
+	static void Release(ResourceAttributeNode* node)
+	{
+		if (node == nullptr)
+			return;
+		for (size_t i = 0; i < node->children.size(); i++)
+			Release(node->children[i]);
+		delete node;
+	}
+	void Own() const
+	{
+		if (registered == nullptr)
+			return;
+		size_t depth = 0;
+		for (const ResourceAttributeNode* node = registered; node->parent != nullptr; node = node->parent)
+			depth++;
+		items.reserve(depth);
+		Apply(registered);
+		registered = nullptr;
+	}
+	void Apply(const ResourceAttributeNode* node) const
+	{
+		if (node->parent == nullptr)
+			return;
+		Apply(node->parent);
+		std::vector<value_type>::iterator it = items.begin();
+		while (it != items.end() && it->first != node->key)
+			++it;
+		if (it == items.end())
+		{
+			items.push_back(value_type(node->key, ResourceAttribute()));
+			it = items.end() - 1;
+		}
+		it->second.value = node->value;
+		it->second.isRequired = node->isRequired;
+		it->second.wasSet = false;
+	}
+
+	mutable std::vector<value_type> items;
+	mutable const ResourceAttributeNode* registered;  // registrations not yet copied into items
+	static __declspec(thread) ResourceAttributeNode* threadRoot;
 };
 
 """
@@ -261,9 +347,9 @@ def _file_specific(name, text, parser):
     elif name == 'ZAPD/ZResource.h':
         text = _once(text, '\tstd::map<std::string, ResourceAttribute> registeredAttributes;',
                      '\tResourceAttributes registeredAttributes;')
-        text = _once(text, 'class ZResource\n{\npublic:\n', RESOURCE_ATTRIBUTES + 'class ZResource\n{\npublic:\n')
         # The list keys each attribute, so the unread copy of the key is dropped.
         text = _once(text, '\tstd::string key;\n\tstd::string value;\n', '\tstd::string value;\n')
+        text = _once(text, 'class ZResource\n{\npublic:\n', RESOURCE_ATTRIBUTES + 'class ZResource\n{\npublic:\n')
         # Some limb and room fields are never assigned; zeroed blocks match desktop archives.
         # The global allocator serves small resources from the extraction arena.
         text = _once(text, 'class ZResource\n{\npublic:\n',
@@ -379,6 +465,8 @@ def _file_specific(name, text, parser):
                      '\t\tconst auto& parentRawData = parent->GetRawData();\n'
                      '\t\thash = CRC32B(parentRawData.data() + rawDataIndex, GetRawDataSize());\n')
     elif name == 'ZAPD/ZResource.cpp':
+        text = _once(text, '#include <ZArray.h>\n',
+                     '#include <ZArray.h>\n\n__declspec(thread) ResourceAttributeNode* ResourceAttributes::threadRoot;\n')
         text = _once(text, '\tResourceAttribute resAtrr;\n\tresAtrr.key = attr;\n\tresAtrr.isRequired = true;\n'
                      '\tregisteredAttributes[attr] = resAtrr;\n',
                      '\tregisteredAttributes.Register(attr, true, std::string());\n')
@@ -596,6 +684,7 @@ struct ExtractQueue
 			delete externals[e];
 		externals.clear();
 		Globals::Instance->configExternalsParsed = false;
+		ResourceAttributes::ReleaseThreadRegistrations();
 		if (worker != 0)
 		{
 			Globals::Instance->rom = nullptr;
