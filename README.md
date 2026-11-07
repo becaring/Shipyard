@@ -1,3 +1,8 @@
+<picture>
+  <source media="(prefers-color-scheme: light)" srcset="media/Shipyard-on-light.svg">
+  <img src="media/Shipyard.svg" alt="Shipyard" width="520">
+</picture>
+
 # Shipyard
 
 **The Xbox 360 platform under 3Shipsty and Warwing.**
