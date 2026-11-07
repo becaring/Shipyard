@@ -63,6 +63,11 @@ inline std::string ShipyardZapdNative(const xbox_compat::filesystem::path& value
 
 #ifdef _XBOX
 #include <crt/format.h>
+#include <stdio.h>
+#include <cstdio>
+// Nothing reads the extractor's console output, and each stdio call is a debug-channel write here.
+#define printf(...) 0
+#define fprintf(...) 0
 #define PRIi64 "lli"
 #define PRId64 "lld"
 #define PRIu64 "llu"
