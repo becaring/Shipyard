@@ -136,12 +136,12 @@ public:
 		iterator it = find(key);
 		if (it == items.end())
 		{
+			// Eight keyed attributes fit one 480-byte arena block, which covers scalars and vectors.
 			if (items.empty())
-				items.reserve(5);
+				items.reserve(8);
 			items.push_back(value_type(key, ResourceAttribute()));
 			it = items.end() - 1;
 		}
-		it->second.key = key;
 		it->second.value = value;
 		it->second.isRequired = required;
 		it->second.wasSet = false;
@@ -152,7 +152,7 @@ public:
 		if (it != items.end())
 			return it->second;
 		if (items.empty())
-			items.reserve(5);
+			items.reserve(8);
 		items.push_back(value_type(key, ResourceAttribute()));
 		return items.back().second;
 	}
@@ -262,6 +262,8 @@ def _file_specific(name, text, parser):
         text = _once(text, '\tstd::map<std::string, ResourceAttribute> registeredAttributes;',
                      '\tResourceAttributes registeredAttributes;')
         text = _once(text, 'class ZResource\n{\npublic:\n', RESOURCE_ATTRIBUTES + 'class ZResource\n{\npublic:\n')
+        # The list keys each attribute, so the unread copy of the key is dropped.
+        text = _once(text, '\tstd::string key;\n\tstd::string value;\n', '\tstd::string value;\n')
         # Some limb and room fields are never assigned; zeroed blocks match desktop archives.
         text = _once(text, 'class ZResource\n{\npublic:\n',
                      'class ZResource\n{\npublic:\n'
