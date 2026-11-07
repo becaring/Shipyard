@@ -118,7 +118,7 @@ public:
 		if (it == items.end())
 		{
 			if (items.empty())
-				items.reserve(8);
+				items.reserve(5);
 			items.push_back(value_type(key, ResourceAttribute()));
 			it = items.end() - 1;
 		}
@@ -133,7 +133,7 @@ public:
 		if (it != items.end())
 			return it->second;
 		if (items.empty())
-			items.reserve(8);
+			items.reserve(5);
 		items.push_back(value_type(key, ResourceAttribute()));
 		return items.back().second;
 	}
