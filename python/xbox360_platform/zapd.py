@@ -242,6 +242,13 @@ def _file_specific(name, text, parser):
             raise ValueError('ZAPD vertex list join inventory changed')
         # Format each vertex in place instead of copying its resource.
         text = _once(text, '\t\t\tfor (auto vtx : item.second)\n', '\t\t\tfor (auto& vtx : item.second)\n')
+        # Vertex lists move into the map; copies of one constructed vertex replace a construction per vertex.
+        text = _once(text, '\t\t\tvertices[vtxAddr] = vtxList;\n', '\t\t\tvertices[vtxAddr].swap(vtxList);\n')
+        text = _once(text, '\t\t\t\tself->vertices[vtxOffset] = vtxList;\n', '\t\t\t\tself->vertices[vtxOffset].swap(vtxList);\n')
+        text = _once(text, '\t\t\tfor (int32_t i = 0; i < count; i++)\n\t\t\t{\n\t\t\t\tZVtx vtx(self->parent);\n'
+                     '\t\t\t\tvtx.ExtractFromFile(currentPtr);\n\n\t\t\t\tvtxList.push_back(vtx);\n\t\t\t\tcurrentPtr += 16;\n\t\t\t}\n',
+                     '\t\t\tvtxList.resize(count, ZVtx(self->parent));\n\t\t\tfor (int32_t i = 0; i < count; i++)\n\t\t\t{\n'
+                     '\t\t\t\tvtxList[i].ExtractFromFile(currentPtr);\n\t\t\t\tcurrentPtr += 16;\n\t\t\t}\n')
     elif name == 'ZAPD/ZResource.h':
         text = _once(text, '\tstd::map<std::string, ResourceAttribute> registeredAttributes;',
                      '\tResourceAttributes registeredAttributes;')
