@@ -191,6 +191,7 @@ bool StoredZipWriter::Finish() {
         mFailed = true;
     mFile = NULL;
     mEntries.clear();
+    std::vector<unsigned char>().swap(mBuffer); // Open reserves it again
     return !mFailed;
 }
 
