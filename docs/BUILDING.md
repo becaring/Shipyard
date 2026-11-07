@@ -13,8 +13,9 @@ python -B python/check_hygiene.py
 python -B python/test_host.py
 ```
 
-The portable runner checks the manifest, lock contract, hygiene policy, and
-compiler projections that do not need a C++ compiler. CI runs this command.
+The portable runner checks the manifest, lock contract, hygiene policy, ZAPD
+projection, and the compiler projections that do not need a C++ compiler. CI
+runs this command.
 
 ## Full host suite
 
@@ -30,16 +31,17 @@ python -B -m unittest discover -s tests -p 'test_*.py' -v
 
 Set `SHIPYARD_NLOHMANN_INCLUDE` to a full nlohmann 3.12.0 include directory to
 enable the optional reference-parser test. The package's smaller pinned input
-set is sufficient for its projectors.
+set is enough for its projectors.
 
 These tests exercise host behavior and compile selected PowerPC units. They do
 not run a game. Runtime checks belong in each game's hardware test routine.
 
 ## Editing projectors
 
-Trace the caller and pinned input before changing a projector. Keep numerical,
-lifetime, synchronization, and invalidation rules intact. Keep generated files,
-disassembly, measurements, and working notes in ignored `scratch/` or `archive/`.
+Trace the caller and pinned input before changing a projector. Do not break
+numerical, lifetime, synchronization, or invalidation rules. Keep generated
+files, disassembly, measurements, and working notes in ignored `scratch/` or
+`archive/`.
 
 For formatting-only changes, record generated-source hashes, rerun only the
 changed projector, and require identical output bytes. Leave compiled sources
@@ -48,4 +50,4 @@ listed in the hygiene check's DEFERRED list for work that also rebuilds them.
 After changing a packaged file, refresh the `files` mapping in `baseline.json`
 with SHA-256 hashes of every file under `python/`, `sources/`, and `third_party/`.
 Exclude Python bytecode directories. Run the hygiene check and full suite before
-committing; consumers then pin the commit and the manifest's SHA-256 digest.
+committing. Consumers then pin the commit and the manifest's SHA-256 digest.

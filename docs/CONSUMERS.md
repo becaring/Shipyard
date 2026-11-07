@@ -3,13 +3,13 @@
 Clone Shipyard as a sibling named `Shipyard` beside the game repository. The
 game's `platform-base.lock.json` uses `"base": "../Shipyard"`. For another local
 layout, set `XBOX360_PLATFORM_BASE` to the absolute Shipyard checkout path.
-The environment variable changes discovery only; the lock still controls the
+The variable only changes where Shipyard is found. The lock still controls the
 required revision, API version, and manifest digest.
 
 Use Python 3.9 or newer and Git. Add Shipyard's `python/` directory to the import
 path and call `xbox360_platform.contract.verify(base, lock)` before using package
-files. The base must be the Git checkout root. API 7 accepts one shared package;
-it rejects the `selection` field.
+files. The base must be the Git checkout root. API 7 accepts one shared package
+and rejects the `selection` field.
 
 The lock records:
 
@@ -27,5 +27,5 @@ game's lock and verify its generated sources and build. Interface changes also
 need coordinated API and adapter updates. Documentation edits do not change the
 package API.
 
-See [architecture](ARCHITECTURE.md) for component ownership and capability
-options, and [building](BUILDING.md) for the test commands.
+[Architecture](ARCHITECTURE.md) covers component ownership and capability
+options. [Building](BUILDING.md) lists the test commands.
