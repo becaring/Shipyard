@@ -240,6 +240,15 @@ def _file_specific(name, text, parser):
             text = text[:start] + JOIN_OVERLAPPING_VERTEX_LISTS + text[end:]
         if 'verticesSorted' in text:
             raise ValueError('ZAPD vertex list join inventory changed')
+        # The archive stores raw commands, so only the argument callbacks that declare
+        # references run; formatting each command as C text is skipped.
+        text = _once(text, '\tgfxd_puts("\\t");\n\tgfxd_macro_dflt();\n\tgfxd_puts(",");\n',
+                     '\tfor (int32_t i = 0; i < gfxd_arg_count(); i++)\n\t\tgfxd_arg_callbacks(i);\n')
+        text = _once(text, '\tgfxd_output_callback(\n\t\toutputformatter.StaticWriter());',
+                     '\tgfxd_output_callback(DiscardGfxdOutput);')
+        text = _once(text, 'std::string ZDisplayList::ProcessGfxDis(',
+                     'static int DiscardGfxdOutput(const char*, int count)\n{\n\treturn count;\n}\n\n'
+                     'std::string ZDisplayList::ProcessGfxDis(')
         # Format each vertex in place instead of copying its resource.
         text = _once(text, '\t\t\tfor (auto vtx : item.second)\n', '\t\t\tfor (auto& vtx : item.second)\n')
         # Vertex lists move into the map; copies of one constructed vertex replace a construction per vertex.
