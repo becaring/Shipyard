@@ -25,6 +25,7 @@ struct Request {
     LogSink log;                   // null discards exporter diagnostics
     std::string* stages;           // receives seconds per extraction stage, or null
     int helpers;                   // threads to add on hardware threads 4, 5 and 2, at most 3
+    std::string assetBundle;       // stored zip read in place of the folder of the same name, or empty
     Request() : rom(NULL), done(NULL), total(NULL), log(NULL), stages(NULL), helpers(0) {}
 };
 

@@ -298,16 +298,38 @@ def _native_opens(text, pattern, replacement, expected):
     return text
 
 
+def _bundled_reads(text):
+    """Serve the asset folder's files from the adapter's stored zip when it supplied one."""
+    text = _once(text, '\tstatic bool Exists(const fs::path& filePath)\n\t{\n',
+                 '\tstatic bool Exists(const fs::path& filePath)\n\t{\n'
+                 '\t\tif (ShipyardZapdBundled(filePath.string(), NULL))\n\t\t\treturn true;\n')
+    text = _once(text, '\tstatic std::vector<uint8_t> ReadAllBytes(const fs::path& filePath)\n\t{\n',
+                 '\tstatic std::vector<uint8_t> ReadAllBytes(const fs::path& filePath)\n\t{\n'
+                 '\t\tstd::string bundled;\n'
+                 '\t\tif (ShipyardZapdBundled(filePath.string(), &bundled))\n'
+                 '\t\t\treturn std::vector<uint8_t>(bundled.begin(), bundled.end());\n')
+    return _once(text, '\tstatic std::string ReadAllText(const fs::path& filePath)\n\t{\n',
+                 '\tstatic std::string ReadAllText(const fs::path& filePath)\n\t{\n'
+                 '\t\tstd::string bundled;\n'
+                 '\t\tif (ShipyardZapdBundled(filePath.string(), &bundled))\n'
+                 '\t\t\treturn std::string(bundled.c_str());\n')
+
+
 def _file_specific(name, text, parser):
     if name.startswith('OTRExporter/'):
         text = _otr_includes(text)
     # The XDK opens only native absolute paths, which the filesystem shim resolves.
     if name in ('ZAPD/GameConfig.cpp', 'ZAPD/Main.cpp'):
-        text = _native_opens(text, r'doc\.LoadFile\((.+)\);', r'doc.LoadFile(ShipyardZapdNative(\1).c_str());',
+        text = _native_opens(text, r'doc\.LoadFile\((.+)\);', r'(tinyxml2::XMLError)ShipyardZapdLoadXml(doc, \1);',
                              3 if name == 'ZAPD/GameConfig.cpp' else 1)
     elif name == 'ZAPD/Utils/DiskFile.h':
         text = _native_opens(text, r'std::(i|o)fstream file\(filePath,',
                              r'std::\1fstream file(ShipyardZapdNative(filePath).c_str(),', 7)
+        text = _bundled_reads(text)
+    elif name == 'ZAPD/Utils/Directory.h':
+        text = _once(text, '\t\tstd::vector<std::string> lst;\n\n\t\tif (Exists(dir))',
+                     '\t\tstd::vector<std::string> lst;\n\t\tShipyardZapdBundledList(dir, lst);\n\n'
+                     '\t\tif (lst.empty() && Exists(dir))')
     if name == 'ZAPD/Utils/StringHelper.h':
         for kind in ('std::vector<std::string_view> Split(std::string_view s, const std::string& delimiter)',
                      'bool IsValidHex(std::string_view str)', 'bool IsValidOffset(std::string_view str)'):
@@ -595,7 +617,7 @@ def _stage_timers(text):
     text = _once(text, '\t\tGlobals::Instance->rom = new ZRom(Globals::Instance->baseRomPath.string());\n',
                  '\t{\n\t\tShipyardZapdTimer timer(ZapdStageRom);\n'
                  '\t\tGlobals::Instance->rom = new ZRom(Globals::Instance->baseRomPath.string());\n\t}\n')
-    load = '\ttinyxml2::XMLError eResult = doc.LoadFile(ShipyardZapdNative(xmlFilePath.string().c_str()).c_str());\n'
+    load = '\ttinyxml2::XMLError eResult = (tinyxml2::XMLError)ShipyardZapdLoadXml(doc, xmlFilePath.string().c_str());\n'
     text = _once(text, load, '\tShipyardZapdTimer xmlTimer(ZapdStageXml);\n' + load + '\txmlTimer.Stop();\n')
     parse = '\t\t\tZFile* file = new ZFile(fileMode, child, basePath, outPath, "", xmlFilePath, workerID);\n'
     text = _once(text, parse, '\t\t\tShipyardZapdTimer parseTimer(ZapdStageParse);\n' + parse + '\t\t\tparseTimer.Stop();\n')

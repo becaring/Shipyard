@@ -5,6 +5,7 @@
 #define SHIPYARD_ZAPD_COMPAT_H
 #include <string>
 #include <memory>
+#include <vector>
 #include <stdlib.h>
 #include <string.h>
 #include <assert.h>
@@ -81,6 +82,17 @@ inline std::string ShipyardZapdNative(const xbox_compat::filesystem::path& value
     std::error_code error;
     std::string native = xbox_compat::filesystem::to_native_path(value, error);
     return error ? value.string() : native;
+}
+
+// An adapter may ship the asset folder as one stored zip, since copying thousands of
+// small files is slow; ZAPD's reads and listings check that archive first.
+bool ShipyardZapdBundled(const std::string& path, std::string* bytes);
+void ShipyardZapdBundledList(const std::string& folder, std::vector<std::string>& files);
+template <class Document> int ShipyardZapdLoadXml(Document& doc, const std::string& path) {
+    std::string bytes;
+    if (ShipyardZapdBundled(path, &bytes))
+        return doc.Parse(bytes.data(), bytes.size());
+    return doc.LoadFile(ShipyardZapdNative(path).c_str());
 }
 
 #ifdef _XBOX

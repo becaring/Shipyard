@@ -1,5 +1,6 @@
 #include "zapd/extract.h"
 #include "zapd/compat.h"
+#include "archive/stored_zip_reader.h"
 #include <stdio.h>
 #include <algorithm>
 #include <map>
@@ -27,6 +28,51 @@ struct LockSetup {
 double gTotalSeconds[ZapdStageCount];
 std::map<std::string, double> gTypeSeconds[2];
 __declspec(thread) std::map<std::string, double>* tTypeSeconds; // parse and export, made on first use
+Shipyard::Archive::StoredZipReader gBundle;
+std::string gBundleRoot; // the folder the bundle stands in for, as BundleKey spells it
+
+std::string BundleKey(const std::string& path) {
+    std::string key = ShipyardZapdNative(path);
+    for (size_t i = 0; i < key.size(); ++i)
+        if (key[i] == '\\')
+            key[i] = '/';
+    while (!key.empty() && key[key.size() - 1] == '/')
+        key.erase(key.size() - 1);
+    return key;
+}
+
+// The path's place inside the bundle, or false when the path is outside the bundled folder.
+bool BundleName(const std::string& path, std::string& name) {
+    if (!gBundle.IsOpen())
+        return false;
+    const std::string key = BundleKey(path);
+    if (key.size() < gBundleRoot.size() || _strnicmp(key.c_str(), gBundleRoot.c_str(), gBundleRoot.size()) != 0)
+        return false;
+    if (key.size() == gBundleRoot.size()) {
+        name.clear();
+        return true;
+    }
+    if (key[gBundleRoot.size()] != '/')
+        return false;
+    name = key.substr(gBundleRoot.size() + 1);
+    return true;
+}
+}
+
+bool ShipyardZapdBundled(const std::string& path, std::string* bytes) {
+    std::string name;
+    return BundleName(path, name) && !name.empty() && gBundle.Read(name, bytes);
+}
+
+void ShipyardZapdBundledList(const std::string& folder, std::vector<std::string>& files) {
+    std::string name;
+    if (!BundleName(folder, name))
+        return;
+    std::vector<std::string> names;
+    gBundle.List(name, names);
+    const std::string base = BundleKey(folder) + "/";
+    for (size_t i = 0; i < names.size(); ++i)
+        files.push_back(base + names[i].substr(name.empty() ? 0 : name.size() + 1));
 }
 
 __declspec(thread) double gShipyardZapdSeconds[ZapdStageCount];
@@ -172,6 +218,15 @@ int Extract(const Request& request) {
     };
     for (int stage = 0; stage < ZapdStageCount; ++stage)
         gShipyardZapdSeconds[stage] = gTotalSeconds[stage] = 0;
+    if (!request.assetBundle.empty()) {
+        if (!gBundle.Open(ShipyardZapdNative(request.assetBundle).c_str())) {
+            if (request.log != NULL)
+                request.log(("cannot read asset bundle " + request.assetBundle).c_str());
+            return 1;
+        }
+        const size_t dot = request.assetBundle.find_last_of('.');
+        gBundleRoot = BundleKey(request.assetBundle.substr(0, dot));
+    }
     ShipyardZapdArenaBegin();
     gLog = request.log;
     gHelpers = request.helpers;
@@ -186,6 +241,8 @@ int Extract(const Request& request) {
     AppendTypes(types, "parse", gTypeSeconds[0]);
     AppendTypes(types, "export", gTypeSeconds[1]);
     ShipyardZapdArenaEnd();
+    gBundle.Close();
+    std::string().swap(gBundleRoot);
     if (request.stages != NULL) {
         // Seconds are summed over the extraction threads; export includes the archive writes it makes.
         const double* s = gTotalSeconds;
