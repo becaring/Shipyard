@@ -19,6 +19,7 @@ void ShipyardZapdArenaEnd();
 namespace {
 Shipyard::Zapd::LogSink gLog = NULL;
 int gHelpers;
+volatile long gRetired; // helpers that stopped early for memory
 CRITICAL_SECTION gLock;
 struct LockSetup {
     LockSetup() { InitializeCriticalSection(&gLock); }
@@ -46,6 +47,17 @@ ShipyardZapdArchiveLock::~ShipyardZapdArchiveLock() {
 
 long ShipyardZapdIncrement(volatile long* value) {
     return InterlockedIncrement(value);
+}
+
+// One file can hold tens of megabytes until it is exported, so helpers stop well before memory runs out.
+bool ShipyardZapdRetireHelper() {
+    const SIZE_T kFloor = 96u << 20;
+    MEMORYSTATUS status;
+    GlobalMemoryStatus(&status);
+    if (status.dwAvailPhys >= kFloor)
+        return false;
+    InterlockedIncrement(&gRetired);
+    return true;
 }
 
 namespace {
@@ -163,6 +175,7 @@ int Extract(const Request& request) {
     ShipyardZapdArenaBegin();
     gLog = request.log;
     gHelpers = request.helpers;
+    gRetired = 0;
     gShipyardZapdRom = request.rom;
     int result = zapd_report(sizeof(argv) / sizeof(argv[0]), const_cast<char**>(argv), request.done, request.total);
     gShipyardZapdRom = NULL;
@@ -178,8 +191,8 @@ int Extract(const Request& request) {
         const double* s = gTotalSeconds;
         char text[256];
         _snprintf(text, sizeof(text),
-                  "threads=%d config=%.1f rom=%.1f xml=%.1f parse=%.1f export=%.1f archive=%.1f free=%.1f finish=%.1f",
-                  1 + std::min(request.helpers, 3), s[ZapdStageConfig], s[ZapdStageRom], s[ZapdStageXml], s[ZapdStageParse],
+                  "threads=%d retired=%ld config=%.1f rom=%.1f xml=%.1f parse=%.1f export=%.1f archive=%.1f free=%.1f finish=%.1f",
+                  1 + std::min(request.helpers, 3), gRetired, s[ZapdStageConfig], s[ZapdStageRom], s[ZapdStageXml], s[ZapdStageParse],
                   s[ZapdStageExport], s[ZapdStageArchive], s[ZapdStageFree], s[ZapdStageFinish]);
         text[sizeof(text) - 1] = 0;
         *request.stages = text + types;

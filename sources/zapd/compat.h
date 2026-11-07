@@ -39,6 +39,8 @@ template <class T> void ShipyardZapdLog(const char* format, const T&) { Shipyard
 // thread the request asks for, then waits for the helpers. work must not throw.
 void ShipyardZapdRunParallel(void (*work)(void* context, int worker), void* context);
 long ShipyardZapdIncrement(volatile long* value);
+// True once free memory is short; the helper asking then takes no more files.
+bool ShipyardZapdRetireHelper();
 // Held while a thread uses the archive writer the extraction threads share.
 struct ShipyardZapdArchiveLock {
     ShipyardZapdArchiveLock();

@@ -707,9 +707,11 @@ struct ExtractQueue
 			Globals::Instance = new Globals(*queue.configured);
 		try
 		{
-			for (long i = ShipyardZapdIncrement(&queue.next) - 1; i < (long)queue.files.size() && !queue.failed;
-			     i = ShipyardZapdIncrement(&queue.next) - 1)
+			while (!queue.failed && (worker == 0 || !ShipyardZapdRetireHelper()))
 			{
+				const long i = ShipyardZapdIncrement(&queue.next) - 1;
+				if (i >= (long)queue.files.size())
+					break;
 				ExtractFunc(i, (int)queue.files.size(), queue.files[i], queue.fileMode);
 				const long finished = ShipyardZapdIncrement(&queue.done);
 				if (queue.extractCount != nullptr)
