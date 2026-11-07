@@ -84,6 +84,25 @@ MERGE_VERTEX_LISTS = """void ZDisplayList::MergeConnectingVertexLists()
 
 """
 
+# DeclareReferences joins vertex lists that overlap, by the same rule as upstream,
+# without first copying every list into a sorted vector.
+JOIN_OVERLAPPING_VERTEX_LISTS = """		std::map<uint32_t, std::vector<ZVtx> >::iterator last = vertices.begin();
+		std::map<uint32_t, std::vector<ZVtx> >::iterator current = last;
+		for (++current; current != vertices.end();)
+		{
+			size_t lastEnd = last->first + last->second.size() * 16;
+			if (lastEnd > current->first)
+			{
+				for (size_t j = (lastEnd - current->first) / 16; j < current->second.size(); j++)
+					last->second.push_back(current->second[j]);
+				vertices.erase(current++);
+			}
+			else
+				last = current++;
+		}
+
+"""
+
 # Every resource registers its XML attributes, and display lists hold thousands of
 # vertex resources, so a vector keeps construction and copies to one allocation.
 RESOURCE_ATTRIBUTES = """class ResourceAttributes
@@ -215,6 +234,14 @@ def _file_specific(name, text, parser):
         start = text.index('void ZDisplayList::MergeConnectingVertexLists()\n{\n')
         end = text.index('void ZDisplayList::TextureGenCheck()\n')
         text = text[:start] + MERGE_VERTEX_LISTS + text[end:]
+        for _ in range(2):
+            start = text.index('\t\tstd::vector<std::pair<uint32_t, std::vector<ZVtx>>> verticesSorted(vertices.begin(),\n')
+            end = text.index('\t\t// Generate Vertex Declarations', start)
+            text = text[:start] + JOIN_OVERLAPPING_VERTEX_LISTS + text[end:]
+        if 'verticesSorted' in text:
+            raise ValueError('ZAPD vertex list join inventory changed')
+        # Format each vertex in place instead of copying its resource.
+        text = _once(text, '\t\t\tfor (auto vtx : item.second)\n', '\t\t\tfor (auto& vtx : item.second)\n')
     elif name == 'ZAPD/ZResource.h':
         text = _once(text, '\tstd::map<std::string, ResourceAttribute> registeredAttributes;',
                      '\tResourceAttributes registeredAttributes;')
