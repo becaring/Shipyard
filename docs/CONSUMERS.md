@@ -18,14 +18,12 @@ The lock records:
 - `baseline_sha256`: SHA-256 of the complete `baseline.json` file.
 
 Verification checks the checkout root and HEAD, manifest digest, API version,
-and every manifested file. Changes outside the manifest do not relax these
-checks. Each game separately checks its upstream inputs and adapters.
+and every manifested file. Each game checks its own upstream inputs and adapters.
 
 To adopt a package change, review the source and generated differences, update
 the baseline, run the relevant tests, and commit Shipyard first. Then update the
 game's lock and verify its generated sources and build. Interface changes also
-need coordinated API and adapter updates. Documentation edits do not change the
-package API.
+need matching API and adapter updates.
 
 [Architecture](ARCHITECTURE.md) covers component ownership and capability
 options. [Building](BUILDING.md) lists the test commands.

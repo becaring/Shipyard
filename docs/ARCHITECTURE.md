@@ -1,9 +1,9 @@
 # Architecture
 
-Shipyard owns reusable Xbox platform services and compiler projections. A game
-owns its lifecycle, data formats, save policy, upstream version, and adapter
-interfaces. Generated sources are outputs; make fixes in their projector or
-maintained source.
+Shipyard provides shared Xbox platform services and compiler projections. A game
+decides its lifecycle, data formats, save policy, upstream version, and adapter
+interfaces. Generated sources are outputs; fix their projector or maintained
+source instead.
 
 ## Package layout
 
@@ -17,7 +17,7 @@ Consumers verify that manifest before generating or compiling sources.
 
 ## Service boundaries
 
-| Shared component | Input from the game | Policy owned by the game |
+| Shared component | Input from the game | Decided by the game |
 | --- | --- | --- |
 | Xenos renderer, framebuffers, shader cache, and shader lowering | Xbox SDK, pinned Fast3D types, `shader_provider.h`, `services.h`, and `xenos_backend.h` | Device lifecycle, feature decoding, logging, failure handling, and optional shader-cache location |
 | ImGui renderer and XInput | Xbox SDK, pinned ImGui types, and the functions in `shipyard_imgui_xenos.h` | GUI lifecycle, menus, and input mappings |
@@ -56,7 +56,7 @@ normal and does not populate the lookup table.
 
 ## Renderer capabilities
 
-Adapters choose these definitions when compiling `sources/xenos/core.cpp`.
+Adapters set these definitions when compiling `sources/xenos/core.cpp`.
 Every name below has the prefix `SHIPYARD_XENOS_`. The release column is
 `xbox360_platform.xenos_capabilities.compiler_options`; setting
 `SHIPYARD_XENOS_DIAGNOSTICS=1` selects its instrumented build.
@@ -109,6 +109,6 @@ Native-state checks are opt-in through `Shipyard_VerifyFast3DReuse`. Warwing use
 ## Projector options
 
 Opcode lowering accepts `composed_dispatch=True`. Resource lookup supports the
-selected load signatures, optional owned-rvalue construction, and task draining.
+selected load signatures, optional rvalue construction, and task draining.
 Logging generation accepts `normalize_file_paths=False` when the adapter keeps
 its own path handling. Version choices stay explicit in the adapter.

@@ -34,7 +34,7 @@ enable the optional reference-parser test. The package's smaller pinned input
 set is enough for its projectors.
 
 These tests exercise host behavior and compile selected PowerPC units. They do
-not run a game. Runtime checks belong in each game's hardware test routine.
+not run a game; each game's hardware test routine covers runtime.
 
 ## Editing projectors
 
