@@ -69,7 +69,7 @@ template <typename Texture, size_t Capacity = 256> class TextureHashCache {
         return NULL;
     }
 
-    // After an authoritative HashToCString lookup, a previously cached path
+    // After a HashToCString lookup, a previously cached path
     // can acquire the new epoch certificate without loading the texture again.
     const Entry* LookupAndCertifyArchive(uint64_t hash, const char* path,
                                          unsigned generation, const void* archiveManager,

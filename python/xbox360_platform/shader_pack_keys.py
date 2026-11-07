@@ -1,7 +1,7 @@
 """Fast3D program keys of harvested draw states, from the consumer's own interpreter.
 
 harness_source() lifts Interpreter::GenerateCC and GfxSpTri1's combiner-option
-block out of the consumer's (projected) interpreter, with the shader enums of
+block out of the consumer's (adapted) interpreter, with the shader enums of
 its interpreter.h, into a host program; derive() feeds it
 every distinct (combine, other mode, grayscale). Clamp masks follow GfxSpTri1:
 texture and tile sizes are unknown offline, so either outcome is kept.
@@ -110,7 +110,7 @@ def harness_source(interpreter, header, gbi='fast/lus_gbi.h',
 
     options: anchors bounding GfxSpTri1's option block, which reads only mRdp's
     other modes, grayscale and loaded-texture flags and mShaderStack. options_text
-    supplies that block from another interpreter.cpp when the projection restructured it."""
+    supplies that block from another interpreter.cpp when the adaptation restructured it."""
     signature = 'void Interpreter::GenerateCC(ColorCombiner* comb, const ColorCombinerKey& key) '
     generate = braced(interpreter, once(interpreter, signature))[len(signature):]
     source = interpreter if options_text is None else options_text

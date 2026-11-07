@@ -1,7 +1,7 @@
 """Exact Fast3D triangle-stream write lowering, with per-runtime contracts.
 
 The shared operation is deliberately mechanical. Each application supplies its
-own loop anchors, color expressions, namespace, and audited write counts.
+own loop anchors, color expressions, namespace, and reviewed write counts.
 Nothing here chooses material, texture, shader, or game behavior.
 """
 
@@ -11,7 +11,7 @@ import re
 def reuse_material_inputs(source, *, start, end, cursor, mapping, shade):
     """Reuse first-vertex packed invariant channels within the same triangle.
 
-    The caller audits that only the shade selector reads the current vertex.
+    The caller checks that only the shade selector reads the current vertex.
     The original conversion remains intact for the first vertex and all shade
     channels. Pointers reference completed writes in this call's vertex buffer.
     """

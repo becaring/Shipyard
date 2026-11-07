@@ -168,7 +168,7 @@ void Shipyard_ImGuiRender(ImDrawData* data) {
     saved_state->Capture();
     // ImGui lays out square pixels; an anamorphic SD back buffer is narrower.
     // Framebuffer surfaces are EDRAM-padded or one tile pass, so only the back
-    // buffer's description is its real size.
+    // buffer's description is its size.
     IDirect3DSurface9 *target, *back;
     Shipyard_ImGuiCheck(device->GetRenderTarget(0, &target), "ImGui target");
     Shipyard_ImGuiCheck(device->GetBackBuffer(0, 0, D3DBACKBUFFER_TYPE_MONO, &back), "ImGui back buffer");

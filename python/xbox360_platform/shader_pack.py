@@ -1,7 +1,7 @@
 """Offline Xenos shader pack (sources/xenos/shader_pack.h): generate, compile, write.
 
 A consumer harvests program keys and builds sources/graphics/shader_pack_sources.cpp
-with its own projected feature decoder and Prism builder. generate() shards the
+with its own adapted feature decoder and Prism builder. generate() shards the
 keys across that host generator; compile_sources() runs the XDK's fxc.exe on each
 distinct lowered source; write_pack() writes format v3 (64-bit shaderId1 and a
 per-program source digest), or v2 for 32-bit keys. Intermediate files are named

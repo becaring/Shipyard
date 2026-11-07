@@ -131,7 +131,7 @@ const bool directory_symlinks = true;
 #endif
 } // namespace platform_properties
 
-// Xbox uses a synchronized logical cwd, set to an existing absolute device
+// Xbox uses a synchronized logical cwd, set to an absolute device
 // path before relative operations. Windows uses the process cwd.
 void InitWorkingDirectory(const path& directory);
 bool InitWorkingDirectory(const path& directory, std::error_code& error);

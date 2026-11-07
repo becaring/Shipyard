@@ -6,9 +6,9 @@ walks the list as usual and also evaluates every later presentation's
 matrices, vertex positions, culling and lerped texture offsets, recording each
 renderer call with one vertex stream per presentation
 (fast3d/walk_replay.h). Later Runs reissue the recorded calls instead of
-walking. Anything a replay cannot reproduce -- a framebuffer readback, a
+walking. Anything a replay cannot reproduce (a framebuffer readback, a
 texture rewritten after a draw sampled it, a depth branch or tile size that
-differs between presentations -- taints the record, and those presentations
+differs between presentations) taints the record, and those presentations
 walk the list themselves.
 
 Triangles and display-list culls are kept when any presentation keeps them:

@@ -1,4 +1,4 @@
-"""Project the pinned JSON lexer and number conversion algorithms for XDK."""
+"""Adapt the pinned JSON lexer and number conversion algorithms for XDK."""
 
 import hashlib
 from pathlib import Path
@@ -166,7 +166,7 @@ def generate(source, out):
     outputs = []
     results = {}
 
-    # Stage all outputs before writing any; an anchor failure leaves existing output intact.
+    # Stage all outputs before writing any; an anchor failure leaves earlier output intact.
     for name, relative in INPUTS:
         path = source / "include/nlohmann" / relative
         raw = path.read_bytes()

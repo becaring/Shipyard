@@ -887,7 +887,7 @@ recursive_directory_iterator& recursive_directory_iterator::increment(std::error
         error.clear();
 #else
     // There are no directory symlinks on the XDK filesystem; requesting follow
-    // still enumerates all actual directories and never discards feature code.
+    // still enumerates all directories and never discards feature code.
     descend = current.is_directory(error);
 #endif
     if (error) {

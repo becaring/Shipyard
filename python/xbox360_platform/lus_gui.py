@@ -1,4 +1,4 @@
-"""libultraship GUI CPU projections shared by every consumer.
+"""libultraship GUI CPU patches shared by every consumer.
 
 GUI methods lock the interpreter weak_ptr once per call site; each lock is an
 interlocked reference-count round trip on the render thread every presentation.

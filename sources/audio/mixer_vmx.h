@@ -1,6 +1,6 @@
 /* Exact VMX lanes for N64 audio mixing: saturated add or subtract of 16-bit
- * samples, and stereo interleave. Each returns 0, leaving the caller's scalar
- * loop authoritative, for empty, unaligned or partially overlapping buffers
+ * samples, and stereo interleave. Each returns 0, so the caller's scalar
+ * loop does the work, for empty, unaligned or partially overlapping buffers
  * (scalar loops carry sample-to-sample feedback there) and off Xenon. */
 #ifndef SHIPYARD_AUDIO_MIXER_VMX_H
 #define SHIPYARD_AUDIO_MIXER_VMX_H

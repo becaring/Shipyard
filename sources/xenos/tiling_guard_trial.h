@@ -28,7 +28,7 @@ struct TilingGuardTrialStats {
     uint64_t totalDrawBytes;
 };
 
-// Opt-in diagnostic policy. QueryBufferSpace is authoritative for current
+// Opt-in diagnostic policy. QueryBufferSpace gives current
 // occupancy, but the SDK does not document an upper bound for the next Draw or
 // EndTiling; keep half of the command buffer in reserve for this trial.
 struct TilingGuardTrialWindow {

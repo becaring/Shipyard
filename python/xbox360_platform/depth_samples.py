@@ -1,6 +1,6 @@
 """Use inline depth requests for Fast3D interpreters with coordinate adjustment.
 
-Adapters select this after auditing their pinned depth methods. Coordinate
+Adapters select this after reviewing their pinned depth methods. Coordinate
 conversion stays in the interpreter; the shared Xenos callback owns readback.
 """
 import re

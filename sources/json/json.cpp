@@ -310,7 +310,7 @@ detail::iteration_proxy<json::const_iterator> json::items() const {
     return detail::iteration_proxy<const_iterator>(*this);
 }
 
-// Iterative DOM parser driven by the actual 3.12.0 scanner. Error construction
+// Iterative DOM parser driven by the 3.12.0 scanner. Error construction
 // follows parser.hpp::exception_message and exceptions.hpp::parse_error.
 class Parser {
     typedef ShipyardJsonAlgorithm::detail::lexer<json, ShipyardJsonAlgorithm::detail::StringInput>

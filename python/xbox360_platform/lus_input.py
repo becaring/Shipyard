@@ -1,4 +1,4 @@
-"""libultraship controller projections shared by every consumer.
+"""libultraship controller patches shared by every consumer.
 
 Run both on raw upstream text, before structured-binding lowering. Either order
 with overlap_lus.control_deck works: the snapshot path calls the deck's own

@@ -4,7 +4,7 @@ Display lists are simulated with the RDP state the interpreter reads (combine,
 other modes, tile clamp modes, grayscale): LUS O2R display-list resources,
 following OTR calls, and raw F3DEX2 lists found in other archive blobs. State a
 list inherits from its caller is unknown and filled from C-side seeds: setup
-display lists and constant gDP* state calls, compiled with the real gbi.h
+display lists and constant gDP* state calls, compiled with the gbi.h
 macros by a host dump program. The result is a superset of runtime draw states.
 """
 

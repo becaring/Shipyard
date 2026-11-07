@@ -1,4 +1,4 @@
-"""Project pinned libzip 1.11.4 sources for the Xbox 360 toolchain."""
+"""Adapt pinned libzip 1.11.4 sources for the Xbox 360 toolchain."""
 
 import hashlib
 import re
@@ -112,7 +112,7 @@ def public_config(template):
 
 
 def project(source: Path, output: Path, source_prefix: str):
-    """Return selected units and hashes; source verification remains consumer-owned."""
+    """Return selected units and hashes; source verification stays with the consumer."""
     source = Path(source)
     output = Path(output)
     units = re.findall(r'^  (zip_\S+\.c)$',

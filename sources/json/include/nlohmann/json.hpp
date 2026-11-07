@@ -38,7 +38,7 @@ template <class T> class iter_impl;
 template <class Iterator> class iteration_proxy;
 template <class T, class Enable = void>
 struct conversion; // Unknown conversions deliberately fail compilation.
-// XDK has is_enum but no underlying_type intrinsic. The compiler projection must
+// XDK has is_enum but no underlying_type intrinsic. The compiler adaptation must
 // register the exact underlying type after declaring each reached enum.
 #if defined(_XBOX)
 template <class T> struct enum_underlying;

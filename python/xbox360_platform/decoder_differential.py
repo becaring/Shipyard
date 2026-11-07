@@ -2,7 +2,7 @@
 
 Each decoder source is self-contained: the shader enums, SHADER_OPT, CCFeatures
 and gfx_cc_get_features of one view (pinned upstream, or the consumer's
-projection). Both compile into one program in separate namespaces; CCFeatures
+adapted copy). Both compile into one program in separate namespaces; CCFeatures
 size, alignment and every member offset must match, and every option combination
 below option_bits, with each combiner nibble and pseudo-random upper id bits,
 must decode to identical bytes. shaderId1 is 64-bit.

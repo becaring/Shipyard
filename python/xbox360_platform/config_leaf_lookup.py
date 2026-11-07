@@ -1,4 +1,4 @@
-"""Project a guarded flattened-leaf fast path into the shared Config owner.
+"""Add a guarded flattened-leaf fast path into the shared Config owner.
 
 Replacing an existing primitive leaf preserves the certificate. Other writes
 invalidate it; Save recertifies after its required unflatten. Reads never

@@ -1,5 +1,5 @@
 #pragma once
-// Included inside namespace Fast after the authoritative RDP/RenderingState
+// Included inside namespace Fast after the RDP/RenderingState
 // types. No resource ownership or game state is duplicated here.
 // SHIPYARD BYTE EQUALITY BEGIN
 __forceinline bool XboxTriangleBytesEqual(const void* left, const void* right, size_t size) {
@@ -78,7 +78,7 @@ struct XboxTrianglePipelineKey {
     uint8_t sampler[2][3];
     // Reload restoration is opt-in through RestoresReloadedTextures. Capture
     // both TMEM entries because imports may fall back to the other entry, and
-    // use PaletteIdentity for the consumer's actual palette import key.
+    // use PaletteIdentity for the consumer's palette import key.
     union {
         uint32_t imageAlignment;
         unsigned char images[2][sizeof(((RDP*)0)->loaded_texture[0])];

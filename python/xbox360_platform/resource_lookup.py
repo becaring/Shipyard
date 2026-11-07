@@ -416,7 +416,7 @@ def lookup_generation_source(source, *, stable_fills=True):
 
 
 def texture_hash_phase_profile(source):
-    """Time the authoritative hash route without changing its lookup decisions."""
+    """Time the hash route without changing its lookup decisions."""
     begin = source.index('bool gfx_set_timg_otr_hash_handler_custom(')
     end = source.index('\nbool ', begin + 5)
     body = source[begin:end]
@@ -577,7 +577,7 @@ def texture_hash_cache_handler(source):
 
 
 def synchronous_cache_hit(source):
-    """Use the existing authoritative cache policy before constructing a future."""
+    """Use the version's own cache policy before constructing a future."""
     anchor = '    auto resource = LoadResourceAsync(identifier, loadExact, BS::pr::highest, initData).get();'
     return _once(source, anchor, """    std::shared_ptr<IResource> cached;
     if (OtrSignatureCheck(identifier.Path.c_str())) {

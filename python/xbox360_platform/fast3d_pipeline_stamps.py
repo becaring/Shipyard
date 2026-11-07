@@ -26,7 +26,7 @@ NEUTRAL_HANDLERS = (
     'gfx_tri1_otr_handler_f3dex2', 'gfx_tri2_handler_f3dex', 'gfx_quad_handler_f3dex2')
 
 # Upstream LUS dispatches OTR, then RDP, then the loaded ucode; neutrality
-# follows the handler that actually runs for each F3DEX2 opcode.
+# follows the handler that runs for each F3DEX2 opcode.
 SEQUENTIAL_LOOKUP = ('otrHandlers.contains(code) ? otrHandlers.at(code).second :\n'
                      '                rdpHandlers.contains(code) ? rdpHandlers.at(code).second :\n'
                      '                f3dex2Handlers.contains(code) ? f3dex2Handlers.at(code).second : 0')

@@ -1,12 +1,12 @@
-"""Project pinned ZAPDTR and OTRExporter sources into an in-process XDK extractor.
+"""Adapt pinned ZAPDTR and OTRExporter sources into an in-process XDK extractor.
 
 ZAPD parses ROM resources from the asset XML and OTRExporter serializes them; the
-projection keeps only extract-directory mode and streams entries into Shipyard's
+adapted extractor keeps only extract-directory mode and streams entries into Shipyard's
 stored O2R writer. Generic passes lower C++11-20 syntax the XDK compiler lacks;
 anchored edits replace process, thread, archive, and host byte-order plumbing.
 Entries match desktop archives byte for byte, except fields desktop builds leave
-uninitialized, which are zeroed. Source verification and game selection remain
-consumer-owned.
+uninitialized, which are zeroed. Source verification and game selection stay
+with the consumer.
 """
 
 import hashlib

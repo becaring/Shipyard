@@ -21,7 +21,7 @@ steady_clock::time_point steady_clock::now() {
     LARGE_INTEGER counter;
     if (!QueryPerformanceCounter(&counter))
         throw Shipyard::Async::native_error("QueryPerformanceCounter", GetLastError());
-    // Real XDK/Windows performance frequencies fit this bound; enforce the
+    // XDK and Windows performance frequencies fit this bound; enforce the
     // multiplication precondition rather than silently overflow on other hosts.
     int64_t seconds = counter.QuadPart / frequency;
     int64_t remainder = counter.QuadPart % frequency;

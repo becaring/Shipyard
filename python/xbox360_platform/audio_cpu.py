@@ -1,4 +1,4 @@
-"""Audio-thread CPU projections shared by every consumer.
+"""Audio-thread CPU source patches shared by every consumer.
 
 Synthesis controls: each synthesis call reads its CVars once, on the thread that
 runs it, and every per-note or per-update reader inside that call returns the

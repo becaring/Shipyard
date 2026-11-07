@@ -58,7 +58,7 @@ struct TriangleRowTable {
         if (++generation == 0)
             Reset();
     }
-    // Returns true with the existing row, else records `next` for the vertex.
+    // Returns true with the stored row, else records `next` for the vertex.
     __forceinline bool Find(const void* vertex, size_t size, uint16_t next, uint16_t& row) {
         Entry& entry = entries[(uintptr_t(vertex) / size) & 127];
         if (entry.generation == generation && entry.vertex == vertex) {

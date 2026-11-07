@@ -42,7 +42,7 @@ def move_enum_definitions(text, expected):
 
 
 def lower_default_members(text, parser, class_names):
-    """Move audited in-class defaults into every constructor of each struct."""
+    """Move reviewed in-class defaults into every constructor of each struct."""
     for name in class_names:
         parsed = text.encode().replace(b"IMGUI_API", b"         ")
         candidates = [node for node in _nodes(parser.parse(parsed).root_node)

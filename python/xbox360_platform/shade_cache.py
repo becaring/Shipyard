@@ -1,4 +1,4 @@
-"""Project an interpreter's directional-light cache through checked source anchors."""
+"""Add an interpreter's directional-light cache through checked source anchors."""
 
 
 def _once(text, old, new):

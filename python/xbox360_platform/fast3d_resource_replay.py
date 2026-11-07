@@ -3,7 +3,7 @@
 run_scope: every replayed resource command re-acquires the Context-owned
 resource and archive managers through shared_ptr copies (an atomic reference
 count pair each). One scope per Run owns both managers; commands borrow raw
-pointers and code outside a Run keeps the authoritative acquisition.
+pointers and code outside a Run keeps the normal acquisition.
 
 texture_replays: an interpolation batch presents one command list several
 times. The first resolution of each texture hash owns its resource, path and

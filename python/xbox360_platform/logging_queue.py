@@ -1,4 +1,4 @@
-"""Project pinned spdlog 1.16 queue templates for the Xbox compiler."""
+"""Adapt pinned spdlog 1.16 queue templates for the Xbox compiler."""
 
 import hashlib
 from pathlib import Path

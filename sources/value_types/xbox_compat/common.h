@@ -51,7 +51,7 @@ template<std::size_t A,std::size_t B> struct maximum { enum { value = A>B?A:B };
 template<int N> struct absent {};
 template<int Index,class T> struct choice { enum { index = Index }; typedef T type; };
 
-/* The real shapes need exact types, promotions, char* -> string, and nullptr
+/* The shapes need exact types, promotions, char* -> string, and nullptr
  * -> shared_ptr. Filter arithmetic/pointer narrowing before overload selection,
  * so bool promotes to int rather than selecting a first-convertible float. */
 template<class From,class To> struct nonnarrowing {

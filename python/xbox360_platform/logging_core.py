@@ -1,4 +1,4 @@
-"""Project each consumer's pinned spdlog source into XDK-compatible headers."""
+"""Adapt each consumer's pinned spdlog source into XDK-compatible headers."""
 
 import hashlib
 import json

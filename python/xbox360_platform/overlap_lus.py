@@ -1,4 +1,4 @@
-"""Game/render overlap projections for libultraship units shared by every consumer.
+"""Game/render overlap patches for libultraship units shared by every consumer.
 
 Render reads CVars from a snapshot captured while the game is idle at its handoff.
 Resource owners follow the packet that read them; cache mutation waits for replay.

@@ -1,4 +1,4 @@
-"""Shared C++ syntax and source mapping for the Xbox logging projector."""
+"""Shared C++ syntax and source mapping for the Xbox logging adapter."""
 
 import difflib
 import hashlib

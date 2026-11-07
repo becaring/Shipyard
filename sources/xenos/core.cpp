@@ -268,7 +268,7 @@ FilteringMode filtering = FILTER_THREE_POINT;
 unsigned filtering_key = unsigned(FILTER_THREE_POINT) << 4;
 const unsigned BilinearDrawKey = 64;
 
-// Only this thread owns these values. Cache the actual native sampler fields,
+// Only this thread owns these values. Cache the native sampler fields,
 // not texture identity: a sampler edit through either alias must reach both
 // bound slots. External/native drawing invalidates this state explicitly.
 struct NativeStateCache {
@@ -289,7 +289,7 @@ typedef char NativeConstantsAligned[(__alignof(NativeStateCache) >= 16 &&
                                      offsetof(NativeStateCache, constants) % 16 == 0)
                                         ? 1
                                         : -1];
-// A prepared draw reuses the existing native-state payloads; no resource pointer
+// A prepared draw reuses the native-state payloads; no resource pointer
 // is retained. Mutations and external drawing revoke this render-thread certificate.
 bool draw_state_prepared;
 ShipyardXenos::SamplerCertificate sampler_certificate;
@@ -470,7 +470,7 @@ template <int tile> void ApplySamplerSlot(const TextureSampler& sampler) {
         SHIPYARD_DETAIL(native_state_counts.sampler_suppressed += 5, DetailsSamplerSuppressed, 5);
         return;
     }
-    // A real change must not rewrite the other four independent fields.
+    // A change must not rewrite the other four independent fields.
 #define SHIPYARD_SAMPLER_FIELD(index, field, value) \
     if (!native_state.sampler_valid[tile] || cached[index] != (DWORD)(value)) { \
         xenos_device->SetSamplerState(tile, field, value); \
@@ -1988,7 +1988,7 @@ void Clear(bool color, bool depth) {
 #if SHIPYARD_XENOS_DEFERRED_FRAMEBUFFERS
     // A fresh tiled bracket clears depth/stencil for every tile; a fresh
     // single-tile bracket clears depth when the retained depth was discarded.
-    // The existing full-clear shortcut applies only to single-tile targets.
+    // The full-clear shortcut applies only to single-tile targets.
     if (begin_clears_depth || begin_clears_both)
 #else
     // Single-tile BeginFramebuffer has just cleared both attachments after
@@ -2075,12 +2075,12 @@ template<class Range> void ReadPixelDepth(int id, Range& coords) {
         FinishFramebuffer();
         Framebuffer& b = buffers[id];
         // A caller may read depth before its next draw after switching targets.
-        // Xenos retains actual depth fragments regardless of the draw-side hint.
+        // Xenos retains depth fragments regardless of the draw-side hint.
         if (!b.depth_samples[0])
             Shipyard_Fatal("depth readback unavailable", E_FAIL);
         if (!b.depth_stored) {
             // A depth query can precede the first draw after an MSAA or resolution
-            // change. Initialize real GPU color/depth storage through the same
+            // change. Initialize GPU color/depth storage through the same
             // clear/resolve path used for the first draw, then read sample zero.
             int previous = active_fb;
             active_fb = id;
@@ -2355,7 +2355,7 @@ void End() {
         }
     } else if (active_fb == 0) {
         // A read-only framebuffer image already completed the resolve. Keep
-        // that result until the next actual draw, and apply end-of-frame
+        // that result until the next draw, and apply end-of-frame
         // discard policy without restoring its old contents first.
         if (discardPresentationDepth)
             buffers[0].depth_stored = false;
@@ -2688,7 +2688,7 @@ void SetDetailedTimingEnabled(bool enabled) {
 void SetTimingEnabled(bool enabled) {
 #if !SHIPYARD_XENOS_DIAGNOSTICS
     // The normal XEX contains no hot-path diagnostic writes or timing reads.
-    // An explicitly instrumented build defines SHIPYARD_XENOS_DIAGNOSTICS=1.
+    // An instrumented build defines SHIPYARD_XENOS_DIAGNOSTICS=1.
     (void)enabled;
     timing_enabled = false;
     return;

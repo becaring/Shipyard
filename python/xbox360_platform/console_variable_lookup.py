@@ -26,7 +26,7 @@ def transform(text):
         if body.count(anchor) != 1:
             raise ValueError('CVar getter lookup drift: ' + name)
         # The map retains ownership and these getters only inspect/copy values.
-        # Nothing survives this invocation except the existing borrowed string
+        # Nothing survives this invocation except the borrowed string
         # result; public Get still returns shared ownership to its callers.
         body = body.replace(anchor,
             '    auto found = mVariables.find(name);\n'

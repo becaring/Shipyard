@@ -21,7 +21,7 @@ inline bool FullFillCovers(uint32_t targetWidth, uint32_t targetHeight, float le
                            uint8_t clip3) {
     if (targetWidth == 0 || targetHeight == 0 || targetWidth > 16384 || targetHeight > 16384)
         return false;
-    // GfxSpTri1 tests these existing reserved-vertex rejection bits even for
+    // GfxSpTri1 tests these reserved-vertex rejection bits even for
     // rectangles. An omitted half would not overwrite the whole target.
     if ((clip0 & clip1 & clip3) || (clip1 & clip2 & clip3))
         return false;

@@ -1,7 +1,7 @@
-"""Source-locked BS thread-pool 4.1.0 projection for Shipyard::Async.
+"""Source-locked BS thread-pool 4.1.0 adaptation for Shipyard::Async.
 
 The caller owns the upstream header and the output directory. This module
-only lowers the audited priority/pause subset; unsupported APIs are absent.
+only lowers the reviewed priority/pause subset; unsupported APIs are absent.
 """
 
 import argparse

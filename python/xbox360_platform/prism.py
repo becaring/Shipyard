@@ -1,4 +1,4 @@
-"""Version-constrained Prism syntax lowering for the two audited Xbox ports.
+"""Version-constrained Prism syntax lowering for the two reviewed Xbox ports.
 
 The caller owns the C++ parser dependency, source locking, resource acquisition,
 shader builder, and diagnostic policy. Only compiler compatibility is shared.
