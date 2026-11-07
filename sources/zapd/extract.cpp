@@ -9,6 +9,8 @@
 
 extern "C" int zapd_report(int argc, char* argv[], volatile size_t* extractCount, volatile size_t* totalExtract);
 extern std::vector<uint8_t>* gShipyardZapdRom;
+void ShipyardZapdArenaBegin();
+void ShipyardZapdArenaEnd();
 
 namespace {
 Shipyard::Zapd::LogSink gLog = NULL;
@@ -48,11 +50,13 @@ int Extract(const Request& request) {
     for (int stage = 0; stage < ZapdStageCount; ++stage)
         gShipyardZapdSeconds[stage] = 0;
     const double start = ShipyardZapdClock();
+    ShipyardZapdArenaBegin();
     gLog = request.log;
     gShipyardZapdRom = request.rom;
     int result = zapd_report(sizeof(argv) / sizeof(argv[0]), const_cast<char**>(argv), request.done, request.total);
     gShipyardZapdRom = NULL;
     gLog = NULL;
+    ShipyardZapdArenaEnd();
     if (request.stages != NULL) {
         const double* s = gShipyardZapdSeconds;
         // Export includes the archive writes it makes; other is everything untimed.
