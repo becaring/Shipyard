@@ -35,6 +35,25 @@ inline xbox_compat::filesystem::recursive_directory_iterator PrismEnd(
 void ShipyardZapdLog(const std::string& message);
 template <class T> void ShipyardZapdLog(const char* format, const T&) { ShipyardZapdLog(std::string(format)); }
 
+// Seconds spent in each extraction stage, which Shipyard::Zapd::Extract reports.
+enum ShipyardZapdStage {
+    ZapdStageConfig, ZapdStageRom, ZapdStageXml, ZapdStageParse, ZapdStageExport, ZapdStageArchive, ZapdStageFree,
+    ZapdStageFinish, ZapdStageCount
+};
+extern double gShipyardZapdSeconds[ZapdStageCount];
+double ShipyardZapdClock();
+struct ShipyardZapdTimer {
+    int stage;
+    double start;
+    explicit ShipyardZapdTimer(int value) : stage(value), start(ShipyardZapdClock()) {}
+    ~ShipyardZapdTimer() { Stop(); }
+    void Stop() {
+        if (stage >= 0)
+            gShipyardZapdSeconds[stage] += ShipyardZapdClock() - start;
+        stage = -1;
+    }
+};
+
 // ZAPD reads through fopen and fstreams, which take only native absolute paths on the XDK.
 inline std::string ShipyardZapdNative(const xbox_compat::filesystem::path& value) {
     std::error_code error;

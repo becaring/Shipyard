@@ -390,7 +390,27 @@ def _zapd_main(text):
                 '\t\t\t\t}\n\n\t\t\t\tif (!Globals::Instance->singleThreaded)')
     text = _cut(text, '\t\t\t\tif (!Globals::Instance->singleThreaded)\n\t\t\t\t{\n\t\t\t\t\twhile (true)',
                 '\t\t\t\tauto end = std::chrono::steady_clock::now();')
-    return _shared_externals(text)
+    return _stage_timers(_shared_externals(text))
+
+
+def _stage_timers(text):
+    """Time each extraction stage so the adapter can report where a run spends its seconds."""
+    text = _once(text, '\tParseArgs(argc, argv);\n',
+                 '\t{\n\t\tShipyardZapdTimer timer(ZapdStageConfig);\n\t\tParseArgs(argc, argv);\n\t}\n')
+    text = _once(text, '\t\tGlobals::Instance->rom = new ZRom(Globals::Instance->baseRomPath.string());\n',
+                 '\t{\n\t\tShipyardZapdTimer timer(ZapdStageRom);\n'
+                 '\t\tGlobals::Instance->rom = new ZRom(Globals::Instance->baseRomPath.string());\n\t}\n')
+    load = '\ttinyxml2::XMLError eResult = doc.LoadFile(ShipyardZapdNative(xmlFilePath.string().c_str()).c_str());\n'
+    text = _once(text, load, '\tShipyardZapdTimer xmlTimer(ZapdStageXml);\n' + load + '\txmlTimer.Stop();\n')
+    parse = '\t\t\tZFile* file = new ZFile(fileMode, child, basePath, outPath, "", xmlFilePath, workerID);\n'
+    text = _once(text, parse, '\t\t\tShipyardZapdTimer parseTimer(ZapdStageParse);\n' + parse + '\t\t\tparseTimer.Stop();\n')
+    text = _once(text, '\t\t\t\tfile->ExtractResources();\n',
+                 '\t\t\t{\n\t\t\t\tShipyardZapdTimer timer(ZapdStageExport);\n\t\t\t\tfile->ExtractResources();\n\t\t\t}\n')
+    cleanup = '\tif (Globals::Instance->singleThreaded)\n\t{\n\t\tfor (int i = 0; i < Globals::Instance->files.size(); i++)'
+    text = _once(text, cleanup, '\tShipyardZapdTimer freeTimer(ZapdStageFree);\n' + cleanup)
+    return _once(text, '\tif (exporterSet != nullptr && exporterSet->endProgramFunc != nullptr)\n\t\texporterSet->endProgramFunc();\n',
+                 '\tif (exporterSet != nullptr && exporterSet->endProgramFunc != nullptr)\n\t{\n'
+                 '\t\tShipyardZapdTimer timer(ZapdStageFinish);\n\t\texporterSet->endProgramFunc();\n\t}\n')
 
 
 def _shared_externals(text):
@@ -455,6 +475,7 @@ static std::set<std::string> sGenuineLogos;
 
 static void StreamFile(std::string fName, const std::vector<char>& data)
 {
+    ShipyardZapdTimer timer(ZapdStageArchive);
     if (!sArchiveOpen)
         sArchiveOpen = sArchive.Open(archiveFileName.c_str());
     if (fName.find("gTitleZeldaShieldLogoMQTex") != std::string::npos)

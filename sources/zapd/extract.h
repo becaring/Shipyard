@@ -22,7 +22,8 @@ struct Request {
     volatile size_t* done;         // XML files finished, or null
     volatile size_t* total;        // XML files to process, or null
     LogSink log;                   // null discards exporter diagnostics
-    Request() : rom(NULL), done(NULL), total(NULL), log(NULL) {}
+    std::string* stages;           // receives seconds per extraction stage, or null
+    Request() : rom(NULL), done(NULL), total(NULL), log(NULL), stages(NULL) {}
 };
 
 // Returns ZAPD's exit code: zero once the archive is complete.
