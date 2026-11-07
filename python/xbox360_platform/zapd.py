@@ -103,6 +103,33 @@ JOIN_OVERLAPPING_VERTEX_LISTS = """		std::map<uint32_t, std::vector<ZVtx> >::ite
 
 """
 
+# Upstream frees none of a sound bank's entries; samples are shared through the map.
+AUDIO_DESTRUCTOR = """ZAudio::~ZAudio()
+{
+	for (size_t i = 0; i < soundFontTable.size(); i++)
+	{
+		AudioTableEntry& font = soundFontTable[i];
+		for (size_t d = 0; d < font.drums.size(); d++)
+			for (size_t e = 0; e < font.drums[d].env.size(); e++)
+				delete font.drums[d].env[e];
+		for (size_t s = 0; s < font.soundEffects.size(); s++)
+			delete font.soundEffects[s];
+		for (size_t n = 0; n < font.instruments.size(); n++)
+		{
+			InstrumentEntry& instrument = font.instruments[n];
+			for (size_t e = 0; e < instrument.env.size(); e++)
+				delete instrument.env[e];
+			delete instrument.lowNotesSound;
+			delete instrument.normalNotesSound;
+			delete instrument.highNotesSound;
+		}
+	}
+	for (std::map<uint32_t, SampleEntry*>::iterator it = samples.begin(); it != samples.end(); ++it)
+		delete it->second;
+}
+
+"""
+
 # Every resource registers its XML attributes, but only resources an XML declares read them.
 # A resource's registrations are a path in a per-thread tree that each resource of its type
 # shares, and it copies them into its own list once something reads them.
@@ -304,6 +331,20 @@ def _file_specific(name, text, parser):
         text = text.replace(') : MemoryStream()\n', ')\n')
     elif name == 'ZAPD/ZAudio.cpp':
         text = _once(text, 'DrumEntry drum = {0};', 'DrumEntry drum;')
+        text = _once(text, '\tif (sampleOffset == 0)\n\t\treturn nullptr;\n',
+                     '\tif (sampleOffset == 0)\n\t{\n\t\tdelete soundFont;\n\t\treturn nullptr;\n\t}\n')
+        text = _once(text, 'std::vector<AdsrEnvelope*> ZAudio::ParseEnvelopeData(',
+                     AUDIO_DESTRUCTOR + 'std::vector<AdsrEnvelope*> ZAudio::ParseEnvelopeData(')
+    elif name == 'ZAPD/ZAudio.h':
+        text = _once(text, '\tZAudio(ZFile* nParent);\n', '\tZAudio(ZFile* nParent);\n\t~ZAudio();\n')
+    elif name == 'ZAPD/ZRoom/Commands/SetCutscenes.h':
+        text = _once(text, '\tSetCutscenes(ZFile* nParent);\n', '\tSetCutscenes(ZFile* nParent);\n\t~SetCutscenes();\n')
+    elif name == 'ZAPD/ZRoom/Commands/SetCutscenes.cpp':
+        # Upstream never frees the cutscenes it parses for the archive.
+        text = _once(text, 'SetCutscenes::SetCutscenes(ZFile* nParent) : ZRoomCommand(nParent)\n{\n}\n',
+                     'SetCutscenes::SetCutscenes(ZFile* nParent) : ZRoomCommand(nParent)\n{\n}\n\n'
+                     'SetCutscenes::~SetCutscenes()\n{\n\tfor (size_t i = 0; i < cutscenes.size(); i++)\n'
+                     '\t\tdelete cutscenes[i];\n}\n')
     elif name == 'ZAPD/Utils/BinaryWriter.h':
         # Entry headers declare little-endian payloads on every host.
         text = _once(text, 'Endianness endianness = Endianness::Native;', 'Endianness endianness = Endianness::Little;')
