@@ -265,11 +265,11 @@ def _file_specific(name, text, parser):
         # The list keys each attribute, so the unread copy of the key is dropped.
         text = _once(text, '\tstd::string key;\n\tstd::string value;\n', '\tstd::string value;\n')
         # Some limb and room fields are never assigned; zeroed blocks match desktop archives.
+        # The global allocator serves small resources from the extraction arena.
         text = _once(text, 'class ZResource\n{\npublic:\n',
                      'class ZResource\n{\npublic:\n'
-                     '\tstatic void* operator new(size_t size) { void* block = calloc(1, size); '
-                     'if (!block) throw std::bad_alloc(); return block; }\n'
-                     '\tstatic void operator delete(void* block) { free(block); }\n'
+                     '\tstatic void* operator new(size_t size) { return memset(::operator new(size), 0, size); }\n'
+                     '\tstatic void operator delete(void* block) { ::operator delete(block); }\n'
                      '\tstatic void* operator new(size_t, void* where) { return where; }\n'
                      '\tstatic void operator delete(void*, void*) {}\n')
     elif name == 'ZAPD/GameConfig.cpp':
