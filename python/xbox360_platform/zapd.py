@@ -429,6 +429,20 @@ def _type_timers(text):
                  '\t\tShipyardZapdTypeTimer typeTimer(ZapdStageExport, res->GetSourceTypeName());\n')
 
 
+
+# Plain auto copies the parent's whole ROM file for each resource; these sites only read it.
+_RAW_DATA_COPY = re.compile(r'\bauto (\w+) = (\w+(?:->\w+)*->GetRawData\(\));')
+
+
+def _raw_data_views(files):
+    total = 0
+    for name in files:
+        files[name], count = _RAW_DATA_COPY.subn(r'const auto& \1 = \2;', files[name])
+        total += count
+    if total != 5:
+        raise ValueError('ZAPD raw data copy inventory changed: ' + str(total))
+    return files
+
 def _shared_externals(text):
     """Parse the config's external files once per run instead of once per listed file.
 
@@ -753,6 +767,7 @@ def project(zapd_root, otr_root, lus_root, resource_types, animation, output, pa
         sources[name] = path.read_bytes().decode().replace('\r\n', '\n')
     sources['lus/GameAnimation.h'] = _enum_header(Path(animation).read_bytes().decode(), 'AnimationType')
     files = {name: _syntax(_utility_names(_file_specific(name, text, parser))) for name, text in sources.items()}
+    files = _raw_data_views(files)
     headers = dict((name, text) for name, text in files.items() if name.endswith('.h'))
     sources = dict((name, text) for name, text in files.items() if not name.endswith('.h'))
     _member_defaults(headers, sources, parser)
