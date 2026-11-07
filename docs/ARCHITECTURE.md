@@ -39,6 +39,16 @@ run on hardware threads 4, 5 and 2 and stop taking files when free memory drops
 below 96 MB. `Request.stages` receives one line of seconds per stage, summed
 over threads.
 
+Interpolation recording (`sources/interpolation/recording_memory.h`) pools
+freed blocks in 32-byte bins up to 4096 bytes, keeps at most 2 MiB per thread,
+and trims the pool before retrying a failed allocation.
+`python/xbox360_platform/interpolation_recording.py` projects ownership,
+allocation, operation-index and child lookup; opcode conversion is a game
+capability. The opt-in `retain_root_operations` projection keeps root operation
+vectors across frames within a per-root byte budget, so recordings larger than
+the pool's blocks stop regrowing the heap. Payload layouts, label order, camera
+policy and matrix math stay with the game.
+
 Shared JSON vector conversion reserves destination storage before copying
 elements. It keeps element order, type checks, and allocation-failure order.
 Normal-batch helpers leave empty output untouched. A singleton uses its own
