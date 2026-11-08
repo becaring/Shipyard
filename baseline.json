@@ -86,7 +86,7 @@
     "python/xbox360_platform/vertex_invariants.py": "0a705b2e01cc34d6961269b6ffcb7ba83de9aaa43d36f8cbc15e1b756098251a",
     "python/xbox360_platform/vertex_stream.py": "53a2cb6561cf567207cd9b4adf2938437863474e46e401aa0b5a5631f50dc758",
     "python/xbox360_platform/xenos_capabilities.py": "8ffa7b634349da2b33f868a0ce7b0ed3a94f93522bc08790118daa6883283cc2",
-    "python/xbox360_platform/zapd.py": "ac19b0e5e3ce5788ef5a019b57cbe51c19ffcaa0ae4e93e8a8b5e1ca2481cc0a",
+    "python/xbox360_platform/zapd.py": "2cd1701e93a023ec7ce9033addadf037b12d971371bf7de8c784d9cfd51f2841",
     "sources/archive/stored_zip_reader.cpp": "e0257aa50d1df01d77d1a116ddf1201fe2940d977ce35a0a3eefc82b71a87139",
     "sources/archive/stored_zip_reader.h": "f0b74c491faf53258c26cddb2ee025d26dfbc3c9f058bd6de260f015fcd5c812",
     "sources/archive/stored_zip_writer.cpp": "67127a899588dbc3215a78f5e2935030f3f935dcc46f9d83c2f30b8f1561b414",

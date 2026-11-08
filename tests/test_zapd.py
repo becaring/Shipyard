@@ -31,6 +31,10 @@ class ZapdLoweringTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             scoped_enums('enum class Broken;')
 
+    def test_size_modifier_uses_xdk_form(self):
+        result = zapd._syntax('Sprintf("%%-%zus 0x%zX", n); x = a %zone;')
+        self.assertEqual(result, 'Sprintf("%%-%Ius 0x%IX", n); x = a %zone;')
+
     def test_tables_fill_from_static_entries(self):
         parser = Parser(Language(tree_sitter_cpp.language()))
         result = lower_table_initializers(

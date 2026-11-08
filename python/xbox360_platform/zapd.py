@@ -32,6 +32,8 @@ _EXCLUDED = frozenset((
 _FILESYSTEM = re.compile(r'#if __has_include\(<filesystem>\)\n#include <filesystem>\n'
                          r'namespace fs = std::filesystem;\n#else\n#include <experimental/filesystem>\n'
                          r'namespace fs = std::experimental::filesystem;\n#endif\n')
+_STRING = re.compile(r'"(?:[^"\\\n]|\\.)*"')
+_SIZE_Z = re.compile(r'(%[-+ #0-9.*]*)z(?=[diouxX])')
 
 
 def _once(text, before, after):
@@ -888,6 +890,8 @@ def _syntax(text):
     text = re.sub(r'\bstd::filesystem\b', 'xbox_compat::filesystem', text)
     text = re.sub(r'R"\((.*?)\)"', lambda match: '"' + match[1].replace('\\', '\\\\').replace('"', '\\"') + '"',
                   text, flags=re.S)
+    # The XDK CRT rejects C99's z size as an invalid parameter, a fatal trap on retail; I is its size_t form.
+    text = _STRING.sub(lambda match: _SIZE_Z.sub(r'\1I', match[0]), text)
     return text
 
 
