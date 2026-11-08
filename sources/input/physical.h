@@ -13,6 +13,9 @@ bool ShipyardInput_PhysicalPadHasRumble(unsigned slot);
 bool ShipyardInput_WritePhysicalRumble(unsigned slot, uint16_t low, uint16_t high);
 uint32_t ShipyardInput_InputMilliseconds();
 void ShipyardInput_PumpGamepads();
+// Game-frame read: pump, then report each button any pump saw held since the previous
+// game read until the next one. A game polling slower than the display misses no taps.
+void ShipyardInput_PumpGamepadsForGame();
 // Sample every physical slot for this presentation. The GUI device handler may
 // consume it once; ordinary window/game pumps always sample again.
 void ShipyardInput_BeginGamepadPresentation();

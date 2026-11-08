@@ -1,8 +1,10 @@
 #include "physical.h"
+#include "../atomic/atomic.h"
 #include <cstring>
 
 struct ShipyardInputGamepad {
     ShipyardInputRawPad raw;
+    uint16_t gameButtons;
     bool connected;
     bool hasRumble;
     bool rumbleTimed;
@@ -12,6 +14,8 @@ struct ShipyardInputGamepad {
 };
 namespace {
 ShipyardInputGamepad pads[4] = {};
+// Buttons any pump saw held since the last game read, so a tap between game reads still counts.
+Shipyard::Atomic::atomic<unsigned> heldSinceGameRead[4];
 bool presentationSampleReady = false;
 uint32_t generation = 1;
 int32_t nextInstance = 1;
@@ -79,12 +83,20 @@ void ShipyardInput_PumpGamepads() {
         if (!connected)
             std::memset(&sampledState, 0, sizeof(sampledState));
         pad.raw = sampledState;
+        unsigned held = heldSinceGameRead[i].load();
+        while (sampledState.buttons && !heldSinceGameRead[i].compare_exchange_strong(held, held | sampledState.buttons)) {
+        }
         if (pad.rumbleTimed &&
             static_cast<int32_t>(nowMilliseconds - pad.rumbleEndMilliseconds) >= 0) {
             ShipyardInput_WritePhysicalRumble(i, 0, 0);
             pad.rumbleTimed = false;
         }
     }
+}
+void ShipyardInput_PumpGamepadsForGame() {
+    ShipyardInput_PumpGamepads();
+    for (unsigned i = 0; i < 4; ++i)
+        pads[i].gameButtons = static_cast<uint16_t>(heldSinceGameRead[i].exchange(0));
 }
 void ShipyardInput_BeginGamepadPresentation() {
     ShipyardInput_PumpGamepads();
@@ -168,7 +180,7 @@ const char* ShipyardInput_GamepadError() {
 uint8_t ShipyardInput_GamepadButton(ShipyardInputGamepad* pad, ShipyardInputButton button) {
     if (!valid(pad) || button < 0 || button >= ShipyardButtonMax)
         return 0;
-    return (pad->raw.buttons & buttonMasks[button]) ? 1 : 0;
+    return ((pad->raw.buttons | pad->gameButtons) & buttonMasks[button]) ? 1 : 0;
 }
 int16_t ShipyardInput_GamepadAxis(ShipyardInputGamepad* pad, ShipyardInputAxis axis) {
     if (!valid(pad))
