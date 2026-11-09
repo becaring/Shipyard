@@ -144,6 +144,54 @@ int main() {
         for (unsigned i = 0; i < Buffers; ++i) assert(device.textures[i].references == 0);
         assert(chain.Present() == E_UNEXPECTED);
     }
+    {
+        typedef Shipyard::XenosSwapChain Chain;
+        Chain chain;
+        Device device;
+        assert(chain.Create(&device, parameters) == S_OK && chain.QueueLimit() == Chain::LongQueue);
+        // Startup settles with the long queue, then frames start with at most two swaps pending.
+        for (unsigned frame = 0; frame < Chain::SettleFrames; ++frame) {
+            assert(chain.QueueLimit() == Chain::LongQueue);
+            device.enqueued = 1;
+            device.queries = 0;
+            assert(chain.Present() == S_OK);
+        }
+        assert(chain.QueueLimit() == Chain::ShortQueue);
+        device.enqueued = 2;
+        device.queries = 0;
+        assert(chain.Present() == S_OK && device.queries == 2);
+
+        // A frame that finds nothing pending needed the third swap. Needed again right after
+        // the settle, it holds twice as long.
+        device.enqueued = 0;
+        device.queries = 0;
+        assert(chain.Present() == S_OK && chain.QueueLimit() == Chain::LongQueue);
+        for (unsigned frame = 1; frame < 2 * Chain::SettleFrames; ++frame) {
+            assert(chain.QueueLimit() == Chain::LongQueue);
+            device.enqueued = 2;
+            device.queries = 0;
+            assert(chain.Present() == S_OK && device.queries == 1);
+        }
+        assert(chain.QueueLimit() == Chain::ShortQueue);
+
+        // Needed again only long after, the hold returns to the settle length.
+        for (unsigned frame = 0; frame < Chain::SettleFrames; ++frame) {
+            device.enqueued = 1;
+            device.queries = 0;
+            assert(chain.Present() == S_OK && chain.QueueLimit() == Chain::ShortQueue);
+        }
+        device.enqueued = 0;
+        device.queries = 0;
+        assert(chain.Present() == S_OK && chain.QueueLimit() == Chain::LongQueue);
+        for (unsigned frame = 1; frame + 1 < Chain::SettleFrames; ++frame) {
+            device.enqueued = 1;
+            device.queries = 0;
+            assert(chain.Present() == S_OK && chain.QueueLimit() == Chain::LongQueue);
+        }
+        device.enqueued = 1;
+        device.queries = 0;
+        assert(chain.Present() == S_OK && chain.QueueLimit() == Chain::ShortQueue);
+    }
     assert(&Shipyard::XenosPresentationChain() == &Shipyard::XenosPresentationChain());
     return 0;
 }

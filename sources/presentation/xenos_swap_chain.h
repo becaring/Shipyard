@@ -7,17 +7,22 @@
 
 namespace Shipyard {
 // Title-owned front buffers, following the XDK AsyncSwaps sample. Four
-// buffers let rendering run two frames ahead of scanout, so one slow
+// buffers let rendering run up to three swaps ahead of scanout, so one slow
 // presentation between quick ones keeps refresh; the submitting CPU waits before
 // reusing a busy buffer. Swaps retain the device's presentation interval and
 // submission order. Buffering does not guarantee that a workload meets refresh.
+// Every pending swap is a refresh of input delay, so frames start with at most two
+// pending; a frame that finds none pending needed the third, which then holds for
+// a while, longer each time it is needed again soon after.
 class XenosSwapChain {
   public:
-    enum { FrontBuffers = 4 };
+    enum { FrontBuffers = 4, ShortQueue = 2, LongQueue = 3, SettleFrames = 120, LongestHold = 3840 };
 
     XenosSwapChain() : device(NULL), backBuffer(NULL), next(0), resolved(false) {
         for (UINT i = 0; i < FrontBuffers; ++i) front[i] = NULL;
+        ResetQueue();
     }
+    UINT QueueLimit() const { return limit; }
 
     // parameters are the ones the device was created with. Async swaps need
     // DisableAutoFrontBuffer; the device's back buffer must still be bound.
@@ -37,6 +42,7 @@ class XenosSwapChain {
         value->SetSwapMode(TRUE);
         device = value;
         next = 0;
+        ResetQueue();
         return S_OK;
     }
 
@@ -65,6 +71,12 @@ class XenosSwapChain {
         device->InsertFence();
         device->Swap(front[next], NULL);
         next = (next + 1) % FrontBuffers;
+        gated = false;
+        ++framesAtLimit;
+        if (limit == LongQueue && framesAtLimit >= hold) {
+            limit = ShortQueue;
+            framesAtLimit = 0;
+        }
         return S_OK;
     }
 
@@ -82,15 +94,31 @@ class XenosSwapChain {
         device = NULL;
         next = 0;
         resolved = false;
+        ResetQueue();
     }
 
   private:
-    // EnqueuedCount excludes the buffer being scanned out. Wait on the CPU
-    // until pending swaps plus scanout leave one of our front buffers free.
+    // Startup settles with the long queue before the short one is tried.
+    void ResetQueue() {
+        limit = LongQueue;
+        hold = SettleFrames;
+        framesAtLimit = 0;
+        gated = false;
+    }
+    // EnqueuedCount excludes the buffer being scanned out. Wait on the CPU until
+    // fewer than limit swaps are pending; tiled frames call this once per tile.
     void WaitForFrontBuffer() {
+        if (gated) return;
+        gated = true;
         D3DSWAP_STATUS status;
         device->QuerySwapStatus(&status);
-        if (status.EnqueuedCount + 1 < FrontBuffers) return;
+        if (limit == ShortQueue && status.EnqueuedCount == 0) {
+            // Needed again soon after the last hold: hold twice as long.
+            hold = framesAtLimit < SettleFrames ? (hold * 2 < LongestHold ? hold * 2 : LongestHold) : SettleFrames;
+            limit = LongQueue;
+            framesAtLimit = 0;
+        }
+        if (status.EnqueuedCount < limit) return;
         // SDK spin pattern: an interrupt resets the hardware priority, so it
         // is lowered on every pass and restored to the default afterwards.
         do {
@@ -101,7 +129,7 @@ class XenosSwapChain {
             YieldProcessor();
 #endif
             device->QuerySwapStatus(&status);
-        } while (status.EnqueuedCount + 1 >= FrontBuffers);
+        } while (status.EnqueuedCount >= limit);
 #ifdef _XBOX
         __SetHWThreadPriorityMed();
 #endif
@@ -112,6 +140,8 @@ class XenosSwapChain {
     IDirect3DTexture9* front[FrontBuffers];
     UINT next;
     bool resolved;
+    UINT limit, hold, framesAtLimit;
+    bool gated;
 };
 
 // The presentation device has one swap chain, shared by device setup, the
